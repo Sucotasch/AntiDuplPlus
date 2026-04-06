@@ -24,6 +24,8 @@ namespace AntiDupl.NET.WPF.Model
         [NonSerialized]
         private const string _fileName = @"locations.xml";
 
+        private readonly object _lock = new object();
+
         ObservableCollection<SearchPathViewModel> _searchLocationsObservable;
         public ObservableCollection<SearchPathViewModel> SearchLocations
         {
@@ -95,13 +97,16 @@ namespace AntiDupl.NET.WPF.Model
 
         public void AddSearchPath(string path)
         {
-            if (!SearchLocations.Any(sl => sl.Path.Equals(path)))
+            lock (_lock)
             {
-                Location sp = new Location(path);
-                //_searchPathList.Add(sp);
-                SearchPathViewModel spvm = new SearchPathViewModel(sp);
-                spvm.PropertyChanged += OnSearchPathPropertyChanged;
-                SearchLocations.Add(spvm);
+                if (!SearchLocations.Any(sl => sl.Path.Equals(path)))
+                {
+                    Location sp = new Location(path);
+                    //_searchPathList.Add(sp);
+                    SearchPathViewModel spvm = new SearchPathViewModel(sp);
+                    spvm.PropertyChanged += OnSearchPathPropertyChanged;
+                    SearchLocations.Add(spvm);
+                }
             }
         }
 
@@ -135,9 +140,12 @@ namespace AntiDupl.NET.WPF.Model
             {
                 return _deleteLocationCommand ?? (_deleteLocationCommand = new RelayCommand(arg =>
                 {
-                    var current = Current as SearchPathViewModel;
-                    if (current != null)
-                        SearchLocations.Remove(current);
+                    lock (_lock)
+                    {
+                        var current = Current as SearchPathViewModel;
+                        if (current != null)
+                            SearchLocations.Remove(current);
+                    }
                 }, arg => SearchLocations != null && SearchLocations.Count > 0 && Current != null && Current is SearchPathViewModel));
             }
         }

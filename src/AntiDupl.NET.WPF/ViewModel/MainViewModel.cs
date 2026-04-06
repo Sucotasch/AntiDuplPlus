@@ -1172,5 +1172,53 @@ namespace AntiDupl.NET.WPF.ViewModel
             get { return _closeCmd ?? (_closeCmd = new RelayCommand(arg => { Application.Current.Shutdown(); })); }
         }
 
+        // --- Tools Commands ---
+        private ICommand _runGpuCollectorCmd;
+        public ICommand RunGpuCollectorCommand
+        {
+            get
+            {
+                return _runGpuCollectorCmd ?? (_runGpuCollectorCmd = new RelayCommand(arg =>
+                {
+                    // Launch NvJpegCollector.exe with current search path
+                    var paths = Options.searchPath;
+                    if (paths != null && paths.Length > 0)
+                    {
+                        string path = paths[0].path;
+                        string exePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "NvJpegCollector.exe");
+                        if (System.IO.File.Exists(exePath))
+                        {
+                            var startInfo = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = exePath,
+                                Arguments = $"--input \"{path}\" --size {Options.advancedOptions.reducedImageSize}",
+                                UseShellExecute = true // Ensures console window is visible
+                            };
+                            System.Diagnostics.Process.Start(startInfo);
+                        }
+                        else
+                        {
+                            _windowService.ShowMessage("NvJpegCollector.exe not found in application directory.\nPlease build the NvJpegCollector project.");
+                        }
+                    }
+                    else
+                    {
+                        _windowService.ShowMessage("Please add a search path first.");
+                    }
+                }));
+            }
+        }
+
+        private ICommand _openDbManagerCmd;
+        public ICommand OpenDbManagerCommand
+        {
+            get
+            {
+                return _openDbManagerCmd ?? (_openDbManagerCmd = new RelayCommand(arg =>
+                {
+                    _windowService.ShowMessage("Database Manager coming soon.");
+                }));
+            }
+        }
     }
 }

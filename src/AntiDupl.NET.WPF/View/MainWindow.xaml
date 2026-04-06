@@ -124,6 +124,21 @@
                     </i:Interaction.Behaviors>
                 </MenuItem>
             </MenuItem>
+
+            <MenuItem Header="{DynamicResource mainwindow_menu_tools}">
+                <MenuItem Header="{DynamicResource mainwindow_menu_tools_gpu_collector}"
+                          Command="{Binding RunGpuCollectorCommand}">
+                    <MenuItem.Icon>
+                        <Image Source="../Image/img/ProfileOpenMenu.png" />
+                    </MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="{DynamicResource mainwindow_menu_tools_db_manager}"
+                          Command="{Binding OpenDbManagerCommand}">
+                    <MenuItem.Icon>
+                        <Image Source="../Image/img/OptionsButton.png" />
+                    </MenuItem.Icon>
+                </MenuItem>
+            </MenuItem>
         </Menu>
 
         <ToolBar DockPanel.Dock="Top">

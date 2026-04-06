@@ -27,6 +27,7 @@ using System.Text;
 using System.Runtime.InteropServices;
 using System.Reflection;
 using System.Diagnostics;
+using System.Threading;
 
 namespace AntiDupl.NET.Core
 {
@@ -77,17 +78,22 @@ namespace AntiDupl.NET.Core
 
         ~DynamicModule()
         {
-            Dispose();
+            Dispose(false);
         }
 
         public void Dispose()
         {
-            if (m_module != IntPtr.Zero)
-            {
-                FreeLibrary(m_module);
-                m_module = IntPtr.Zero;
-            }
+            Dispose(true);
             GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            IntPtr module = Interlocked.Exchange(ref m_module, IntPtr.Zero);
+            if (module != IntPtr.Zero)
+            {
+                FreeLibrary(module);
+            }
         }
 
         public string FileName { get { return m_fileName; } }

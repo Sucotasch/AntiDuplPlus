@@ -27,6 +27,7 @@ using System.Text;
 using System.IO;
 using System.Xml;
 using System.Xml.Serialization;
+using System.Diagnostics;
 
 namespace AntiDupl.NET.Core
 {
@@ -52,8 +53,9 @@ namespace AntiDupl.NET.Core
                 Version version = (Version)xmlSerializer.Deserialize(stream);
                 return version;
             }
-            catch
+            catch (Exception ex)
             {
+                Trace.TraceError("Error loading version XML: " + ex.ToString());
                 return null;
             }
         }
@@ -62,12 +64,15 @@ namespace AntiDupl.NET.Core
         {
             try
             {
-                TextWriter writer = new StreamWriter(fileName);
-                XmlSerializer xmlSerializer = new XmlSerializer(typeof(Version));
-                xmlSerializer.Serialize(writer, this);
+                using (TextWriter writer = new StreamWriter(fileName))
+                {
+                    XmlSerializer xmlSerializer = new XmlSerializer(typeof(Version));
+                    xmlSerializer.Serialize(writer, this);
+                }
             }
-            catch
+            catch (Exception ex)
             {
+                Trace.TraceError("Error saving version XML: " + ex.ToString());
             }
         }
 

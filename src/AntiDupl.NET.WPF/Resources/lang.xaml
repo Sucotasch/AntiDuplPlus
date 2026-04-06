@@ -31,6 +31,10 @@
     <v:String x:Key="mainwindow_menu_view_toGroup">To group</v:String>
     <v:String x:Key="mainwindow_menu_view_toDuplPair">To dupl pair</v:String>
 
+    <v:String x:Key="mainwindow_menu_tools">Tools</v:String>
+    <v:String x:Key="mainwindow_menu_tools_gpu_collector">Pre-process Images (GPU)</v:String>
+    <v:String x:Key="mainwindow_menu_tools_db_manager">Database Manager</v:String>
+
     <v:String x:Key="mainwindow_contextmenu_IgnorePair">Ignore pair</v:String>
     <v:String x:Key="mainwindow_contextmenu_IgnorePairs">Ignore selected pairs ({0})</v:String>
     <v:String x:Key="mainwindow_contextmenu_OpenСomparator">Open comparator</v:String>

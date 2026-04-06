@@ -48,6 +48,19 @@ namespace AntiDupl.NET.Core.Original
         //-----------API enumerations------------------------------------------
 
         public enum PathType : int
+
+        //-----------Database Registry API--------------------------------------
+        
+        [DllImport("AntiDupl.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr adDatabaseRegistryLoad(IntPtr databasesPtr, IntPtr userPath);
+        
+        [DllImport("AntiDupl.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr adDatabaseRegistryAddOrUpdate(IntPtr dbInfoPtr, IntPtr userPath);
+        
+        [DllImport("AntiDupl.dll", CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr adDatabaseRegistryRemove(IntPtr path, IntPtr userPath);
+
+        public enum PathType : int
         {
             Search = 0,
             Ignore = 1,

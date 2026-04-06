@@ -54,6 +54,7 @@ typedef ad::TEngine* adEngineHandle;
 #include "adStatus.h"
 #include "adResult.h"
 #include "adResultStorage.h"
+#include "adDatabaseRegistry.h"
 #include "adMistakeStorage.h"
 #include "adImageDataStorage.h"
 #include "adEngine.h"
@@ -604,5 +605,51 @@ DLLAPI adError adLoadBitmapW(adEngineHandle handle, const adCharW* fileName, adB
     CHECK_HANDLE CHECK_POINTER(fileName)
 
     return ad::LoadBitmap(fileName, pBitmap, handle->Options());
+}
+
+//-----------Database Registry API---------------------------------------------
+
+DLLAPI adError adDatabaseRegistryLoadW(const adCharW* userPath, adSize* pCount, adCharW** pPaths, int* pThumbSizes, adSize* pCounts, adCharW** pStatuses)
+{
+    try {
+        std::wstring path(userPath);
+        std::vector<ad::TDatabaseInfo> databases;
+        if (!ad::TDatabaseRegistry::Load(databases, path)) return AD_ERROR_UNKNOWN;
+
+        if (pCount) *pCount = databases.size();
+        for (size_t i = 0; i < databases.size(); i++) {
+            if (pPaths && i < *pCount) {
+                // Copy path string
+                wcscpy_s(pPaths[i], MAX_PATH_EX, databases[i].Path.c_str());
+            }
+            if (pThumbSizes && i < *pCount) pThumbSizes[i] = databases[i].ThumbSize;
+            if (pCounts && i < *pCount) pCounts[i] = databases[i].ImageCount;
+            if (pStatuses && i < *pCount) {
+                wcscpy_s(pStatuses[i], 64, databases[i].Status.c_str());
+            }
+        }
+        return AD_OK;
+    } catch (...) { return AD_ERROR_UNKNOWN; }
+}
+
+DLLAPI adError adDatabaseRegistryAddOrUpdateW(const adCharW* path, int thumbSize, adSize count, const adCharW* status, const adCharW* userPath)
+{
+    try {
+        ad::TDatabaseInfo db;
+        db.Path = path;
+        db.ThumbSize = thumbSize;
+        db.ImageCount = count;
+        db.Status = status ? status : L"Ready";
+        if (ad::TDatabaseRegistry::AddOrUpdate(db, userPath)) return AD_OK;
+        return AD_ERROR_UNKNOWN;
+    } catch (...) { return AD_ERROR_UNKNOWN; }
+}
+
+DLLAPI adError adDatabaseRegistryRemoveW(const adCharW* path, const adCharW* userPath)
+{
+    try {
+        if (ad::TDatabaseRegistry::Remove(path, userPath)) return AD_OK;
+        return AD_ERROR_UNKNOWN;
+    } catch (...) { return AD_ERROR_UNKNOWN; }
 }
 

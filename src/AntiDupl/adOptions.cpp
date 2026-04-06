@@ -149,9 +149,6 @@ namespace ad
             }
         }
 
-		// некрасиво сделано, можно вообще убрать эту проверку
-		if (compare.algorithmComparing == AD_COMPARING_SQUARED_SUM && compare.thresholdDifference > 15)
-			compare.thresholdDifference = 5;
     }
 
     adError TOptions::Import(adOptionsType optionsType, void * pOptions)

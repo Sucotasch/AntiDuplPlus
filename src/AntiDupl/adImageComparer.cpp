@@ -489,9 +489,9 @@ namespace ad
         float sigmaOfBoth = (float)correlationSum/(m_pOptions->advanced.reducedImageSize * m_pOptions->advanced.reducedImageSize) - 
             pFirst->data->average*pSecond->data->average;
 
-		float res = (2 * pFirst->data->average * pSecond->data->average + C1) * (2 * sigmaOfBoth + C2) / 
-			((pow(pFirst->data->average, 2) + pow(pSecond->data->average, 2) + C1) * 
-			(pFirst->data->varianceSquare + pSecond->data->varianceSquare + C2));  
+		float res = (float)((2 * pFirst->data->average * pSecond->data->average + C1) * (2 * sigmaOfBoth + C2) /
+			((pow(pFirst->data->average, 2) + pow(pSecond->data->average, 2) + C1) *
+			(pFirst->data->varianceSquare + pSecond->data->varianceSquare + C2)));
 
 		if (res > 2 || res < -2) // может быть равным 1.0000000594991703 и должно быть от 0 до 1
 			return false;

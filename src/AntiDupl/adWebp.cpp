@@ -22,6 +22,7 @@
 * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 * SOFTWARE.
 */
+#include <memory>
 #include "adWebp.h"
 #include "adPerformance.h"
 
@@ -54,18 +55,13 @@ namespace ad
 			WebPBitstreamFeatures features;
 			if (WebPGetFeatures(data, data_size, &features) == VP8_STATUS_OK)
 			{
-				TView * pView = new TView(features.width, features.height, TView::Bgra32);
-				if (pView)
+				std::unique_ptr<TView> pView(new TView(features.width, features.height, TView::Bgra32));
+				pView->Recreate(features.width, features.height, TView::Bgra32);
+				if (WebPDecodeBGRAInto(data, data_size, pView->data, pView->DataSize(), (int)pView->stride))
 				{
-					pView->Recreate(features.width, features.height, TView::Bgra32);
-					if (WebPDecodeBGRAInto(data, data_size, pView->data, pView->DataSize(), (int)pView->stride))
-					{
-						pWebp = new TWebp();
-						pWebp->m_pView = pView;
-						pWebp->m_format = TImage::Webp;
-					}
-					else
-						delete pView;
+					pWebp = new TWebp();
+					pWebp->m_pView = pView.release();
+					pWebp->m_format = TImage::Webp;
 				}
 			}
 			::GlobalUnlock(hGlobal);

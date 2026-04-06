@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{C8D9E0F1-A2B3-4567-89AB-CDEF01234567}</ProjectGuid>
+    <RootNamespace>AntiDuplCore</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.8.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)..\bin\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)..\obj\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_LIB;_UNICODE;UNICODE;NDEBUG;ENABLE_CUDA;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\include;$(SolutionDir)vcpkg_installed\x64-windows-static\x64-windows-static\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp14</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+    <Lib>
+      <AdditionalLibraryDirectories>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\lib\x64;$(SolutionDir)vcpkg_installed\x64-windows-static\x64-windows-static\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>cudart.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <!-- Core files needed by both AntiDupl.dll and NvJpegCollector.exe -->
+    <ClCompile Include="..\AntiDupl\adFileStream.cpp" />
+    <ClCompile Include="..\AntiDupl\adImageData.cpp" />
+    <ClCompile Include="..\AntiDupl\adStrings.cpp" />
+    <ClCompile Include="..\AntiDupl\adFileUtils.cpp" />
+    <ClCompile Include="..\AntiDupl\adOptions.cpp" />
+    <ClCompile Include="..\AntiDupl\adPath.cpp" />
+    <ClCompile Include="..\AntiDupl\adImage.cpp" />
+    <ClCompile Include="..\AntiDupl\adPixelData.cpp" />
+    <ClCompile Include="..\AntiDupl\adImageInfo.cpp" />
+    <ClCompile Include="..\AntiDupl\adIniFile.cpp" />
+    <ClCompile Include="..\AntiDupl\adTurboJpeg.cpp" />
+    <ClCompile Include="..\AntiDupl\adBlurringDetector.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\AntiDupl\adFileStream.h" />
+    <ClInclude Include="..\AntiDupl\adImageData.h" />
+    <ClInclude Include="..\AntiDupl\adStrings.h" />
+    <ClInclude Include="..\AntiDupl\adFileUtils.h" />
+    <ClInclude Include="..\AntiDupl\adOptions.h" />
+    <ClInclude Include="..\AntiDupl\adPath.h" />
+    <ClInclude Include="..\AntiDupl\adImage.h" />
+    <ClInclude Include="..\AntiDupl\adPixelData.h" />
+    <ClInclude Include="..\AntiDupl\adImageInfo.h" />
+    <ClInclude Include="..\AntiDupl\adIniFile.h" />
+    <ClInclude Include="..\AntiDupl\adTurboJpeg.h" />
+    <ClInclude Include="..\AntiDupl\adBlurringDetector.h" />
+    <ClInclude Include="..\AntiDupl\adConfig.h" />
+    <ClInclude Include="..\AntiDupl\adException.h" />
+    <ClInclude Include="..\AntiDupl\adSimd.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.8.targets" />
+  </ImportGroup>
+</Project>

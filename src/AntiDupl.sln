@@ -21,6 +21,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AntiDupl.NET.WPF", "AntiDup
 		{8F2134F7-2163-4B0B-8C79-801631116565} = {8F2134F7-2163-4B0B-8C79-801631116565}
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NvJpegCollector", "NvJpegCollector\NvJpegCollector.vcxproj", "{B7C9D2E1-F3A4-5678-9ABC-DEF012345678}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -52,6 +54,8 @@ Global
 		{45E650C2-2508-4897-9A7F-3EA583FC9243}.Publish|x64.Build.0 = Publish|x64
 		{45E650C2-2508-4897-9A7F-3EA583FC9243}.Release|x64.ActiveCfg = Release|x64
 		{45E650C2-2508-4897-9A7F-3EA583FC9243}.Release|x64.Build.0 = Release|x64
+		{B7C9D2E1-F3A4-5678-9ABC-DEF012345678}.Release|x64.ActiveCfg = Release|x64
+		{B7C9D2E1-F3A4-5678-9ABC-DEF012345678}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

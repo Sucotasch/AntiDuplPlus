@@ -56,7 +56,7 @@ namespace ad
                 AD_DEBUG("TGpuManager: GpuInit failed\n");
             }
         }
-        catch (const std::exception& e)
+        catch (const std::exception&)
         {
             AD_DEBUG("TGpuManager: Exception caught\n");
             m_available = false;

@@ -103,6 +103,7 @@
     <ClCompile Include="adJxl.cpp" />
     <ClCompile Include="adLogger.cpp" />
     <ClCompile Include="adMistakeStorage.cpp" />
+    <ClCompile Include="adNvJpeg.cpp" />
     <ClCompile Include="adOpenJpeg.cpp" />
     <ClCompile Include="adOptions.cpp" />
     <ClCompile Include="adPath.cpp" />
@@ -158,6 +159,7 @@
     <ClInclude Include="adJxl.h" />
     <ClInclude Include="adLogger.h" />
     <ClInclude Include="adMistakeStorage.h" />
+    <ClInclude Include="adNvJpeg.h" />
     <ClInclude Include="adOpenJpeg.h" />
     <ClInclude Include="adOptions.h" />
     <ClInclude Include="adPath.h" />

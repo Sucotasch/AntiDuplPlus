@@ -31,6 +31,7 @@
 #include "adTga.h"
 #include "adWebp.h"
 #include "adTurboJpeg.h"
+#include "adNvJpeg.h"
 #include "adHeif.h"
 #include "adAvif.h"
 #include "adJxl.h"
@@ -110,6 +111,14 @@ namespace ad
             return TJxl::Load(hGlobal);
         else if (THeif::Supported(hGlobal))
             return THeif::Load(hGlobal);
+#ifdef AD_NVJPEG_ENABLE
+        // Попытка GPU декодирования JPEG через nvJPEG (динамическая загрузка)
+        if (pOptions->advanced.useLibJpegTurbo && TNvJpeg::Supported(hGlobal)) {
+            TImage* pImage = TNvJpeg::Load(hGlobal, pOptions->advanced.reducedImageSize);
+            if (pImage) return pImage;
+            // Fallback на TTurboJpeg если nvJPEG не смог декодировать
+        }
+#endif//AD_NVJPEG_ENABLE
 #ifdef AD_TURBO_JPEG_ENABLE
         if (pOptions->advanced.useLibJpegTurbo && TTurboJpeg::Supported(hGlobal))
             return TTurboJpeg::Load(hGlobal, pOptions->advanced.reducedImageSize);

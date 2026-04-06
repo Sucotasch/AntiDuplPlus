@@ -79,6 +79,7 @@
     <ClCompile Include="adAvif.cpp" />
     <ClCompile Include="adBlurringDetector.cpp" />
     <ClCompile Include="adDataCollector.cpp" />
+    <ClCompile Include="adDatabaseRegistry.cpp" />
     <ClCompile Include="adDds.cpp" />
     <ClCompile Include="adDump.cpp" />
     <ClCompile Include="adDuplResultFilter.cpp" />
@@ -131,6 +132,7 @@
     <ClInclude Include="adAvif.h" />
     <ClInclude Include="adBlurringDetector.h" />
     <ClInclude Include="adConfig.h" />
+    <ClInclude Include="adDatabaseRegistry.h" />
     <ClInclude Include="adDataCollector.h" />
     <ClInclude Include="adDds.h" />
     <ClInclude Include="adDump.h" />

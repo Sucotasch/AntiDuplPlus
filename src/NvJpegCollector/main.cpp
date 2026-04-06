@@ -399,6 +399,49 @@ int wmain(int argc, wchar_t* argv[]) {
     }
     
     std::wcout << L"[SAVE] Database saved to: " << outPath << std::endl;
+
+    // Update ad_database.xml Registry
+    std::wstring registryPath;
+    wchar_t* appData = _wgetenv(L"APPDATA");
+    if (appData) {
+        registryPath = std::wstring(appData) + L"\\AntiDuplPlus\\ad_database.xml";
+        fs::create_directories(fs::path(registryPath).parent_path());
+        
+        // Read existing XML
+        std::wstring xmlContent;
+        {
+            std::wifstream rFile(registryPath);
+            if (rFile.is_open()) {
+                xmlContent.assign((std::istreambuf_iterator<wchar_t>(rFile)), std::istreambuf_iterator<wchar_t>());
+            }
+        }
+
+        // Simple update: remove old entry for this path, add new one
+        std::wstring newXml = L"<DatabaseRegistry>\n";
+        size_t pos = xmlContent.find(L"<Database ");
+        while (pos != std::wstring::npos) {
+            size_t endPos = xmlContent.find(L"/>", pos);
+            if (endPos != std::wstring::npos) {
+                std::wstring tag = xmlContent.substr(pos, endPos - pos + 2);
+                // If tag does NOT contain our input path, keep it
+                if (tag.find(args.inputPath) == std::wstring::npos) {
+                    newXml += tag + L"\n";
+                }
+                pos = xmlContent.find(L"<Database ", endPos);
+            } else break;
+        }
+        // Add new entry
+        newXml += L"  <Database Path=\"" + args.inputPath + L"\" ThumbSize=\"" + 
+                  std::to_wstring(args.thumbSize) + L"\" Count=\"" + std::to_wstring(images.size()) + 
+                  L"\" Status=\"Ready\"/>\n";
+        newXml += L"</DatabaseRegistry>\n";
+
+        std::wofstream wFile(registryPath);
+        wFile << newXml;
+        
+        std::wcout << L"[REGISTRY] Updated database registry." << std::endl;
+    }
+
     std::wcout << L"[DONE] Processed " << processed << L" images in " 
                << std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count()
                << L" seconds." << std::endl;

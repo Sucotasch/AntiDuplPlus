@@ -1,10 +1,6 @@
 /*
-* NvJpegCollector - GPU-accelerated JPEG pre-processing utility for AntiDuplPlus.
-*
-* Standalone utility that decodes JPEG images using nvJPEG batch decoder 
-* and saves them in AntiDupl-compatible binary format.
-* 
-* NO dependencies on AntiDupl core code - uses direct binary format writing.
+* NvJpegCollector - GPU-accelerated image pre-processing utility for AntiDuplPlus.
+* Decodes JPEG via nvJPEG (GPU) and other formats via WIC (CPU).
 */
 #define NOMINMAX
 #define _CRT_SECURE_NO_WARNINGS
@@ -15,149 +11,185 @@
 #include <filesystem>
 #include <chrono>
 #include <algorithm>
+#include <map>
+#include <limits>
 #include <shlobj.h>
 #include <windows.h>
+#include <wincodec.h>
 #include <nvjpeg.h>
 #include <cuda_runtime.h>
 
 namespace fs = std::filesystem;
 
-// --- CRC32c Implementation (SimdCrc32c equivalent) ---
 static uint64_t CalculateCRC32c(const void* data, size_t length) {
     uint64_t crc = 0;
     const uint8_t* bytes = static_cast<const uint8_t*>(data);
     for (size_t i = 0; i < length; i++) {
         crc ^= bytes[i];
         for (int j = 0; j < 8; j++) {
-            if (crc & 1) crc = (crc >> 1) ^ 0x82F63B78u; // CRC32C polynomial
+            if (crc & 1) crc = (crc >> 1) ^ 0x82F63B78u;
             else crc >>= 1;
         }
     }
     return crc;
 }
 
-// --- Bilinear Resize (32x32 thumbnail) ---
-static void ResizeBilinear(const uint8_t* src, int srcW, int srcH, 
-                           uint8_t* dst, int dstW, int dstH) {
+static uint32_t SimpleCRC32(const std::wstring& s) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (wchar_t c : s) {
+        crc ^= (uint32_t)c;
+        for (int i = 0; i < 8; i++) {
+            if (crc & 1) crc = (crc >> 1) ^ 0xEDB88320u;
+            else crc >>= 1;
+        }
+    }
+    return crc ^ 0xFFFFFFFF;
+}
+
+static std::wstring GenerateAdiFileName(const std::wstring& path, int thumbSize) {
+    fs::path p(path);
+    std::wstring folderName = p.filename().wstring();
+    if (folderName.empty()) folderName = p.parent_path().filename().wstring();
+    std::wstring safeName;
+    for (wchar_t c : folderName) {
+        if (iswalnum(c) || c == L'_' || c == L'-') safeName += c;
+        else safeName += L'_';
+    }
+    size_t first = safeName.find_first_not_of(L'_');
+    if (first != std::wstring::npos) safeName = safeName.substr(first);
+    while (!safeName.empty() && safeName.back() == L'_') safeName.pop_back();
+    if (safeName.length() > 50) safeName = safeName.substr(0, 50);
+    if (safeName.empty()) safeName = L"database";
+    uint32_t hash = SimpleCRC32(path);
+    wchar_t hashStr[5]; swprintf_s(hashStr, L"%04X", hash & 0xFFFF);
+    wchar_t result[200];
+    swprintf_s(result, L"%s_%s_%dx%d.adi", safeName.c_str(), hashStr, thumbSize, thumbSize);
+    return std::wstring(result);
+}
+
+static bool ShowFolderDialog(std::wstring& result) {
+    IFileDialog* pFileDialog = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFileDialog));
+    if (FAILED(hr)) return false;
+    DWORD dwOptions;
+    if (SUCCEEDED(pFileDialog->GetOptions(&dwOptions))) pFileDialog->SetOptions(dwOptions | FOS_PICKFOLDERS);
+    pFileDialog->SetTitle(L"Select folder to pre-process");
+    hr = pFileDialog->Show(NULL);
+    if (SUCCEEDED(hr)) {
+        IShellItem* pItem = nullptr;
+        hr = pFileDialog->GetResult(&pItem);
+        if (SUCCEEDED(hr)) {
+            PWSTR pszPath = nullptr;
+            hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
+            if (SUCCEEDED(hr)) { result = pszPath; CoTaskMemFree(pszPath); }
+            pItem->Release();
+        }
+    }
+    pFileDialog->Release();
+    return SUCCEEDED(hr) && !result.empty();
+}
+
+static void ResizeBilinear(const uint8_t* src, int srcW, int srcH, uint8_t* dst, int dstW, int dstH) {
     for (int y = 0; y < dstH; y++) {
         for (int x = 0; x < dstW; x++) {
             float srcX = (x + 0.5f) * srcW / dstW - 0.5f;
             float srcY = (y + 0.5f) * srcH / dstH - 0.5f;
-            if (srcX < 0) srcX = 0;
-            if (srcY < 0) srcY = 0;
-            int x0 = (int)srcX;
-            int y0 = (int)srcY;
-            int x1 = (std::min)(x0 + 1, srcW - 1);
-            int y1 = (std::min)(y0 + 1, srcH - 1);
-            float fx = srcX - x0;
-            float fy = srcY - y0;
-            
-            for (int c = 0; c < 3; c++) { // RGB
-                float v = src[y0 * srcW * 3 + x0 * 3 + c] * (1 - fx) * (1 - fy) +
-                          src[y0 * srcW * 3 + x1 * 3 + c] * fx * (1 - fy) +
-                          src[y1 * srcW * 3 + x0 * 3 + c] * (1 - fx) * fy +
-                          src[y1 * srcW * 3 + x1 * 3 + c] * fx * fy;
+            if (srcX < 0) srcX = 0; if (srcY < 0) srcY = 0;
+            int x0 = (int)srcX, y0 = (int)srcY;
+            int x1 = (std::min)(x0 + 1, srcW - 1), y1 = (std::min)(y0 + 1, srcH - 1);
+            float fx = srcX - x0, fy = srcY - y0;
+            for (int c = 0; c < 3; c++) {
+                float v = src[y0 * srcW * 3 + x0 * 3 + c] * (1-fx)*(1-fy) + src[y0 * srcW * 3 + x1 * 3 + c] * fx*(1-fy)
+                        + src[y1 * srcW * 3 + x0 * 3 + c] * (1-fx)*fy + src[y1 * srcW * 3 + x1 * 3 + c] * fx*fy;
                 dst[y * dstW * 3 + x * 3 + c] = (uint8_t)v;
             }
         }
     }
 }
 
-// --- Convert RGB to Grayscale ---
-static void RgbToGray(const uint8_t* rgb, uint8_t* gray, int width, int height) {
-    for (int i = 0; i < width * height; i++) {
-        gray[i] = (uint8_t)(0.299f * rgb[i * 3] + 0.587f * rgb[i * 3 + 1] + 0.114f * rgb[i * 3 + 2]);
-    }
+static void RgbToGray(const uint8_t* rgb, uint8_t* gray, int w, int h) {
+    for (int i = 0; i < w * h; i++)
+        gray[i] = (uint8_t)(0.299f * rgb[i*3] + 0.587f * rgb[i*3+1] + 0.114f * rgb[i*3+2]);
 }
 
-// --- Binary File Writer (AntiDupl-compatible format) ---
-class AdiWriter {
-    FILE* m_file;
-public:
-    AdiWriter(const wchar_t* path) {
-        m_file = _wfopen(path, L"wb");
-        if (!m_file) throw std::runtime_error("Cannot create file");
-    }
-    ~AdiWriter() { if (m_file) fclose(m_file); }
-    
-    void Write(const void* data, size_t size) {
-        if (fwrite(data, 1, size, m_file) != size)
-            throw std::runtime_error("Write failed");
-    }
-    
-    template<typename T> void Write(T val) { Write(&val, sizeof(T)); }
-    void WriteSize(size_t size) { Write<uint64_t>(size); }
-    
-    void WriteString(const std::wstring& s) {
-        WriteSize(s.size());
-        Write(s.c_str(), s.size() * sizeof(wchar_t));
-    }
-    
-    void WritePath(const std::wstring& s) { WriteString(s); }
+static bool DecodeWithWIC(const wchar_t* path, std::vector<uint8_t>& outRgb, int& outW, int& outH) {
+    IWICImagingFactory* pFactory = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFactory));
+    if (FAILED(hr)) return false;
+    IWICBitmapDecoder* pDecoder = nullptr;
+    hr = pFactory->CreateDecoderFromFilename(path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &pDecoder);
+    if (FAILED(hr)) { pFactory->Release(); return false; }
+    IWICBitmapFrameDecode* pFrame = nullptr;
+    hr = pDecoder->GetFrame(0, &pFrame); pDecoder->Release();
+    if (FAILED(hr)) { pFactory->Release(); return false; }
+    IWICFormatConverter* pConverter = nullptr;
+    hr = pFactory->CreateFormatConverter(&pConverter);
+    if (SUCCEEDED(hr)) hr = pConverter->Initialize(pFrame, GUID_WICPixelFormat24bppBGR, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom);
+    pFrame->Release();
+    if (FAILED(hr)) { pFactory->Release(); return false; }
+    UINT w = 0, h = 0; pConverter->GetSize(&w, &h);
+    outW = w; outH = h; outRgb.resize(w * h * 3);
+    hr = pConverter->CopyPixels(nullptr, w * 3, (UINT)outRgb.size(), outRgb.data());
+    pConverter->Release(); pFactory->Release();
+    return SUCCEEDED(hr);
+}
+
+struct ImageInfo {
+    std::wstring path; uint64_t size, time; uint32_t hash; uint8_t type;
+    uint32_t width, height; float blockiness, blurring; uint64_t crc32c;
+    std::vector<uint8_t> thumbnail;
 };
 
-// --- Command Line Arguments ---
-struct Arguments {
-    std::wstring inputPath;
-    std::wstring outputPath;
-    int thumbSize = 32;
-    int batchSize = 64;
-    bool help = false;
-};
+static uint64_t GetFileTime(const fs::path& p) {
+    WIN32_FILE_ATTRIBUTE_DATA attr;
+    if (GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &attr))
+        return ((uint64_t)attr.ftLastWriteTime.dwHighDateTime << 32) | attr.ftLastWriteTime.dwLowDateTime;
+    return 0;
+}
+
+static uint8_t GetImageType(const std::wstring& ext) {
+    if (ext==L".jpg"||ext==L".jpeg"||ext==L".JPG"||ext==L".JPEG"||ext==L".jpe"||ext==L".JPE"||ext==L".jif"||ext==L".JIF"||ext==L".jfif"||ext==L".JFIF"||ext==L".jfi"||ext==L".JFI") return 1;
+    if (ext==L".png"||ext==L".PNG") return 2;
+    if (ext==L".tif"||ext==L".tiff"||ext==L".TIF"||ext==L".TIFF") return 3;
+    if (ext==L".webp"||ext==L".WEBP") return 4;
+    if (ext==L".bmp"||ext==L".BMP"||ext==L".dib"||ext==L".DIB") return 0;
+    if (ext==L".gif"||ext==L".GIF") return 5;
+    return 0xFF;
+}
+
+struct Arguments { std::wstring inputPath, outputPath; int thumbSize=32, batchSize=64; bool help=false; };
 
 Arguments ParseArguments(int argc, wchar_t* argv[]) {
     Arguments args;
-    for (int i = 1; i < argc; i++) {
+    for (int i=1; i<argc; i++) {
         std::wstring arg = argv[i];
-        if ((arg == L"--input" || arg == L"-i") && i + 1 < argc) args.inputPath = argv[++i];
-        else if ((arg == L"--output" || arg == L"-o") && i + 1 < argc) args.outputPath = argv[++i];
-        else if ((arg == L"--size" || arg == L"-s") && i + 1 < argc) args.thumbSize = std::stoi(argv[++i]);
-        else if ((arg == L"--batch" || arg == L"-b") && i + 1 < argc) args.batchSize = std::stoi(argv[++i]);
-        else if (arg == L"--help" || arg == L"-h") args.help = true;
+        if ((arg==L"--input"||arg==L"-i")&&i+1<argc) args.inputPath=argv[++i];
+        else if ((arg==L"--output"||arg==L"-o")&&i+1<argc) args.outputPath=argv[++i];
+        else if ((arg==L"--size"||arg==L"-s")&&i+1<argc) args.thumbSize=std::stoi(argv[++i]);
+        else if ((arg==L"--batch"||arg==L"-b")&&i+1<argc) args.batchSize=std::stoi(argv[++i]);
+        else if (arg==L"--help"||arg==L"-h") args.help=true;
     }
     return args;
 }
 
 void PrintHelp() {
-    std::wcout << L"NvJpegCollector - GPU-accelerated JPEG pre-processing for AntiDuplPlus\n\n";
+    std::wcout << L"NvJpegCollector - GPU-accelerated image pre-processing for AntiDuplPlus\n\n";
     std::wcout << L"Usage: NvJpegCollector.exe --input <path> [--output <path>] [--size 32] [--batch 64]\n\n";
-    std::wcout << L"Options:\n";
-    std::wcout << L"  --input, -i     Path to folder with JPEG images (required)\n";
-    std::wcout << L"  --output, -o    Path to save .adi database (default: %APPDATA%\\AntiDuplPlus\\images)\n";
-    std::wcout << L"  --size, -s      Thumbnail size in pixels (default: 32)\n";
-    std::wcout << L"  --batch, -b     Batch size for nvJPEG decoding (default: 64)\n";
-    std::wcout << L"  --help, -h      Show this help message\n";
+    std::wcout << L"Supported: JPEG/JPG/JFIF (GPU), PNG, BMP, TIFF, WebP, GIF (CPU via WIC)\n";
 }
 
-// --- Global nvJPEG handles ---
 static nvjpegHandle_t g_nvjpegHandle = nullptr;
 static nvjpegJpegState_t g_nvjpegState = nullptr;
 static cudaStream_t g_stream = nullptr;
 
 bool InitNvJpeg() {
-    nvjpegDevAllocator_t dev_alloc = {
-        [](void** p, size_t s) -> int { return (int)cudaMalloc(p, s); },
-        [](void* p) -> int { return (int)cudaFree(p); }
-    };
-    nvjpegPinnedAllocator_t pinned_alloc = {
-        [](void** p, size_t s, unsigned int) -> int { return (int)cudaHostAlloc(p, s, cudaHostAllocDefault); },
-        [](void* p) -> int { return (int)cudaFreeHost(p); }
-    };
-    
-    nvjpegStatus_t status = nvjpegCreateEx(NVJPEG_BACKEND_DEFAULT, &dev_alloc, &pinned_alloc, 
-                                           NVJPEG_FLAGS_DEFAULT, &g_nvjpegHandle);
-    if (status != NVJPEG_STATUS_SUCCESS) {
-        std::wcerr << L"[ERROR] nvjpegCreateEx failed: " << status << std::endl;
-        return false;
-    }
-    
+    nvjpegDevAllocator_t dev_alloc = { [](void** p, size_t s)->int { return (int)cudaMalloc(p,s); }, [](void* p)->int { return (int)cudaFree(p); } };
+    nvjpegPinnedAllocator_t pinned_alloc = { [](void** p, size_t s, unsigned int)->int { return (int)cudaHostAlloc(p,s,cudaHostAllocDefault); }, [](void* p)->int { return (int)cudaFreeHost(p); } };
+    nvjpegStatus_t status = nvjpegCreateEx(NVJPEG_BACKEND_DEFAULT, &dev_alloc, &pinned_alloc, NVJPEG_FLAGS_DEFAULT, &g_nvjpegHandle);
+    if (status != NVJPEG_STATUS_SUCCESS) return false;
     status = nvjpegJpegStateCreate(g_nvjpegHandle, &g_nvjpegState);
-    if (status != NVJPEG_STATUS_SUCCESS) {
-        std::wcerr << L"[ERROR] nvjpegJpegStateCreate failed: " << status << std::endl;
-        return false;
-    }
-    
-    cudaStreamCreateWithFlags(&g_stream, cudaStreamNonBlocking);
+    if (status != NVJPEG_STATUS_SUCCESS) return false;
+    cudaStreamCreate(&g_stream);
     return true;
 }
 
@@ -167,288 +199,228 @@ void CleanupNvJpeg() {
     if (g_nvjpegHandle) nvjpegDestroy(g_nvjpegHandle);
 }
 
-// --- Image Info Structure ---
-struct ImageInfo {
-    std::wstring path;
-    uint64_t size;
-    uint64_t time; // FILETIME
-    uint32_t hash;
-    uint8_t type; // 1 = JPEG
-    uint32_t width;
-    uint32_t height;
-    float blockiness;
-    float blurring;
-    uint64_t crc32c;
-    std::vector<uint8_t> thumbnail; // 32x32 grayscale
-};
+static void PauseAndExit() {
+    MessageBoxW(NULL, L"Processing complete. Press OK to exit.", L"NvJpegCollector", MB_ICONINFORMATION | MB_OK);
+    CoUninitialize();
+}
 
-// --- Main ---
+static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* ep) {
+    wchar_t msg[200]; swprintf_s(msg, L"CRASH at 0x%p! Code: 0x%X", ep->ExceptionRecord->ExceptionAddress, ep->ExceptionRecord->ExceptionCode);
+    MessageBoxW(NULL, msg, L"NvJpegCollector Crash", MB_ICONERROR | MB_OK);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+int wmain_impl(int argc, wchar_t* argv[]);
+
 int wmain(int argc, wchar_t* argv[]) {
+    SetUnhandledExceptionFilter(CrashHandler);
     SetConsoleOutputCP(CP_UTF8);
-    
+    CoInitialize(NULL);
+    try { return wmain_impl(argc, argv); }
+    catch (const std::exception& e) {
+        std::string what(e.what(), e.what()+strlen(e.what()));
+        std::wstring msg(what.begin(), what.end());
+        MessageBoxW(NULL, msg.c_str(), L"NvJpegCollector FATAL ERROR", MB_ICONERROR | MB_OK);
+        CoUninitialize(); return 2;
+    } catch (...) {
+        MessageBoxW(NULL, L"Unknown exception", L"NvJpegCollector FATAL ERROR", MB_ICONERROR | MB_OK);
+        CoUninitialize(); return 2;
+    }
+}
+
+int wmain_impl(int argc, wchar_t* argv[]) {
     Arguments args = ParseArguments(argc, argv);
-    if (args.help || args.inputPath.empty()) {
-        PrintHelp();
-        return args.help ? 0 : 1;
+    if (args.help) { PrintHelp(); PauseAndExit(); return 0; }
+    if (args.inputPath.empty()) {
+        std::wcout << L"=== NvJpegCollector ===" << std::endl;
+        std::wcout << L"No input path. Opening folder selector..." << std::endl;
+        if (!ShowFolderDialog(args.inputPath)) { std::wcout << L"[CANCEL] No folder selected." << std::endl; PauseAndExit(); return 0; }
+        std::wcout << L"Selected: " << args.inputPath << std::endl << std::endl;
     }
-    
     std::wcout << L"=== NvJpegCollector ===" << std::endl;
-    std::wcout << L"Input:    " << args.inputPath << std::endl;
-    std::wcout << L"Output:   " << (args.outputPath.empty() ? L"[Auto]" : args.outputPath) << std::endl;
-    std::wcout << L"Thumb:    " << args.thumbSize << L"x" << args.thumbSize << std::endl;
-    std::wcout << L"Batch:    " << args.batchSize << std::endl;
-    std::wcout << std::endl;
-    
-    // 1. Scan for JPEG files
-    std::wcout << L"[SCAN] Searching for JPEG files..." << std::endl;
-    std::vector<fs::path> jpegFiles;
-    try {
-        for (const auto& entry : fs::recursive_directory_iterator(args.inputPath)) {
-            if (entry.is_regular_file()) {
-                std::wstring ext = entry.path().extension().wstring();
-                if (ext == L".jpg" || ext == L".jpeg" || ext == L".JPG" || ext == L".JPEG") {
-                    jpegFiles.push_back(entry.path());
-                }
-            }
-        }
-    } catch (const std::exception& e) {
-        std::wcerr << L"[ERROR] Failed to scan directory: " << e.what() << std::endl;
-        return 1;
-    }
-    
-    if (jpegFiles.empty()) {
-        std::wcout << L"[WARN] No JPEG files found." << std::endl;
-        return 0;
-    }
-    
-    std::wcout << L"[SCAN] Found " << jpegFiles.size() << L" JPEG files." << std::endl;
-    
-    // 2. Initialize nvJPEG
-    std::wcout << L"[INIT] Initializing nvJPEG..." << std::endl;
-    if (!InitNvJpeg()) return 1;
-    
-    // 3. Process images
-    std::wcout << L"[PROC] Decoding and processing..." << std::endl;
-    std::vector<ImageInfo> images;
-    images.reserve(jpegFiles.size());
-    
-    auto startTime = std::chrono::high_resolution_clock::now();
-    int processed = 0;
-    
-    // Buffers for batch processing
-    std::vector<std::vector<char>> rawData(args.batchSize);
-    std::vector<size_t> rawLen(args.batchSize);
-    std::vector<const unsigned char*> batchPtrs;
-    std::vector<size_t> batchLens;
-    std::vector<nvjpegImage_t> outputs;
-    
-    // GPU buffers
-    std::vector<unsigned char*> gpuBuffers;
-    gpuBuffers.resize(args.batchSize, nullptr);
-    for (int i = 0; i < args.batchSize; i++) {
-        cudaMalloc(&gpuBuffers[i], 4000 * 3000 * 3); // Max reasonable size
-    }
-    
-    for (size_t i = 0; i < jpegFiles.size(); i += args.batchSize) {
-        int batchSize = (std::min)((size_t)args.batchSize, jpegFiles.size() - i);
-        batchPtrs.clear();
-        batchLens.clear();
-        outputs.clear();
-        
-        // Read files
-        for (int b = 0; b < batchSize; b++) {
-            size_t idx = i + b;
-            try {
-                std::ifstream file(jpegFiles[idx], std::ios::binary | std::ios::ate);
-                if (!file.is_open()) continue;
-                
-                std::streamsize fileSize = file.tellg();
-                file.seekg(0, std::ios::beg);
-                
-                rawData[b].resize(fileSize);
-                file.read(rawData[b].data(), fileSize);
-                
-                batchPtrs.push_back(reinterpret_cast<const unsigned char*>(rawData[b].data()));
-                batchLens.push_back(fileSize);
-                
-                outputs.push_back({});
-                outputs.back().channel[0] = gpuBuffers[b];
-                outputs.back().pitch[0] = 4000 * 3;
-            } catch (...) {
-                continue;
-            }
-        }
-        
-        if (batchPtrs.empty()) continue;
-        
-        // Decode batch
-        nvjpegStatus_t status = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState,
-                                                               batchSize, 1, NVJPEG_OUTPUT_RGB);
-        if (status == NVJPEG_STATUS_SUCCESS) {
-            status = nvjpegDecodeBatched(g_nvjpegHandle, g_nvjpegState, batchPtrs.data(),
-                                         batchLens.data(), outputs.data(), g_stream);
-        }
-        
-        cudaStreamSynchronize(g_stream);
-        
-        // Process results
-        for (int b = 0; b < (int)batchPtrs.size(); b++) {
-            if (status != NVJPEG_STATUS_SUCCESS) continue;
-            
-            size_t idx = i + b;
-            ImageInfo info;
-            info.path = jpegFiles[idx].wstring();
-            info.size = batchLens[b];
-            
-            // Get file time
-            WIN32_FILE_ATTRIBUTE_DATA attr;
-            if (GetFileAttributesExW(jpegFiles[idx].c_str(), GetFileExInfoStandard, &attr)) {
-                info.time = ((uint64_t)attr.ftLastWriteTime.dwHighDateTime << 32) | attr.ftLastWriteTime.dwLowDateTime;
-            }
-            
-            // Get image dimensions from nvJPEG
-            int nComp = 0, widths[NVJPEG_MAX_COMPONENT], heights[NVJPEG_MAX_COMPONENT];
-            nvjpegChromaSubsampling_t subsamp;
-            nvjpegGetImageInfo(g_nvjpegHandle, batchPtrs[b], batchLens[b], &nComp, &subsamp, widths, heights);
-            info.width = widths[0];
-            info.height = heights[0];
-            info.type = 1; // JPEG
-            info.hash = 0;
-            info.blockiness = 0;
-            info.blurring = 0;
-            
-            // Resize to thumbnail
-            int srcW = widths[0], srcH = heights[0];
-            std::vector<uint8_t> rgb(srcW * srcH * 3);
-            cudaMemcpy2D(rgb.data(), srcW * 3, gpuBuffers[b], outputs[b].pitch[0], 
-                         srcW * 3, srcH, cudaMemcpyDeviceToHost);
-            
-            std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
-            std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
-            ResizeBilinear(rgb.data(), srcW, srcH, thumbRGB.data(), args.thumbSize, args.thumbSize);
-            RgbToGray(thumbRGB.data(), gray.data(), args.thumbSize, args.thumbSize);
-            
-            info.thumbnail = gray;
-            info.crc32c = CalculateCRC32c(gray.data(), gray.size());
-            
-            images.push_back(info);
-            processed++;
-        }
-        
-        // Progress
-        int pct = (int)((i + batchSize) * 100 / jpegFiles.size());
-        auto elapsed = std::chrono::high_resolution_clock::now() - startTime;
-        double speed = (double)processed / (std::chrono::duration<double>(elapsed).count() + 0.001);
-        std::wcout << L"\r[PROC] " << processed << L"/" << jpegFiles.size() 
-                   << L" (" << pct << L"%) | " << (int)speed << L" img/sec" << std::flush;
-    }
-    
-    std::wcout << std::endl;
-    
-    // 4. Save to .adi format
-    std::wcout << L"[SAVE] Writing database files..." << std::endl;
-    
+    std::wcout << L"Input: " << args.inputPath << std::endl;
+    std::wcout << L"Output: " << (args.outputPath.empty() ? L"[Default]" : args.outputPath) << std::endl;
+    std::wcout << L"Thumb: " << args.thumbSize << L"x" << args.thumbSize << std::endl << std::endl;
+
     std::wstring outPath = args.outputPath;
     if (outPath.empty()) {
         wchar_t* appData = _wgetenv(L"APPDATA");
-        if (appData) {
-            outPath = std::wstring(appData) + L"\\AntiDuplPlus\\images\\" + std::to_wstring(args.thumbSize) + L"x" + std::to_wstring(args.thumbSize);
-            fs::create_directories(outPath);
+        if (appData) outPath = std::wstring(appData) + L"\\AntiDuplPlus\\images\\" + std::to_wstring(args.thumbSize) + L"x" + std::to_wstring(args.thumbSize);
+        else { std::wcerr << L"[ERROR] Cannot determine output path." << std::endl; PauseAndExit(); return 1; }
+    }
+    fs::create_directories(outPath);
+    std::wstring adiFileName = GenerateAdiFileName(args.inputPath, args.thumbSize);
+    std::wstring adiFilePath = outPath + L"\\" + adiFileName;
+
+    std::wcout << L"[SCAN] Searching for image files..." << std::endl;
+    std::vector<fs::path> imageFiles;
+    try {
+        for (const auto& entry : fs::recursive_directory_iterator(args.inputPath))
+            if (entry.is_regular_file()) { std::wstring ext = entry.path().extension().wstring(); if (GetImageType(ext)!=0xFF) imageFiles.push_back(entry.path()); }
+    } catch (const std::exception& e) { std::wcerr << L"[ERROR] " << e.what() << std::endl; PauseAndExit(); return 1; }
+    if (imageFiles.empty()) { std::wcout << L"[WARN] No image files." << std::endl; PauseAndExit(); return 0; }
+    std::wcout << L"[SCAN] Found " << imageFiles.size() << L" files." << std::endl;
+
+    std::wcout << L"[INIT] Initializing decoders..." << std::endl;
+    if (!InitNvJpeg()) { std::wcerr << L"[ERROR] Failed to init nvJPEG." << std::endl; PauseAndExit(); return 1; }
+
+    std::vector<size_t> jpegIndices, nonJpegIndices;
+    for (size_t i = 0; i < imageFiles.size(); i++) {
+        if (GetImageType(imageFiles[i].extension().wstring())==1) jpegIndices.push_back(i);
+        else nonJpegIndices.push_back(i);
+    }
+    std::wcout << L"[PROC] Decoding: " << jpegIndices.size() << L" JPEG (GPU), " << nonJpegIndices.size() << L" other (CPU)" << std::endl;
+
+    std::vector<ImageInfo> images; images.reserve(imageFiles.size());
+    auto startTime = std::chrono::high_resolution_clock::now();
+    int processed = 0;
+
+    // ========== JPEG via nvJPEG (GPU) ==========
+    if (!jpegIndices.empty()) {
+        std::wcout << L"[GPU]  Decoding " << jpegIndices.size() << L" JPEG files..." << std::endl;
+        // Single large GPU buffer (reused)
+        size_t maxW = 8192, maxH = 8192;
+        size_t pitch = ((maxW * 3 + 31) / 32) * 32;
+        unsigned char* gpuBuf = nullptr;
+        cudaError_t allocErr = cudaMalloc(&gpuBuf, pitch * maxH);
+        if (allocErr != cudaSuccess) std::wcerr << L"[GPU ERROR] Cannot allocate GPU buffer" << std::endl;
+
+        std::vector<const unsigned char*> batchPtrs(1);
+        std::vector<size_t> batchLens(1);
+        std::vector<nvjpegImage_t> outputs(1);
+        if (gpuBuf) { outputs[0].channel[0] = gpuBuf; outputs[0].pitch[0] = (int)pitch; }
+
+        // Single state (recreated only on error)
+        for (size_t i = 0; i < jpegIndices.size(); i++) {
+            const auto& fp = imageFiles[jpegIndices[i]];
+            try {
+                std::ifstream file(fp, std::ios::binary | std::ios::ate);
+                if (!file.is_open()) continue;
+                std::streamsize fileSize = file.tellg();
+                file.seekg(0, std::ios::beg);
+                std::vector<char> rawData(fileSize);
+                file.read(rawData.data(), fileSize);
+
+                int nComp=0, widths[NVJPEG_MAX_COMPONENT], heights[NVJPEG_MAX_COMPONENT];
+                nvjpegChromaSubsampling_t subsamp;
+                if (nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)rawData.data(), fileSize, &nComp, &subsamp, widths, heights) != NVJPEG_STATUS_SUCCESS || nComp==0) continue;
+                int srcW = widths[0], srcH = heights[0];
+                if (!gpuBuf) continue;
+
+                batchPtrs[0] = (const unsigned char*)rawData.data();
+                batchLens[0] = fileSize;
+
+                nvjpegStatus_t initS = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, 1, NVJPEG_OUTPUT_RGBI);
+                if (initS != NVJPEG_STATUS_SUCCESS) {
+                    nvjpegJpegStateDestroy(g_nvjpegState);
+                    nvjpegJpegStateCreate(g_nvjpegHandle, &g_nvjpegState);
+                    initS = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, 1, NVJPEG_OUTPUT_RGBI);
+                    if (initS != NVJPEG_STATUS_SUCCESS) continue;
+                }
+
+                nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, g_nvjpegState, batchPtrs.data(), batchLens.data(), outputs.data(), nullptr);
+                cudaError_t cudaErr = cudaDeviceSynchronize();
+                if (decS != NVJPEG_STATUS_SUCCESS || cudaErr != cudaSuccess) {
+                    nvjpegJpegStateDestroy(g_nvjpegState);
+                    nvjpegJpegStateCreate(g_nvjpegHandle, &g_nvjpegState);
+                    continue;
+                }
+
+                size_t imgPitch = srcW * 3;
+                std::vector<uint8_t> rgb(srcW * srcH * 3);
+                cudaMemcpy2D(rgb.data(), imgPitch, gpuBuf, (int)pitch, imgPitch, srcH, cudaMemcpyDeviceToHost);
+
+                std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
+                std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
+                ResizeBilinear(rgb.data(), srcW, srcH, thumbRGB.data(), args.thumbSize, args.thumbSize);
+                RgbToGray(thumbRGB.data(), gray.data(), args.thumbSize, args.thumbSize);
+
+                ImageInfo info;
+                info.path = fp.wstring(); info.size = (uint64_t)fileSize; info.time = GetFileTime(fp);
+                info.hash = 0; info.type = 1; info.width = srcW; info.height = srcH;
+                info.blockiness = 0; info.blurring = 0;
+                info.thumbnail = gray; info.crc32c = CalculateCRC32c(gray.data(), gray.size());
+                images.push_back(info); processed++;
+
+                int pct = (int)((i+1)*100/jpegIndices.size());
+                auto elapsed = std::chrono::high_resolution_clock::now() - startTime;
+                double speed = processed / (std::chrono::duration<double>(elapsed).count() + 0.001);
+                std::wcout << L"\r[GPU]  " << processed << L"/" << jpegIndices.size() << L" (" << pct << L"%) | " << (int)speed << L" img/sec" << std::flush;
+            } catch (...) { continue; }
+        }
+        cudaFree(gpuBuf);
+        std::wcout << std::endl;
+    }
+
+    // ========== Non-JPEG via WIC (CPU) ==========
+    if (!nonJpegIndices.empty()) {
+        std::wcout << L"[WIC]  Processing " << nonJpegIndices.size() << L" files..." << std::endl;
+        for (size_t idx : nonJpegIndices) {
+            std::vector<uint8_t> rgb; int w=0, h=0;
+            if (!DecodeWithWIC(imageFiles[idx].c_str(), rgb, w, h)) continue;
+            std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
+            std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
+            ResizeBilinear(rgb.data(), w, h, thumbRGB.data(), args.thumbSize, args.thumbSize);
+            RgbToGray(thumbRGB.data(), gray.data(), args.thumbSize, args.thumbSize);
+            ImageInfo info;
+            info.path = imageFiles[idx].wstring(); info.size = (uint64_t)fs::file_size(imageFiles[idx]);
+            info.time = GetFileTime(imageFiles[idx]); info.hash = 0;
+            info.type = GetImageType(imageFiles[idx].extension().wstring());
+            info.width = w; info.height = h;
+            info.blockiness = 0; info.blurring = 0;
+            info.thumbnail = gray; info.crc32c = CalculateCRC32c(gray.data(), gray.size());
+            images.push_back(info); processed++;
         }
     }
-    
-    // Write 0000.adi
-    AdiWriter writer((outPath + L"\\0000.adi").c_str());
-    
-    // Header
-    writer.Write("AntiDuplImageData", 18); // Format string
-    writer.Write<uint32_t>(1); // Version
-    writer.Write<uint32_t>(args.thumbSize); // Thumbnail size
-    
-    // Key, First Path, Last Path
-    writer.Write<uint16_t>(0); // Key
-    if (!images.empty()) {
-        writer.WritePath(images.front().path);
-        writer.WritePath(images.back().path);
-    } else {
-        writer.WritePath(L"");
-        writer.WritePath(L"");
-    }
-    
-    // Number of images
-    writer.WriteSize(images.size());
-    
-    // Image data
-    for (const auto& img : images) {
-        writer.WritePath(img.path);
-        writer.Write<uint64_t>(img.size);
-        writer.Write<uint64_t>(img.time);
-        writer.Write<uint32_t>(img.hash);
-        writer.Write<uint8_t>(img.type);
-        writer.Write<uint32_t>(img.width);
-        writer.Write<uint32_t>(img.height);
-        writer.Write<float>(img.blockiness);
-        writer.Write<float>(img.blurring);
-        writer.Write<uint8_t>(0); // defect
-        writer.Write<uint64_t>(img.crc32c);
-        writer.Write<uint8_t>(1); // data->filled
-        writer.WriteSize(img.thumbnail.size());
-        writer.Write(img.thumbnail.data(), img.thumbnail.size());
-        writer.Write<float>(0.0f); // average
-        writer.Write<float>(0.0f); // varianceSquare
-    }
-    
-    std::wcout << L"[SAVE] Database saved to: " << outPath << std::endl;
 
-    // Update ad_database.xml Registry
-    std::wstring registryPath;
+    // ========== Save ==========
+    std::wcout << std::endl << L"[SAVE] Writing: " << adiFileName << std::endl;
+    FILE* f = nullptr; _wfopen_s(&f, adiFilePath.c_str(), L"wb");
+    if (!f) { std::wcerr << L"[ERROR] Cannot create file" << std::endl; CleanupNvJpeg(); PauseAndExit(); return 1; }
+    fwrite("AntiDuplImageData", 1, 18, f);
+    uint32_t version=1; fwrite(&version, 4, 1, f);
+    uint32_t ts=(uint32_t)args.thumbSize; fwrite(&ts, 4, 1, f);
+    uint16_t key=0; fwrite(&key, 2, 1, f);
+    auto writePath = [&](const std::wstring& p) { uint64_t len=p.size(); fwrite(&len,8,1,f); fwrite(p.c_str(),sizeof(wchar_t),len,f); };
+    if (!images.empty()) { writePath(images.front().path); writePath(images.back().path); } else { writePath(L""); writePath(L""); }
+    uint64_t count = images.size(); fwrite(&count, 8, 1, f);
+    for (const auto& img : images) {
+        writePath(img.path); fwrite(&img.size,8,1,f); fwrite(&img.time,8,1,f);
+        fwrite(&img.hash,4,1,f); fwrite(&img.type,1,1,f); fwrite(&img.width,4,1,f); fwrite(&img.height,4,1,f);
+        fwrite(&img.blockiness,4,1,f); fwrite(&img.blurring,4,1,f);
+        uint8_t defect=0; fwrite(&defect,1,1,f);
+        fwrite(&img.crc32c,8,1,f); uint8_t filled=1; fwrite(&filled,1,1,f);
+        uint64_t thumbSize = img.thumbnail.size(); fwrite(&thumbSize,8,1,f);
+        fwrite(img.thumbnail.data(), 1, thumbSize, f);
+        float avg=0, var=0; fwrite(&avg,4,1,f); fwrite(&var,4,1,f);
+    }
+    fclose(f);
+
+    // Update registry
     wchar_t* appData = _wgetenv(L"APPDATA");
     if (appData) {
-        registryPath = std::wstring(appData) + L"\\AntiDuplPlus\\ad_database.xml";
-        fs::create_directories(fs::path(registryPath).parent_path());
-        
-        // Read existing XML
+        std::wstring regPath = std::wstring(appData) + L"\\AntiDuplPlus\\ad_database.xml";
+        fs::create_directories(fs::path(regPath).parent_path());
         std::wstring xmlContent;
-        {
-            std::wifstream rFile(registryPath);
-            if (rFile.is_open()) {
-                xmlContent.assign((std::istreambuf_iterator<wchar_t>(rFile)), std::istreambuf_iterator<wchar_t>());
-            }
-        }
-
-        // Simple update: remove old entry for this path, add new one
+        { std::wifstream rFile(regPath); if (rFile.is_open()) xmlContent.assign((std::istreambuf_iterator<wchar_t>(rFile)), std::istreambuf_iterator<wchar_t>()); }
         std::wstring newXml = L"<DatabaseRegistry>\n";
         size_t pos = xmlContent.find(L"<Database ");
         while (pos != std::wstring::npos) {
             size_t endPos = xmlContent.find(L"/>", pos);
             if (endPos != std::wstring::npos) {
-                std::wstring tag = xmlContent.substr(pos, endPos - pos + 2);
-                // If tag does NOT contain our input path, keep it
-                if (tag.find(args.inputPath) == std::wstring::npos) {
-                    newXml += tag + L"\n";
-                }
+                std::wstring tag = xmlContent.substr(pos, endPos-pos+2);
+                if (tag.find(args.inputPath) == std::wstring::npos) newXml += tag + L"\n";
                 pos = xmlContent.find(L"<Database ", endPos);
             } else break;
         }
-        // Add new entry
-        newXml += L"  <Database Path=\"" + args.inputPath + L"\" ThumbSize=\"" + 
-                  std::to_wstring(args.thumbSize) + L"\" Count=\"" + std::to_wstring(images.size()) + 
-                  L"\" Status=\"Ready\"/>\n";
+        newXml += L"  <Database Path=\"" + args.inputPath + L"\" File=\"" + adiFileName + L"\" ThumbSize=\"" + std::to_wstring(args.thumbSize) + L"\" Count=\"" + std::to_wstring(images.size()) + L"\" Status=\"Ready\"/>\n";
         newXml += L"</DatabaseRegistry>\n";
-
-        std::wofstream wFile(registryPath);
-        wFile << newXml;
-        
-        std::wcout << L"[REGISTRY] Updated database registry." << std::endl;
+        std::wofstream wFile(regPath); wFile << newXml;
     }
 
-    std::wcout << L"[DONE] Processed " << processed << L" images in " 
-               << std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count()
-               << L" seconds." << std::endl;
-    
-    // Cleanup
-    for (auto buf : gpuBuffers) if (buf) cudaFree(buf);
+    auto totalTime = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
+    std::wcout << L"[DONE] Processed: " << processed << L", Total: " << images.size() << L" in " << totalTime << L" sec." << std::endl;
     CleanupNvJpeg();
-    
+    PauseAndExit();
     return 0;
 }

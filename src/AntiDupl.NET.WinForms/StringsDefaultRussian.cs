@@ -330,6 +330,10 @@ namespace AntiDupl.NET.WinForms
             s.ImagePreviewPanel_EXIF_Tooltip_DateTime = "Дата/Время: ";
             s.ImagePreviewPanel_EXIF_Tooltip_Artist = "Автор: ";
             s.ImagePreviewPanel_EXIF_Tooltip_UserComment = "Комментарий: ";
+
+            s.MainMenu_ToolsMenuItem_Text = "Инструменты";
+            s.MainMenu_Tools_GpuCollectorMenuItem_Text = "Сбор базы (GPU)";
+            s.MainMenu_Tools_DbManagerMenuItem_Text = "Менеджер баз";
         }
 
         static private Strings Create()

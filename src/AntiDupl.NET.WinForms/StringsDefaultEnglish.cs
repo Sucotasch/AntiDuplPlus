@@ -330,6 +330,10 @@ namespace AntiDupl.NET.WinForms
             s.ImagePreviewPanel_EXIF_Tooltip_DateTime = "Date/Time: ";
             s.ImagePreviewPanel_EXIF_Tooltip_Artist = "Artist: ";
             s.ImagePreviewPanel_EXIF_Tooltip_UserComment = "Comment: ";
+
+            s.MainMenu_ToolsMenuItem_Text = "Tools";
+            s.MainMenu_Tools_GpuCollectorMenuItem_Text = "Gpu Collector";
+            s.MainMenu_Tools_DbManagerMenuItem_Text = "Database Manager";
         }
 
         static private Strings Create()

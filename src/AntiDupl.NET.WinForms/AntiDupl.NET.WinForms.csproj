@@ -4,6 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net6.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>Icon.ico</ApplicationIcon>
     <AssemblyVersion>2.3.11.1</AssemblyVersion>
     <FileVersion>2.3.11.1</FileVersion>

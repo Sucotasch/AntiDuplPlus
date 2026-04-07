@@ -175,6 +175,23 @@ namespace ad
         }
     }
 
+    // Helper to resolve relative paths against exe directory
+    static std::wstring ResolveDbPath(const std::wstring& path) {
+        // Check if path is absolute (contains ':' or starts with '\\')
+        if (path.find(L":") != std::wstring::npos || (!path.empty() && path[0] == L'\\')) {
+            return path;
+        }
+        // Relative path: resolve against exe directory
+        wchar_t buffer[MAX_PATH];
+        GetModuleFileNameW(NULL, buffer, MAX_PATH);
+        std::wstring exePath(buffer);
+        size_t pos = exePath.find_last_of(L"\\/");
+        if (pos != std::wstring::npos) {
+            return exePath.substr(0, pos) + L"\\" + path;
+        }
+        return path;
+    }
+
     bool TSearcher::LoadDatabase(const std::wstring& path) {
         // Get user path from options
         std::wstring userPath = m_pOptions->userPath;
@@ -193,6 +210,9 @@ namespace ad
         std::wstring dbFolder = dbInfo.Folder;
         if (dbFolder.empty()) {
             dbFolder = path;
+        } else {
+            // Resolve relative path if necessary
+            dbFolder = ResolveDbPath(dbFolder);
         }
 
         // Load images from database folder

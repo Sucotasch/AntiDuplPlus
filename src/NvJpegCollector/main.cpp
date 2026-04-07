@@ -237,9 +237,71 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 }
 
+static std::wstring GetExeDir() {
+    wchar_t buffer[MAX_PATH];
+    GetModuleFileNameW(NULL, buffer, MAX_PATH);
+    std::wstring path(buffer);
+    size_t pos = path.find_last_of(L"\\/");
+    return (pos != std::wstring::npos) ? path.substr(0, pos) : L".";
+}
+
+static void UpdateRegistry(const std::wstring& inputPath, const std::wstring& relativeFolder, const std::wstring& dbName, size_t count, int thumbSize) {
+    std::wstring exeDir = GetExeDir();
+    std::wstring regPath = exeDir + L"\\ad_database.xml";
+    
+    fs::create_directories(fs::path(regPath).parent_path());
+    
+    // ... (read existing xml logic similar to before) ...
+    // For simplicity in this patch, I'll rewrite the logic to be self-contained
+    std::wstring xmlContent;
+    { std::wifstream rFile(regPath); if (rFile.is_open()) xmlContent.assign((std::istreambuf_iterator<wchar_t>(rFile)), std::istreambuf_iterator<wchar_t>()); }
+    
+    // Remove old entry for this path
+    std::wstring newXml = L"<DatabaseRegistry>\n";
+    size_t pos = 0;
+    std::wstring searchTag = L"<Database ";
+    while ((pos = xmlContent.find(searchTag, pos)) != std::wstring::npos) {
+        size_t endPos = xmlContent.find(L"/>", pos);
+        if (endPos == std::wstring::npos) break;
+        
+        std::wstring tag = xmlContent.substr(pos, endPos - pos + 2);
+        pos = endPos + 2;
+        
+        // Extract Path attribute
+        size_t pStart = tag.find(L"Path=\"");
+        if (pStart != std::wstring::npos) {
+            pStart += 6;
+            size_t pEnd = tag.find(L"\"", pStart);
+            if (pEnd != std::wstring::npos) {
+                std::wstring existingPath = tag.substr(pStart, pEnd - pStart);
+                // Case-insensitive comparison
+                std::wstring lowerExisting = existingPath;
+                std::wstring lowerInput = inputPath;
+                std::transform(lowerExisting.begin(), lowerExisting.end(), lowerExisting.begin(), ::towlower);
+                std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(), ::towlower);
+                
+                if (lowerExisting != lowerInput) {
+                    newXml += tag + L"\n";
+                }
+            }
+        } else {
+            newXml += tag + L"\n";
+        }
+    }
+
+    // Add new entry with RELATIVE folder path
+    newXml += L"  <Database Path=\"" + inputPath + L"\" Folder=\"" + relativeFolder + L"\" Name=\"" + dbName + L"\" ThumbSize=\"" + std::to_wstring(thumbSize) + L"\" Count=\"" + std::to_wstring(count) + L"\" Status=\"Ready\"/>\n";
+    newXml += L"</DatabaseRegistry>\n";
+    
+    std::wofstream wFile(regPath);
+    wFile << newXml;
+}
+
 int wmain_impl(int argc, wchar_t* argv[]) {
     Arguments args = ParseArguments(argc, argv);
     if (args.help) { PrintHelp(); PauseAndExit(); return 0; }
+
+    std::wcout << L"=== NvJpegCollector v2 (GPU RGBI, subfolder support) ===" << std::endl;
     if (args.inputPath.empty()) {
         std::wcout << L"=== NvJpegCollector ===" << std::endl;
         std::wcout << L"No input path. Opening folder selector..." << std::endl;
@@ -259,16 +321,25 @@ int wmain_impl(int argc, wchar_t* argv[]) {
         dbName = safeName;
     }
 
+    std::wstring exeDir = GetExeDir();
     std::wstring outPath = args.outputPath;
     if (outPath.empty()) {
-        // Default: same directory as exe + "\databases"
-        wchar_t exePath[MAX_PATH];
-        GetModuleFileNameW(NULL, exePath, MAX_PATH);
-        std::wstring exeDir = fs::path(exePath).parent_path().wstring();
         outPath = exeDir + L"\\databases";
     }
+    
     std::wstring dbFolder = outPath + L"\\" + dbName;
     fs::create_directories(dbFolder);
+
+    // Determine relative folder path for portability
+    std::wstring relativeFolder;
+    // Check if dbFolder is inside exeDir\databases
+    std::wstring defaultBase = exeDir + L"\\databases";
+    if (dbFolder.size() > defaultBase.size() && dbFolder.substr(0, defaultBase.size()) == defaultBase) {
+        relativeFolder = L"databases\\" + dbName;
+    } else {
+        // Fallback to absolute if user specified a custom path outside exe dir
+        relativeFolder = dbFolder;
+    }
 
     std::wcout << L"=== NvJpegCollector ===" << std::endl;
     std::wcout << L"Input: " << args.inputPath << std::endl;
@@ -454,27 +525,8 @@ int wmain_impl(int argc, wchar_t* argv[]) {
 
     std::wcout << L"[SAVE] Saved index.adi + 0000.adi (" << images.size() << L" images)" << std::endl;
 
-    // Update registry
-    wchar_t* appData = _wgetenv(L"APPDATA");
-    if (appData) {
-        std::wstring regPath = std::wstring(appData) + L"\\AntiDuplPlus\\ad_database.xml";
-        fs::create_directories(fs::path(regPath).parent_path());
-        std::wstring xmlContent;
-        { std::wifstream rFile(regPath); if (rFile.is_open()) xmlContent.assign((std::istreambuf_iterator<wchar_t>(rFile)), std::istreambuf_iterator<wchar_t>()); }
-        std::wstring newXml = L"<DatabaseRegistry>\n";
-        size_t pos = xmlContent.find(L"<Database ");
-        while (pos != std::wstring::npos) {
-            size_t endPos = xmlContent.find(L"/>", pos);
-            if (endPos != std::wstring::npos) {
-                std::wstring tag = xmlContent.substr(pos, endPos-pos+2);
-                if (tag.find(args.inputPath) == std::wstring::npos) newXml += tag + L"\n";
-                pos = xmlContent.find(L"<Database ", endPos);
-            } else break;
-        }
-        newXml += L"  <Database Name=\"" + dbName + L"\" Path=\"" + args.inputPath + L"\" Folder=\"" + dbFolder + L"\" Count=\"" + std::to_wstring(images.size()) + L"\" Status=\"Ready\"/>\n";
-        newXml += L"</DatabaseRegistry>\n";
-        std::wofstream wFile(regPath); wFile << newXml;
-    }
+    // Update registry (portable, relative path if possible)
+    UpdateRegistry(args.inputPath, relativeFolder, dbName, images.size(), args.thumbSize);
 
     auto totalTime = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
     std::wcout << L"[DONE] Processed: " << processed << L", Total: " << images.size() << L" in " << totalTime << L" sec." << std::endl;

@@ -180,8 +180,8 @@ namespace AntiDupl.NET.WinForms
             m_searchMenuItem.DropDownItems.Add(m_search_checkResultsAtLoadingMenuItem);
             m_searchMenuItem.DropDownItems.Add(m_search_checkMistakesAtLoadingMenuItem);
 
-            m_tools_gpuCollectorMenuItem = InitFactory.MenuItem.Create("GpuCollectorMenu", null, GpuCollectorAction);
-            m_tools_dbManagerMenuItem = InitFactory.MenuItem.Create("DbManagerMenu", null, DbManagerAction);
+            m_tools_gpuCollectorMenuItem = InitFactory.MenuItem.Create("GpuCollector", null, GpuCollectorAction);
+            m_tools_dbManagerMenuItem = InitFactory.MenuItem.Create("DbManager", null, DbManagerAction);
 
             m_toolsMenuItem = new ToolStripMenuItem();
             m_toolsMenuItem.DropDownItems.Add(m_tools_gpuCollectorMenuItem);
@@ -492,23 +492,37 @@ namespace AntiDupl.NET.WinForms
             string exePath = System.IO.Path.Combine(Application.StartupPath, "NvJpegCollector.exe");
             if (!System.IO.File.Exists(exePath))
             {
-                m_mainForm.ShowWarning("NvJpegCollector.exe not found in application directory.\nPlease build the NvJpegCollector project.");
+                MessageBox.Show(m_mainForm, "NvJpegCollector.exe not found in application directory.\nPlease build the NvJpegCollector project.",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            // Get default databases folder
+
+            // Get default database folder
             string dbRoot = System.IO.Path.Combine(Application.StartupPath, "databases");
-            // Get search paths for dialog hint
+
+            // Show folder browser dialog for input path selection
             string inputPath = "";
             if (m_coreOptions.searchPath != null && m_coreOptions.searchPath.Length > 0)
                 inputPath = m_coreOptions.searchPath[0].path;
-            
+
+            using (FolderBrowserDialog fbd = new FolderBrowserDialog())
+            {
+                fbd.Description = "Select folder with images to collect database";
+                if (!string.IsNullOrEmpty(inputPath) && System.IO.Directory.Exists(inputPath))
+                    fbd.SelectedPath = inputPath;
+                if (fbd.ShowDialog(m_mainForm) != DialogResult.OK)
+                    return;
+                inputPath = fbd.SelectedPath;
+            }
+
             string args = $"--input \"{inputPath}\" --output \"{dbRoot}\"";
             System.Diagnostics.Process.Start(exePath, args);
         }
 
         public void DbManagerAction(object sender, EventArgs e)
         {
-            m_mainForm.ShowWarning("Database Manager coming soon.");
+            var form = new Forms.DatabaseManagerForm();
+            form.ShowDialog(m_mainForm);
         }
 
         private void UpdateResults()

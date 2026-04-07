@@ -295,6 +295,10 @@ namespace AntiDupl.NET.WinForms
         public string MainMenu_Search_CheckResultsAtLoadingMenuItem_Text;
         public string MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text;
 
+        public string MainMenu_ToolsMenuItem_Text;
+        public string MainMenu_Tools_GpuCollectorMenuItem_Text;
+        public string MainMenu_Tools_DbManagerMenuItem_Text;
+
         public string MainMenu_HelpMenuItem_Text;
         public string MainMenu_Help_HelpMenuItem_Text;
         public string MainMenu_Help_AboutProgramMenuItem_Text;

@@ -82,6 +82,10 @@ namespace AntiDupl.NET.WinForms
         private ToolStripMenuItem m_help_aboutProgramMenuItem;
         private ToolStripMenuItem m_help_checkingForUpdatesMenuItem;
 
+        private ToolStripMenuItem m_toolsMenuItem;
+        private ToolStripMenuItem m_tools_gpuCollectorMenuItem;
+        private ToolStripMenuItem m_tools_dbManagerMenuItem;
+
         private NewVersionMenuItem m_newVersionMenuItem;
 
         public MainMenu(CoreLib core, Options options, CoreOptions coreOptions, MainForm mainForm, MainSplitContainer mainSplitContainer)
@@ -176,6 +180,13 @@ namespace AntiDupl.NET.WinForms
             m_searchMenuItem.DropDownItems.Add(m_search_checkResultsAtLoadingMenuItem);
             m_searchMenuItem.DropDownItems.Add(m_search_checkMistakesAtLoadingMenuItem);
 
+            m_tools_gpuCollectorMenuItem = InitFactory.MenuItem.Create("GpuCollectorMenu", null, GpuCollectorAction);
+            m_tools_dbManagerMenuItem = InitFactory.MenuItem.Create("DbManagerMenu", null, DbManagerAction);
+
+            m_toolsMenuItem = new ToolStripMenuItem();
+            m_toolsMenuItem.DropDownItems.Add(m_tools_gpuCollectorMenuItem);
+            m_toolsMenuItem.DropDownItems.Add(m_tools_dbManagerMenuItem);
+
             m_help_helpMenuItem = InitFactory.MenuItem.Create("HelpMenu", null, HelpAction);
             m_help_aboutProgramMenuItem = InitFactory.MenuItem.Create(null, null, AboutProgramAction);
             m_help_checkingForUpdatesMenuItem = InitFactory.MenuItem.Create(null, null, OnCheckingForUpdatesClick, m_options.checkingForUpdates);
@@ -192,6 +203,7 @@ namespace AntiDupl.NET.WinForms
             Items.Add(m_editMenuItem);
             Items.Add(m_viewMenuItem);
             Items.Add(m_searchMenuItem);
+            Items.Add(m_toolsMenuItem);
             Items.Add(m_helpMenuItem);
             Items.Add(m_newVersionMenuItem);
         }
@@ -235,7 +247,11 @@ namespace AntiDupl.NET.WinForms
             m_search_useImageDataBaseMenuItem.Text = s.MainMenu_Search_UseImageDataBaseMenuItem_Text;
             m_search_checkResultsAtLoadingMenuItem.Text = s.MainMenu_Search_CheckResultsAtLoadingMenuItem_Text;
             m_search_checkMistakesAtLoadingMenuItem.Text = s.MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text;
-            
+
+            m_toolsMenuItem.Text = s.MainMenu_ToolsMenuItem_Text;
+            m_tools_gpuCollectorMenuItem.Text = s.MainMenu_Tools_GpuCollectorMenuItem_Text;
+            m_tools_dbManagerMenuItem.Text = s.MainMenu_Tools_DbManagerMenuItem_Text;
+
             m_helpMenuItem.Text = s.MainMenu_HelpMenuItem_Text;
             m_help_helpMenuItem.Text = s.MainMenu_Help_HelpMenuItem_Text;
             m_help_aboutProgramMenuItem.Text = s.MainMenu_Help_AboutProgramMenuItem_Text;
@@ -469,6 +485,30 @@ namespace AntiDupl.NET.WinForms
             {
                 m_newVersionMenuItem = new NewVersionMenuItem(m_options);
             }
+        }
+
+        public void GpuCollectorAction(object sender, EventArgs e)
+        {
+            string exePath = System.IO.Path.Combine(Application.StartupPath, "NvJpegCollector.exe");
+            if (!System.IO.File.Exists(exePath))
+            {
+                m_mainForm.ShowWarning("NvJpegCollector.exe not found in application directory.\nPlease build the NvJpegCollector project.");
+                return;
+            }
+            // Get default databases folder
+            string dbRoot = System.IO.Path.Combine(Application.StartupPath, "databases");
+            // Get search paths for dialog hint
+            string inputPath = "";
+            if (m_coreOptions.searchPath != null && m_coreOptions.searchPath.Length > 0)
+                inputPath = m_coreOptions.searchPath[0].path;
+            
+            string args = $"--input \"{inputPath}\" --output \"{dbRoot}\"";
+            System.Diagnostics.Process.Start(exePath, args);
+        }
+
+        public void DbManagerAction(object sender, EventArgs e)
+        {
+            m_mainForm.ShowWarning("Database Manager coming soon.");
         }
 
         private void UpdateResults()

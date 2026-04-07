@@ -392,10 +392,24 @@ namespace ad
         m_pStatus->SetProgress(0, 0);
         m_pResult->Clear();
 
-        // 1. First, search for images on disk or load from DB
-        AD_DEBUG("Search: Calling SearchImages\n");
-        m_pSearcher->SearchImages();
-        AD_DEBUG("Search: SearchImages completed\n");
+        // 1. First, try to load from pre-collected database
+        AD_DEBUG("Search: Checking for pre-collected database\n");
+        bool dbLoaded = false;
+        for (size_t i = 0; i < m_pOptions->searchPaths.Size() && !dbLoaded; i++) {
+            const TPath& searchPath = m_pOptions->searchPaths[i];
+            if (true) { // All search paths are enabled by default
+                dbLoaded = m_pSearcher->LoadDatabase(searchPath.Original());
+                if (dbLoaded) {
+                    AD_DEBUG("Search: Database loaded successfully, skipping file scan\n");
+                }
+            }
+        }
+
+        if (!dbLoaded) {
+            AD_DEBUG("Search: No pre-collected database found, scanning files\n");
+            m_pSearcher->SearchImages();
+            AD_DEBUG("Search: SearchImages completed\n");
+        }
 
         // 2. Start collection threads
         AD_DEBUG("Search: Starting collection manager\n");

@@ -29,6 +29,8 @@
 #include "adImageDataStorage.h"
 #include "adEngine.h"
 #include "adPerformance.h"
+#include "adLogger.h"
+#include "adDatabaseRegistry.h"
 #include "adSearcher.h"
 
 namespace ad
@@ -171,5 +173,40 @@ namespace ad
             TStrings extensions = TImage::Extensions((TImage::TFormat)imageType);
             m_extensions.insert(m_extensions.end(), extensions.begin(), extensions.end());
         }
+    }
+
+    bool TSearcher::LoadDatabase(const std::wstring& path) {
+        // Get user path from options
+        std::wstring userPath = m_pOptions->userPath;
+
+        // Check registry for ready database
+        TDatabaseInfo dbInfo;
+        if (!TDatabaseRegistry::FindByPath(path, dbInfo, userPath)) {
+            return false;
+        }
+
+        if (dbInfo.Status != L"Ready") {
+            return false;
+        }
+
+        // Determine database folder path
+        std::wstring dbFolder = dbInfo.Folder;
+        if (dbFolder.empty()) {
+            dbFolder = path;
+        }
+
+        // Load images from database folder
+        adError result = m_pImageDataStorage->Load(dbFolder.c_str(), true);
+        if (result == AD_OK) {
+            const TImageDataStorage::TStorage& storage = m_pImageDataStorage->Storage();
+            for (TImageDataStorage::TStorage::const_iterator it = storage.begin(); it != storage.end(); ++it) {
+                if (it->second && it->second->data) {
+                    m_pImageDataPtrs->push_back(it->second);
+                }
+            }
+            return true;
+        }
+
+        return false;
     }
 }

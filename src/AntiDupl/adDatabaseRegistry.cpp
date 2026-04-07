@@ -60,9 +60,11 @@ namespace ad
             if (line.find(L"<Database ") == 0 || line.find(L"<Database\t") == 0) {
                 TDatabaseInfo db;
                 db.Path = GetXmlAttr(line, L"Path");
+                db.Folder = GetXmlAttr(line, L"Folder");
+                db.Name = GetXmlAttr(line, L"Name");
                 std::wstring sizeStr = GetXmlAttr(line, L"ThumbSize");
                 try { db.ThumbSize = std::stoi(sizeStr); } catch (...) { db.ThumbSize = 32; }
-                
+
                 std::wstring countStr = GetXmlAttr(line, L"Count");
                 try { db.ImageCount = std::stoull(countStr); } catch (...) { db.ImageCount = 0; }
 
@@ -83,8 +85,11 @@ namespace ad
 
         file << L"<DatabaseRegistry>\n";
         for (const auto& db : databases) {
-            file << L"  <Database Path=\"" << db.Path << L"\" ThumbSize=\"" << db.ThumbSize
-                 << L"\" Count=\"" << db.ImageCount << L"\" Status=\"" << db.Status << L"\"/>\n";
+            file << L"  <Database Path=\"" << db.Path << L"\"";
+            if (!db.Folder.empty()) file << L" Folder=\"" << db.Folder << L"\"";
+            if (!db.Name.empty()) file << L" Name=\"" << db.Name << L"\"";
+            file << L" ThumbSize=\"" << db.ThumbSize << L"\" Count=\"" << db.ImageCount
+                 << L"\" Status=\"" << db.Status << L"\"/>\n";
         }
         file << L"</DatabaseRegistry>\n";
         return true;
@@ -122,6 +127,26 @@ namespace ad
         if (it != databases.end()) {
             databases.erase(it, databases.end());
             return Save(databases, userPath);
+        }
+        return false;
+    }
+
+    bool TDatabaseRegistry::FindByPath(const std::wstring& path, TDatabaseInfo& out, const std::wstring& userPath) {
+        std::vector<TDatabaseInfo> databases;
+        Load(databases, userPath);
+        
+        // Normalize path for comparison (case-insensitive)
+        std::wstring searchPath = path;
+        std::transform(searchPath.begin(), searchPath.end(), searchPath.begin(), ::towlower);
+        
+        for (const auto& db : databases) {
+            std::wstring dbPath = db.Path;
+            std::transform(dbPath.begin(), dbPath.end(), dbPath.begin(), ::towlower);
+            
+            if (searchPath == dbPath) {
+                out = db;
+                return true;
+            }
         }
         return false;
     }

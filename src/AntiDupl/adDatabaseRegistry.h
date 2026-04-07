@@ -30,7 +30,9 @@
 namespace ad
 {
     struct TDatabaseInfo {
-        std::wstring Path;
+        std::wstring Path;      // Search path (e.g. "D:\Photos\Sandy")
+        std::wstring Folder;    // Database folder (e.g. "...user\images\32x32")
+        std::wstring Name;      // Database name
         int ThumbSize;
         size_t ImageCount;
         std::wstring Status; // Ready, Processing
@@ -42,6 +44,7 @@ namespace ad
         static bool Save(const std::vector<TDatabaseInfo>& databases, const std::wstring& userPath);
         static bool AddOrUpdate(const TDatabaseInfo& db, const std::wstring& userPath);
         static bool Remove(const std::wstring& path, const std::wstring& userPath);
+        static bool FindByPath(const std::wstring& path, TDatabaseInfo& out, const std::wstring& userPath);
     };
 }
 

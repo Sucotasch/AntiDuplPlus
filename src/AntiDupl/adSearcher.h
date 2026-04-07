@@ -40,10 +40,11 @@ namespace ad
     class TSearcher
     {
     public:
-        TSearcher(TEngine *pEngine, TImageDataPtrs *pImageDataPtrs); 
+        TSearcher(TEngine *pEngine, TImageDataPtrs *pImageDataPtrs);
         ~TSearcher() {};
 
         void SearchImages();
+        bool LoadDatabase(const std::wstring& path); // Load from pre-collected DB
 
     private:
         void SearchImages(const TString& directory, bool enableSubFolder);

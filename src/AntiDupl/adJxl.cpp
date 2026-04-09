@@ -63,6 +63,13 @@ namespace ad
 			uint8_t* data = (uint8_t*)::GlobalLock(hGlobal);
 			size_t data_size = ::GlobalSize(hGlobal);
 
+			// RAII guard — guarantees GlobalUnlock on any exit path
+			struct GlobalUnlockGuard {
+				HGLOBAL h;
+				GlobalUnlockGuard(HGLOBAL h_) : h(h_) {}
+				~GlobalUnlockGuard() { if (h) ::GlobalUnlock(h); }
+			} unlockGuard(hGlobal);
+
 			auto runner = JxlResizableParallelRunnerMake(nullptr);
 
 			auto decoder = JxlDecoderMake(nullptr);

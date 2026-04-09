@@ -201,26 +201,35 @@ namespace ad
         // Но для простоты и безопасности используем std::vector, nvjpegDecode сам скопирует в него
         // Нам нужно передать nvjpegImage. Для NVJPEG_OUTPUT_RGBI нужен один канал.
         
-        size_t pitch = width * 3; // RGB = 3 байта на пиксель
+        size_t pitch = width * 3; // BGR = 3 байта на пиксель
         size_t bufferSize = pitch * height;
-        
-        // Используем вектор. Память выделена в RAM.
-        // nvJPEG требует, чтобы память была выровнена или была Pinned для максимальной скорости,
-        // но с обычным malloc/host_malloc через cudaHostAlloc это может быть сложно управлять извне.
-        // Однако, мы передали свои аллокаторы в CreateEx. 
-        // Но для буфера вывода мы просто передаем указатель. nvJPEG умеет писать в обычную память,
-        // но это может быть медленнее.
-        // Для максимальной совместимости просто используем вектор.
-        
-        std::vector<unsigned char> h_output(bufferSize);
+
+        // Pinned (page-locked) memory для прямого DMA GPU → RAM
+        // thread_local — один буфер на поток, переиспользуется между вызовами
+        static thread_local unsigned char* s_pinned_buffer = nullptr;
+        static thread_local size_t s_pinned_buffer_size = 0;
+
+        if (bufferSize > s_pinned_buffer_size) {
+            if (s_pinned_buffer) {
+                cudaFreeHost(s_pinned_buffer);
+                s_pinned_buffer = nullptr;
+            }
+            cudaError_t err = cudaHostAlloc((void**)&s_pinned_buffer, bufferSize, cudaHostAllocDefault);
+            if (err != cudaSuccess) {
+                ::GlobalUnlock(hGlobal);
+                return NULL;
+            }
+            s_pinned_buffer_size = bufferSize;
+        }
 
         nvjpegImage_t nvjpegImage;
-        nvjpegImage.channel[0] = h_output.data();
+        nvjpegImage.channel[0] = s_pinned_buffer;
         nvjpegImage.pitch[0] = pitch;
 
         // Запускаем декодирование в наш отдельный Stream
+        // Используем BGRI — nvJPEG выдаст B,G,R напрямую, что соответствует TView::Bgra32
         status = s_lib->Decode(s_globalHandle, threadState.jpegState, data, size,
-                               NVJPEG_OUTPUT_RGBI, &nvjpegImage, threadState.stream);
+                               NVJPEG_OUTPUT_BGRI, &nvjpegImage, threadState.stream);
 
         if (status != NVJPEG_STATUS_SUCCESS) {
             ::GlobalUnlock(hGlobal);
@@ -230,23 +239,24 @@ namespace ad
         // !!! КРИТИЧНО: Ждем завершения операций в нашем Stream, прежде чем читать данные !!!
         cudaStreamSynchronize(threadState.stream);
 
-        // --- Конвертация RGB -> BGRA (формат TView) ---
+        // --- Конвертация BGR -> BGRA (добавляем альфа-канал) ---
+        // NVJPEG_OUTPUT_BGRI выдаёт B,G,R — порядок уже правильный для Bgra32
         TView * pView = new TView(width, height, TView::Bgra32, NULL, 4);
-        
-        const unsigned char* src = h_output.data();
+
+        const unsigned char* src = s_pinned_buffer;
         unsigned char* dst = pView->data;
         size_t dstStride = pView->stride;
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                // src: R G B R G B ...
-                // dst: B G R A B G R A ...
+                // src: B G R B G R ... (BGRI from nvJPEG)
+                // dst: B G R A B G R A ... (Bgra32)
                 int srcIdx = y * pitch + x * 3;
                 int dstIdx = y * dstStride + x * 4;
-                
-                dst[dstIdx + 0] = src[srcIdx + 2]; // B
-                dst[dstIdx + 1] = src[srcIdx + 1]; // G
-                dst[dstIdx + 2] = src[srcIdx + 0]; // R
+
+                dst[dstIdx + 0] = src[srcIdx + 0]; // B (уже на месте)
+                dst[dstIdx + 1] = src[srcIdx + 1]; // G (уже на месте)
+                dst[dstIdx + 2] = src[srcIdx + 2]; // R (уже на месте)
                 dst[dstIdx + 3] = 255;             // A
             }
         }

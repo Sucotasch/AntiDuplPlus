@@ -61,6 +61,7 @@ namespace ad
 
         void Push(TImageData *pImageData, size_t threadId);
         void Finish();
+        void Clear();
         TPop Pop(TImageData **ppImageData);
 
         size_t Id() const {return m_threadId;}

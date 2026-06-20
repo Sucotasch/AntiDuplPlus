@@ -79,7 +79,7 @@ namespace ad
     {
         if (m_available)
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             GpuRelease();
         }
     }
@@ -88,7 +88,7 @@ namespace ad
     {
         if (!m_available) return false;
         
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (required <= m_capacity && thumbSize == m_thumbSize && m_capacity > 0) return true;
 
         // Reallocate if size changed or capacity is too small

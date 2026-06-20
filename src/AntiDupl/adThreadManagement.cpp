@@ -68,6 +68,16 @@ namespace ad
         m_finish = true;
     }
 
+    void TThreadQueue::Clear()
+    {
+        TCriticalSection::TLocker locker(m_pCS);
+        while(!m_pQueue->empty()) {
+            TData data = m_pQueue->front();
+            m_pQueue->pop();
+            if(data.data) data.data->FreeGlobal();
+        }
+    }
+
     TThreadQueue::TPop TThreadQueue::Pop(TImageData **ppImageData)
     {
         TCriticalSection::TLocker locker(m_pCS);
@@ -202,6 +212,7 @@ namespace ad
         {
             i->task->Queue()->Finish();
             WaitForSingleObject(i->thread->Handle(), INFINITE);
+            i->task->Queue()->Clear();
             delete i->thread;
             delete i->task;
         }

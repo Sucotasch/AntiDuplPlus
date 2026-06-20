@@ -80,6 +80,9 @@ namespace ad
 
                 db.Status = GetXmlAttr(line, L"Status");
                 if (db.Status.empty()) db.Status = L"Ready";
+                
+                std::wstring enabledStr = GetXmlAttr(line, L"Enabled");
+                db.Enabled = (enabledStr.empty() || enabledStr == L"true"); // Default to true
 
                 if (!db.Path.empty()) {
                     databases.push_back(db);
@@ -98,6 +101,7 @@ namespace ad
             file << L"  <Database Path=\"" << db.Path << L"\"";
             if (!db.Folder.empty()) file << L" Folder=\"" << db.Folder << L"\"";
             if (!db.Name.empty()) file << L" Name=\"" << db.Name << L"\"";
+            file << L" Enabled=\"" << (db.Enabled ? L"true" : L"false") << L"\"";
             file << L" ThumbSize=\"" << db.ThumbSize << L"\" Count=\"" << db.ImageCount
                  << L"\" Status=\"" << db.Status << L"\"/>\n";
         }

@@ -1,4 +1,4 @@
-/*
+﻿/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -444,42 +444,8 @@ namespace ad
 		if(m_pOptions->compare.compareInsideOneSearchPath == FALSE && pFirst->index == pSecond->index)
             return false;
 
-		if (pFirst->data->average == 0)
-		{
-			uint64_t sum = 0;
-			SimdValueSum(pFirst->data->main,  m_pOptions->advanced.reducedImageSize, 
-					m_pOptions->advanced.reducedImageSize, m_pOptions->advanced.reducedImageSize, &sum);
-			pFirst->data->average = (float)sum / (m_pOptions->advanced.reducedImageSize * m_pOptions->advanced.reducedImageSize);
-			m_pImageDataStorage->SetSaveState(true);
-		}
-		if (pSecond->data->average == 0)
-		{
-			uint64_t sum = 0;
-			SimdValueSum(pSecond->data->main,  m_pOptions->advanced.reducedImageSize, 
-					m_pOptions->advanced.reducedImageSize, m_pOptions->advanced.reducedImageSize, &sum);
-			pSecond->data->average = (float)sum / (m_pOptions->advanced.reducedImageSize * m_pOptions->advanced.reducedImageSize);
-			m_pImageDataStorage->SetSaveState(true);
-		}
-
-		if (pFirst->data->varianceSquare == 0)
-		{
-			uint64_t sumSquare = 0;
-			SimdSquareSum(pFirst->data->main,  m_pOptions->advanced.reducedImageSize, 
-						m_pOptions->advanced.reducedImageSize, m_pOptions->advanced.reducedImageSize, &sumSquare);
-			float averageSquare = (float)sumSquare / (m_pOptions->advanced.reducedImageSize * m_pOptions->advanced.reducedImageSize);
-			pFirst->data->varianceSquare = fabs(averageSquare - (pFirst->data->average * pFirst->data->average));
-			m_pImageDataStorage->SetSaveState(true);
-		}
-
-		if (pSecond->data->varianceSquare == 0)
-		{
-			uint64_t sumSquare = 0;
-			SimdSquareSum(pSecond->data->main,  m_pOptions->advanced.reducedImageSize, 
-						m_pOptions->advanced.reducedImageSize, m_pOptions->advanced.reducedImageSize, &sumSquare);
-			float averageSquareSecond = (float)sumSquare / (m_pOptions->advanced.reducedImageSize * m_pOptions->advanced.reducedImageSize);
-			pSecond->data->varianceSquare = fabs(averageSquareSecond - (pSecond->data->average * pSecond->data->average));
-			m_pImageDataStorage->SetSaveState(true);
-		}
+		// average/varianceSquare garanteed pre-calculated in FillPixelData or NvJpegCollector.
+		// Method is read-only — thread-safe without additional synchronization.
 
         uint64_t correlationSum = 0;
         SimdCorrelationSum(

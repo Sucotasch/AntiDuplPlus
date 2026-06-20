@@ -2,14 +2,14 @@
 
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
 	<AssemblyVersion>2.3.11.1</AssemblyVersion>
     <FileVersion>2.3.11.1</FileVersion>
     <Platforms>x64</Platforms>
     <Configurations>Debug;Release;Publish</Configurations>
     <Authors>ErmIg;Gigas002</Authors>
-    <Description>Bindings to native AntuDpl packages</Description>
-    <Copyright>ErmIg © 2002-2023</Copyright>
+    <Description>Bindings to native AntiDupl packages</Description>
+    <Copyright>ErmIg © 2002-2026</Copyright>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>

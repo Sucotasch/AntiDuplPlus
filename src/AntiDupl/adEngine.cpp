@@ -271,7 +271,7 @@ namespace ad
         }
     }
 
-    // NEW: GPU AllVsAll comparison с streaming processing
+    // GPU AllVsAll comparison с streaming processing
     // Возвращает true при успешном выполнении, false при ошибке
     bool TEngine::ExecuteGpuAllVsAllComparison()
     {
@@ -295,13 +295,21 @@ namespace ad
         AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: Preparing data for %zu images\n", count);
 
         // Собираем ТОЛЬКО валидные thumbnails в компактный массив
-        // Это предотвращает сравнение изображений без данных
         std::vector<uint8_t> allThumbnails;
         std::vector<uint64_t> allCrcArray;
         std::vector<TImageDataPtr> imageByIndex;
         allThumbnails.reserve(count * thumbSize);
         allCrcArray.reserve(count);
         imageByIndex.reserve(count);
+        
+        // SSIM-specific arrays
+        bool useSsim = (m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM);
+        std::vector<float> averageArray;
+        std::vector<float> varianceArray;
+        if (useSsim) {
+            averageArray.reserve(count);
+            varianceArray.reserve(count);
+        }
         
         size_t validCount = 0;
 
@@ -314,6 +322,12 @@ namespace ad
                 
                 // Копируем CRC
                 allCrcArray.push_back(pImageData->crc32c);
+                
+                // SSIM: копируем pre-computed statistics
+                if (useSsim) {
+                    averageArray.push_back(pImageData->data->average);
+                    varianceArray.push_back(pImageData->data->varianceSquare);
+                }
                 
                 // Сохраняем указатель
                 imageByIndex.push_back(pImageData);
@@ -329,40 +343,58 @@ namespace ad
             return false;
         }
 
-        // Вычисляем threshold и maxDifference как в оригинальном TImageComparer
-        int thresholdPerPixel = Simd::Square(m_pOptions->compare.thresholdDifference * PIXEL_MAX_DIFFERENCE) /
-            Simd::Square(DENOMINATOR);
-        int mainThreshold = (int)(thumbSize * thresholdPerPixel);
-        double threshold = (double)mainThreshold;
-        double maxDifference = (double)(Simd::Square(PIXEL_MAX_DIFFERENCE) * thumbSize);
-
-        AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: threshold=%f, maxDifference=%f\n", threshold, maxDifference);
-
         // Streaming processing context
         MatchProcessContext ctx;
         ctx.engine = this;
         ctx.imageByIndex = &imageByIndex;
         ctx.thumbSize = thumbSize;
-        ctx.maxDifference = maxDifference;
         ctx.totalProcessed = 0;
         ctx.bufferFullCount = 0;
 
-        // Batch size для streaming readback: 5M matches = 60MB RAM
         const size_t BATCH_MATCHES = 5000000;
+        bool success = false;
 
-        AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: Calling GPU with %zu valid images (batch size: %zu)\n", validCount, BATCH_MATCHES);
+        if (useSsim) {
+            // SSIM mode
+            double ssimThreshold = (double)m_pOptions->compare.thresholdDifference;
+            AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: SSIM mode, threshold=%f\n", ssimThreshold);
 
-        bool success = m_pGpuManager->CompareAllVsAll(
-            allThumbnails.data(),
-            allCrcArray.data(),
-            validCount,  // Используем validCount вместо count
-            thumbSize,
-            threshold,
-            maxDifference,
-            ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32,
-            &ctx,
-            MatchCallback,
-            BATCH_MATCHES);
+            success = m_pGpuManager->CompareAllVsAllSsim(
+                allThumbnails.data(),
+                averageArray.data(),
+                varianceArray.data(),
+                allCrcArray.data(),
+                validCount,
+                thumbSize,
+                ssimThreshold,
+                ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32,
+                &ctx,
+                MatchCallback,
+                BATCH_MATCHES);
+        }
+        else {
+            // Mean Square mode
+            int thresholdPerPixel = Simd::Square(m_pOptions->compare.thresholdDifference * PIXEL_MAX_DIFFERENCE) /
+                Simd::Square(DENOMINATOR);
+            int mainThreshold = (int)(thumbSize * thresholdPerPixel);
+            double threshold = (double)mainThreshold;
+            double maxDifference = (double)(Simd::Square(PIXEL_MAX_DIFFERENCE) * thumbSize);
+            ctx.maxDifference = maxDifference;
+
+            AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: MS mode, threshold=%f, maxDifference=%f\n", threshold, maxDifference);
+
+            success = m_pGpuManager->CompareAllVsAll(
+                allThumbnails.data(),
+                allCrcArray.data(),
+                validCount,
+                thumbSize,
+                threshold,
+                maxDifference,
+                ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32,
+                &ctx,
+                MatchCallback,
+                BATCH_MATCHES);
+        }
 
         if (success) {
             AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: Processed %zu total matches\n", ctx.totalProcessed);
@@ -378,6 +410,12 @@ namespace ad
         allCrcArray.shrink_to_fit();
         imageByIndex.clear();
         imageByIndex.shrink_to_fit();
+        if (useSsim) {
+            averageArray.clear();
+            averageArray.shrink_to_fit();
+            varianceArray.clear();
+            varianceArray.shrink_to_fit();
+        }
 
         AD_DEBUG("ExecuteGpuAllVsAllComparison: Finished\n");
         return success;
@@ -392,16 +430,18 @@ namespace ad
         m_pStatus->SetProgress(0, 0);
         m_pResult->Clear();
 
-        // 1. First, try to load from pre-collected database
-        AD_DEBUG("Search: Checking for pre-collected database\n");
+        // Гарантируем чистое состояние — предотвращаем фантомные результаты от предыдущих сессий
+        m_pImageDataStorage->ClearMemory();
+        m_pImageDataPtrs->clear();
+
+        // 1. Try to load all pre-collected databases (not just the first one)
+        AD_DEBUG("Search: Checking for pre-collected databases\n");
         bool dbLoaded = false;
-        for (size_t i = 0; i < m_pOptions->searchPaths.Size() && !dbLoaded; i++) {
+        for (size_t i = 0; i < m_pOptions->searchPaths.Size(); i++) {
             const TPath& searchPath = m_pOptions->searchPaths[i];
-            if (true) { // All search paths are enabled by default
-                dbLoaded = m_pSearcher->LoadDatabase(searchPath.Original());
-                if (dbLoaded) {
-                    AD_DEBUG("Search: Database loaded successfully, skipping file scan\n");
-                }
+            if (m_pSearcher->LoadDatabase(searchPath.Original())) {
+                dbLoaded = true;
+                AD_DEBUG("Search: Database loaded successfully\n");
             }
         }
 
@@ -418,7 +458,8 @@ namespace ad
 
         // 3. GPU AllVsAll comparison (если включено и доступно)
         bool useGpu = (m_pGpuManager && m_pGpuManager->IsAvailable() &&
-                       m_pOptions->compare.algorithmComparing == AD_COMPARING_SQUARED_SUM &&
+                       (m_pOptions->compare.algorithmComparing == AD_COMPARING_SQUARED_SUM ||
+                        m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM) &&
                        m_pOptions->advanced.ignoreFrameWidth == 0);
 
         if (useGpu)

@@ -138,6 +138,7 @@ struct ImageInfo {
     std::wstring path; uint64_t size, time; uint32_t hash; uint8_t type;
     uint32_t width, height; float blockiness, blurring; uint64_t crc32c;
     std::vector<uint8_t> thumbnail;
+    float average = 0.0f; float varianceSquare = 0.0f;
 };
 
 static uint64_t GetFileTime(const fs::path& p) {
@@ -245,56 +246,44 @@ static std::wstring GetExeDir() {
     return (pos != std::wstring::npos) ? path.substr(0, pos) : L".";
 }
 
-static void UpdateRegistry(const std::wstring& inputPath, const std::wstring& relativeFolder, const std::wstring& dbName, size_t count, int thumbSize) {
-    std::wstring exeDir = GetExeDir();
-    std::wstring regPath = exeDir + L"\\ad_database.xml";
-    
-    fs::create_directories(fs::path(regPath).parent_path());
-    
-    // ... (read existing xml logic similar to before) ...
-    // For simplicity in this patch, I'll rewrite the logic to be self-contained
-    std::wstring xmlContent;
-    { std::wifstream rFile(regPath); if (rFile.is_open()) xmlContent.assign((std::istreambuf_iterator<wchar_t>(rFile)), std::istreambuf_iterator<wchar_t>()); }
-    
-    // Remove old entry for this path
-    std::wstring newXml = L"<DatabaseRegistry>\n";
-    size_t pos = 0;
-    std::wstring searchTag = L"<Database ";
-    while ((pos = xmlContent.find(searchTag, pos)) != std::wstring::npos) {
-        size_t endPos = xmlContent.find(L"/>", pos);
-        if (endPos == std::wstring::npos) break;
-        
-        std::wstring tag = xmlContent.substr(pos, endPos - pos + 2);
-        pos = endPos + 2;
-        
-        // Extract Path attribute
-        size_t pStart = tag.find(L"Path=\"");
-        if (pStart != std::wstring::npos) {
-            pStart += 6;
-            size_t pEnd = tag.find(L"\"", pStart);
-            if (pEnd != std::wstring::npos) {
-                std::wstring existingPath = tag.substr(pStart, pEnd - pStart);
-                // Case-insensitive comparison
-                std::wstring lowerExisting = existingPath;
-                std::wstring lowerInput = inputPath;
-                std::transform(lowerExisting.begin(), lowerExisting.end(), lowerExisting.begin(), ::towlower);
-                std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(), ::towlower);
-                
-                if (lowerExisting != lowerInput) {
-                    newXml += tag + L"\n";
-                }
-            }
-        } else {
-            newXml += tag + L"\n";
+// Helper: process decoded image
+static void ProcessDecoded(const std::vector<uint8_t>& rgb, int w, int h, size_t origIdx,
+    const std::vector<fs::path>& imageFiles, int thumbSize, uint64_t fileTime,
+    std::vector<ImageInfo>& images, int& processed, size_t totalJpeg,
+    std::chrono::high_resolution_clock::time_point decodeStartTime)
+{
+    std::vector<uint8_t> gray(thumbSize * thumbSize);
+    std::vector<uint8_t> thumbRGB(thumbSize * thumbSize * 3);
+    ResizeBilinear(rgb.data(), w, h, thumbRGB.data(), thumbSize, thumbSize);
+    RgbToGray(thumbRGB.data(), gray.data(), thumbSize, thumbSize);
+
+    ImageInfo info;
+    info.path = imageFiles[origIdx].wstring();
+    info.size = (uint64_t)fs::file_size(imageFiles[origIdx]);
+    info.time = fileTime; info.hash = 0; info.type = 1;
+    info.width = w; info.height = h;
+    info.blockiness = 0; info.blurring = 0;
+    info.thumbnail = gray;
+    info.crc32c = CalculateCRC32c(gray.data(), gray.size());
+
+    // Рассчитываем SSIM-статистику здесь, чтобы устранить гонку потоков при сравнении
+    {
+        uint64_t sum = 0, sumSq = 0;
+        for (int i = 0; i < thumbSize * thumbSize; i++) {
+            sum += gray[i];
+            sumSq += (uint64_t)gray[i] * gray[i];
         }
+        info.average = (float)sum / (thumbSize * thumbSize);
+        float avgSq = (float)sumSq / (thumbSize * thumbSize);
+        info.varianceSquare = fabs(avgSq - (info.average * info.average));
     }
 
-    // Add new entry with RELATIVE folder path
-    newXml += L"  <Database Path=\"" + inputPath + L"\" Folder=\"" + relativeFolder + L"\" Name=\"" + dbName + L"\" ThumbSize=\"" + std::to_wstring(thumbSize) + L"\" Count=\"" + std::to_wstring(count) + L"\" Status=\"Ready\"/>\n";
-    newXml += L"</DatabaseRegistry>\n";
-    
-    std::wofstream wFile(regPath);
-    wFile << newXml;
+    images.push_back(info); processed++;
+
+    int pct = (int)((processed) * 100 / totalJpeg);
+    auto elapsed = std::chrono::high_resolution_clock::now() - decodeStartTime;
+    double speed = processed / (std::chrono::duration<double>(elapsed).count() + 0.001);
+    std::wcout << L"\r[GPU]  " << processed << L"/" << totalJpeg << L" (" << pct << L"%) | " << (int)speed << L" img/sec" << std::flush;
 }
 
 int wmain_impl(int argc, wchar_t* argv[]) {
@@ -370,14 +359,10 @@ int wmain_impl(int argc, wchar_t* argv[]) {
     auto startTime = std::chrono::high_resolution_clock::now();
     int processed = 0;
 
-    // ========== JPEG via nvJPEG (GPU) ==========
+    // ========== JPEG via nvJPEG (GPU, per-file) ==========
     if (!jpegIndices.empty()) {
         std::wcout << L"[GPU]  Decoding " << jpegIndices.size() << L" JPEG files..." << std::endl;
-
-        // Single state (recreated only on error)
-        std::vector<const unsigned char*> batchPtrs(1);
-        std::vector<size_t> batchLens(1);
-        std::vector<nvjpegImage_t> outputs(1);
+        auto decodeStartTime = std::chrono::high_resolution_clock::now();
 
         for (size_t i = 0; i < jpegIndices.size(); i++) {
             const auto& fp = imageFiles[jpegIndices[i]];
@@ -386,63 +371,37 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                 if (!file.is_open()) continue;
                 std::streamsize fileSize = file.tellg();
                 file.seekg(0, std::ios::beg);
-                std::vector<char> rawData(fileSize);
+                std::vector<char> rawData((size_t)fileSize);
                 file.read(rawData.data(), fileSize);
 
                 int nComp=0, widths[NVJPEG_MAX_COMPONENT], heights[NVJPEG_MAX_COMPONENT];
                 nvjpegChromaSubsampling_t subsamp;
-                if (nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)rawData.data(), fileSize, &nComp, &subsamp, widths, heights) != NVJPEG_STATUS_SUCCESS || nComp==0) continue;
+                if (nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)rawData.data(), (size_t)fileSize, &nComp, &subsamp, widths, heights) != NVJPEG_STATUS_SUCCESS || nComp==0) continue;
                 int srcW = widths[0], srcH = heights[0];
 
-                // Allocate EXACT pitch for THIS image
                 size_t imgPitch = ((srcW * 3 + 31) / 32) * 32;
                 unsigned char* gpuBuf = nullptr;
                 cudaError_t allocErr = cudaMalloc(&gpuBuf, imgPitch * srcH);
                 if (allocErr != cudaSuccess) continue;
 
-                batchPtrs[0] = (const unsigned char*)rawData.data();
-                batchLens[0] = fileSize;
-                outputs[0].channel[0] = gpuBuf;
-                outputs[0].pitch[0] = (int)imgPitch;
+                nvjpegImage_t out;
+                out.channel[0] = gpuBuf;
+                out.pitch[0] = (int)imgPitch;
+
+                const unsigned char* pData = (const unsigned char*)rawData.data();
+                size_t pDataSize = rawData.size();
 
                 nvjpegStatus_t initS = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, 1, NVJPEG_OUTPUT_RGBI);
-                if (initS != NVJPEG_STATUS_SUCCESS) {
-                    nvjpegJpegStateDestroy(g_nvjpegState);
-                    nvjpegJpegStateCreate(g_nvjpegHandle, &g_nvjpegState);
-                    initS = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, 1, NVJPEG_OUTPUT_RGBI);
-                    if (initS != NVJPEG_STATUS_SUCCESS) { cudaFree(gpuBuf); continue; }
-                }
-
-                nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, g_nvjpegState, batchPtrs.data(), batchLens.data(), outputs.data(), nullptr);
+                if (initS != NVJPEG_STATUS_SUCCESS) { cudaFree(gpuBuf); continue; }
+                nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, g_nvjpegState, &pData, &pDataSize, &out, nullptr);
                 cudaError_t cudaErr = cudaDeviceSynchronize();
-                if (decS != NVJPEG_STATUS_SUCCESS || cudaErr != cudaSuccess) {
-                    nvjpegJpegStateDestroy(g_nvjpegState);
-                    nvjpegJpegStateCreate(g_nvjpegHandle, &g_nvjpegState);
-                    cudaFree(gpuBuf);
-                    continue;
-                }
+                if (decS != NVJPEG_STATUS_SUCCESS || cudaErr != cudaSuccess) { cudaFree(gpuBuf); continue; }
 
-                // Copy with matching pitch
                 std::vector<uint8_t> rgb(srcW * srcH * 3);
                 cudaMemcpy2D(rgb.data(), srcW * 3, gpuBuf, (int)imgPitch, srcW * 3, srcH, cudaMemcpyDeviceToHost);
                 cudaFree(gpuBuf);
 
-                std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
-                std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
-                ResizeBilinear(rgb.data(), srcW, srcH, thumbRGB.data(), args.thumbSize, args.thumbSize);
-                RgbToGray(thumbRGB.data(), gray.data(), args.thumbSize, args.thumbSize);
-
-                ImageInfo info;
-                info.path = fp.wstring(); info.size = (uint64_t)fileSize; info.time = GetFileTime(fp);
-                info.hash = 0; info.type = 1; info.width = srcW; info.height = srcH;
-                info.blockiness = 0; info.blurring = 0;
-                info.thumbnail = gray; info.crc32c = CalculateCRC32c(gray.data(), gray.size());
-                images.push_back(info); processed++;
-
-                int pct = (int)((i+1)*100/jpegIndices.size());
-                auto elapsed = std::chrono::high_resolution_clock::now() - startTime;
-                double speed = processed / (std::chrono::duration<double>(elapsed).count() + 0.001);
-                std::wcout << L"\r[GPU]  " << processed << L"/" << jpegIndices.size() << L" (" << pct << L"%) | " << (int)speed << L" img/sec" << std::flush;
+                ProcessDecoded(rgb, srcW, srcH, jpegIndices[i], imageFiles, args.thumbSize, GetFileTime(fp), images, processed, jpegIndices.size(), decodeStartTime);
             } catch (...) { continue; }
         }
         std::wcout << std::endl;
@@ -518,15 +477,86 @@ int wmain_impl(int argc, wchar_t* argv[]) {
         uint8_t filled = 1; fwrite(&filled, 1, 1, dataFile); // filled
         uint64_t tSize = img.thumbnail.size(); fwrite(&tSize, 8, 1, dataFile); // thumb_size
         fwrite(img.thumbnail.data(), 1, tSize, dataFile);  // thumb_data
-        float avg = 0, var = 0; fwrite(&avg, 4, 1, dataFile); // average
-        fwrite(&var, 4, 1, dataFile); // varianceSquare
+        fwrite(&img.average, 4, 1, dataFile);         // average (computed)
+        fwrite(&img.varianceSquare, 4, 1, dataFile);  // varianceSquare (computed)
     }
     fclose(dataFile);
 
     std::wcout << L"[SAVE] Saved index.adi + 0000.adi (" << images.size() << L" images)" << std::endl;
 
-    // Update registry (portable, relative path if possible)
-    UpdateRegistry(args.inputPath, relativeFolder, dbName, images.size(), args.thumbSize);
+    // Update registry (UTF-8 compatible, portable, relative path if possible)
+    {
+        std::wstring exeDir = GetExeDir();
+        std::wstring regPathW = exeDir + L"\\ad_database.xml";
+        std::string regPathA(regPathW.begin(), regPathW.end()); // Path is ASCII
+
+        // 1. Read existing XML as raw bytes (UTF-8)
+        std::wstring xmlContent;
+        {
+            std::ifstream rFile(regPathA, std::ios::binary);
+            if (rFile.is_open()) {
+                std::string content((std::istreambuf_iterator<char>(rFile)), std::istreambuf_iterator<char>());
+                if (!content.empty()) {
+                    int len = MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), NULL, 0);
+                    if (len > 0) {
+                        xmlContent.resize(len);
+                        MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), &xmlContent[0], len);
+                    }
+                }
+            }
+        }
+
+        // 2. Parse and rebuild XML (preserving other entries)
+        std::wstring newXml = L"<DatabaseRegistry>\n";
+        size_t pos = 0;
+        std::wstring searchTag = L"<Database ";
+        while ((pos = xmlContent.find(searchTag, pos)) != std::wstring::npos) {
+            size_t endPos = xmlContent.find(L"/>", pos);
+            if (endPos == std::wstring::npos) break;
+
+            std::wstring tag = xmlContent.substr(pos, endPos - pos + 2);
+            pos = endPos + 2;
+
+            // Extract Path attribute
+            size_t pStart = tag.find(L"Path=\"");
+            if (pStart != std::wstring::npos) {
+                pStart += 6;
+                size_t pEnd = tag.find(L"\"", pStart);
+                if (pEnd != std::wstring::npos) {
+                    std::wstring existingPath = tag.substr(pStart, pEnd - pStart);
+                    // Case-insensitive comparison
+                    std::wstring lowerExisting = existingPath;
+                    std::wstring lowerInput = args.inputPath;
+                    std::transform(lowerExisting.begin(), lowerExisting.end(), lowerExisting.begin(), ::towlower);
+                    std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(), ::towlower);
+
+                    if (lowerExisting != lowerInput) {
+                        newXml += tag + L"\n";
+                    }
+                }
+            } else {
+                newXml += tag + L"\n";
+            }
+        }
+
+        // 3. Add new entry
+        newXml += L"  <Database Path=\"" + args.inputPath + L"\" Folder=\"" + relativeFolder + L"\" Name=\"" + dbName + L"\" ThumbSize=\"" + std::to_wstring(args.thumbSize) + L"\" Count=\"" + std::to_wstring(images.size()) + L"\" Status=\"Ready\"/>\n";
+        newXml += L"</DatabaseRegistry>\n";
+
+        // 4. Write as UTF-8
+        std::string utf8Content;
+        {
+            int len = WideCharToMultiByte(CP_UTF8, 0, newXml.c_str(), (int)newXml.size(), NULL, 0, NULL, NULL);
+            if (len > 0) {
+                utf8Content.resize(len);
+                WideCharToMultiByte(CP_UTF8, 0, newXml.c_str(), (int)newXml.size(), &utf8Content[0], len, NULL, NULL);
+            }
+        }
+        std::ofstream wFile(regPathA, std::ios::binary);
+        if (wFile.is_open()) {
+            wFile.write(utf8Content.c_str(), utf8Content.size());
+        }
+    }
 
     auto totalTime = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();
     std::wcout << L"[DONE] Processed: " << processed << L", Total: " << images.size() << L" in " << totalTime << L" sec." << std::endl;

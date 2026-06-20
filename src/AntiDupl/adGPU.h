@@ -78,6 +78,20 @@ namespace ad
         void* callbackContext,             // Контекст для callback
         GpuMatchCallback callback,         // Callback для streaming обработки
         size_t maxMatchesPerBatch);        // Максимум matches за один вызов
+
+    // SSIM AllVsAll comparison с streaming callback
+    bool GpuCompareAllVsAllSsim(
+        const uint8_t* allThumbnails,
+        const float* allAverages,
+        const float* allVariances,
+        const uint64_t* allCrcArray,
+        size_t count,
+        size_t thumbSize,
+        double ssimThreshold,
+        double addDiffForCrcMismatch,
+        void* callbackContext,
+        GpuMatchCallback callback,
+        size_t maxMatchesPerBatch);
 }
 
 #endif//__adGPU_h__

@@ -157,10 +157,10 @@ namespace ad
 
     adError TResultStorage::ApplyTo(adLocalActionType localActionType, adTargetType targetType)
     {
-        if(localActionType < 0 && localActionType >= AD_LOCAL_ACTION_SIZE)
+        if(localActionType < 0 || localActionType >= AD_LOCAL_ACTION_SIZE)
             return AD_ERROR_INVALID_LOCAL_ACTION_TYPE;
 
-        if(targetType < 0 && targetType >= AD_TARGET_SIZE)
+        if(targetType < 0 || targetType >= AD_TARGET_SIZE)
             return AD_ERROR_INVALID_TARGET_TYPE;
 
 		// Запрешена замена выделнных
@@ -173,7 +173,7 @@ namespace ad
 
     adError TResultStorage::RenameCurrent(adRenameCurrentType renameCurrentType, const TString& newFileName)
     {
-        if(renameCurrentType < 0 && renameCurrentType >= AD_RENAME_CURRENT_SIZE)
+        if(renameCurrentType < 0 || renameCurrentType >= AD_RENAME_CURRENT_SIZE)
             return AD_ERROR_INVALID_RENAME_CURRENT_TYPE;
 
         TUndoRedoStage *pCurrent = m_pUndoRedoEngine->Current();

@@ -234,7 +234,7 @@ namespace ad
             pInfo->totalGlobalMem = prop.totalGlobalMem;
             pInfo->computeMajor = prop.major;
             pInfo->computeMinor = prop.minor;
-            pInfo->isCompatible = (prop.major >= 8);
+            pInfo->isCompatible = (prop.major >= 7);
         }
         
         AD_DEBUG("GpuInit: successful\n");
@@ -317,40 +317,42 @@ namespace ad
 
     bool GpuUploadThumbnail(size_t index, const uint8_t* pData)
     {
-        fprintf(stderr, "GpuUploadThumbnail: index=%zu, g_pDeviceThumbnailBuffer=%p, g_bufferCapacity=%zu\n",
-                index, (void*)g_pDeviceThumbnailBuffer, g_bufferCapacity);
-        fflush(stderr);
-
         if (!g_pDeviceThumbnailBuffer) {
+#ifdef AD_DEBUG
             fprintf(stderr, "GpuUploadThumbnail: FAILED - buffer not allocated\n");
             fflush(stderr);
+#endif
             return false;
         }
 
         if (index >= g_bufferCapacity) {
+#ifdef AD_DEBUG
             fprintf(stderr, "GpuUploadThumbnail: FAILED - index %zu exceeds capacity %zu\n",
                     index, g_bufferCapacity);
             fflush(stderr);
+#endif
             return false;
         }
 
         if (pData == nullptr) {
+#ifdef AD_DEBUG
             fprintf(stderr, "GpuUploadThumbnail: FAILED - null data pointer\n");
             fflush(stderr);
+#endif
             return false;
         }
 
         cudaError_t err = cudaMemcpy(g_pDeviceThumbnailBuffer + (size_t)index * g_thumbSize,
                                      pData, g_thumbSize, cudaMemcpyHostToDevice);
         if (err != cudaSuccess) {
+#ifdef AD_DEBUG
             fprintf(stderr, "GpuUploadThumbnail: FAILED - cudaMemcpy error: %s\n",
                     cudaGetErrorString(err));
             fflush(stderr);
+#endif
             return false;
         }
 
-        fprintf(stderr, "GpuUploadThumbnail: Success\n");
-        fflush(stderr);
         return true;
     }
 
@@ -397,82 +399,41 @@ namespace ad
     bool GpuCompareOneVsList(const uint8_t* pQuery, const size_t* pIndices, size_t count, double threshold, 
                              size_t* pMatchIndices, double* pMatchDifferences, size_t* pMatchCount, size_t maxMatches)
     {
-        fprintf(stderr, "GpuCompareOneVsList: Starting, count=%zu, threshold=%f\n", count, threshold);
-        fflush(stderr);
-        
         if (!g_pDeviceThumbnailBuffer || count > g_bufferCapacity || count == 0 || 
             pQuery == nullptr || pIndices == nullptr || pMatchIndices == nullptr || 
             pMatchDifferences == nullptr || pMatchCount == nullptr || maxMatches == 0) {
-            fprintf(stderr, "GpuCompareOneVsList: Parameter validation FAILED\n");
-            fflush(stderr);
             return false;
         }
 
-        fprintf(stderr, "GpuCompareOneVsList: Copying query to device\n");
-        fflush(stderr);
-        if (cudaMemcpy(g_pQueryBuffer, pQuery, g_thumbSize, cudaMemcpyHostToDevice) != cudaSuccess) {
-            fprintf(stderr, "GpuCompareOneVsList: Query copy FAILED\n");
-            fflush(stderr);
+        if (cudaMemcpy(g_pQueryBuffer, pQuery, g_thumbSize, cudaMemcpyHostToDevice) != cudaSuccess)
             return false;
-        }
         
-        fprintf(stderr, "GpuCompareOneVsList: Copying indices to device\n");
-        fflush(stderr);
-        if (cudaMemcpy(g_pIndexBuffer, pIndices, count * sizeof(size_t), cudaMemcpyHostToDevice) != cudaSuccess) {
-            fprintf(stderr, "GpuCompareOneVsList: Indices copy FAILED\n");
-            fflush(stderr);
+        if (cudaMemcpy(g_pIndexBuffer, pIndices, count * sizeof(size_t), cudaMemcpyHostToDevice) != cudaSuccess)
             return false;
-        }
         
-        // Check for integer overflow before kernel launch
         if (count > INT_MAX) {
-            fprintf(stderr, "GpuCompareOneVsList: Count exceeds INT_MAX\n");
-            fflush(stderr);
 #ifdef AD_LOGGER_ENABLE
             AD_LOG("GPU: Count exceeds INT_MAX, cannot launch kernel");
 #endif
             return false;
         }
         
-        fprintf(stderr, "GpuCompareOneVsList: Launching kernel with count=%zu\n", count);
-        fflush(stderr);
-        
         int threadsPerBlock = 256; 
         OneVsListKernel<<< (int)count, threadsPerBlock, threadsPerBlock * sizeof(double) >>>(
             g_pQueryBuffer, g_pDeviceThumbnailBuffer, g_pIndexBuffer, g_thumbSize, count, g_pResultBuffer, g_bufferCapacity);
 
-        fprintf(stderr, "GpuCompareOneVsList: Kernel launched, checking for errors\n");
-        fflush(stderr);
-        
         cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GpuCompareOneVsList: Kernel launch error: %s\n", cudaGetErrorString(err));
-            fflush(stderr);
+        if (err != cudaSuccess)
             return false;
-        }
         
-        fprintf(stderr, "GpuCompareOneVsList: Synchronizing device\n");
-        fflush(stderr);
         err = cudaDeviceSynchronize();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GpuCompareOneVsList: Device sync error: %s\n", cudaGetErrorString(err));
-            fflush(stderr);
+        if (err != cudaSuccess)
             return false;
-        }
 
-        fprintf(stderr, "GpuCompareOneVsList: Copying results from device\n");
-        fflush(stderr);
-        
         std::vector<double> results(count);
-        if (cudaMemcpy(results.data(), g_pResultBuffer, count * sizeof(double), cudaMemcpyDeviceToHost) != cudaSuccess) {
-            fprintf(stderr, "GpuCompareOneVsList: Results copy FAILED\n");
-            fflush(stderr);
+        if (cudaMemcpy(results.data(), g_pResultBuffer, count * sizeof(double), cudaMemcpyDeviceToHost) != cudaSuccess)
             return false;
-        }
 
-        fprintf(stderr, "GpuCompareOneVsList: Processing results\n");
-        fflush(stderr);
-        
         size_t found = 0;
         for (size_t i = 0; i < count && found < maxMatches; ++i) {
             if (results[i] <= threshold) {
@@ -483,122 +444,55 @@ namespace ad
         }
         *pMatchCount = found;
         
-        fprintf(stderr, "GpuCompareOneVsList: Completed, found=%zu matches\n", found);
-        fflush(stderr);
-        
         return true;
     }
 
     double GpuCompareSquaredSum(const uint8_t* pSrc1, const uint8_t* pSrc2, size_t size)
     {
-        fprintf(stderr, "GpuCompareSquaredSum: Starting, size=%zu\n", size);
-        fflush(stderr);
-
-        if (pSrc1 == nullptr || pSrc2 == nullptr) {
-            fprintf(stderr, "GpuCompareSquaredSum: Null input pointers\n");
-            fflush(stderr);
+        if (pSrc1 == nullptr || pSrc2 == nullptr)
             return 1e10;
-        }
 
-        // Check CUDA device availability
         int deviceCount = 0;
         cudaError_t testErr = cudaGetDeviceCount(&deviceCount);
-        if (testErr != cudaSuccess || deviceCount == 0) {
-            fprintf(stderr, "GpuCompareSquaredSum: No CUDA devices available\n");
-            fflush(stderr);
+        if (testErr != cudaSuccess || deviceCount == 0)
             return 1e10;
-        }
 
         uint8_t *d_1 = nullptr, *d_2 = nullptr;
         double *d_r = nullptr, h_r = 0;
         size_t numBlocks = 0;
 
-        fprintf(stderr, "GpuCompareSquaredSum: Allocating device memory\n");
-        fflush(stderr);
-
         cudaError_t err;
         err = cudaMalloc(&d_1, size);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GpuCompareSquaredSum: cudaMalloc d_1 failed: %s\n", cudaGetErrorString(err));
-            fflush(stderr);
-            goto cleanup;
-        }
+        if (err != cudaSuccess) goto cleanup;
 
         err = cudaMalloc(&d_2, size);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GpuCompareSquaredSum: cudaMalloc d_2 failed: %s\n", cudaGetErrorString(err));
-            fflush(stderr);
-            goto cleanup;
-        }
+        if (err != cudaSuccess) goto cleanup;
 
         err = cudaMalloc(&d_r, sizeof(double));
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GpuCompareSquaredSum: cudaMalloc d_r failed: %s\n", cudaGetErrorString(err));
-            fflush(stderr);
-            goto cleanup;
-        }
+        if (err != cudaSuccess) goto cleanup;
 
-        fprintf(stderr, "GpuCompareSquaredSum: Copying data to device\n");
-        fflush(stderr);
+        if (cudaMemcpy(d_1, pSrc1, size, cudaMemcpyHostToDevice) != cudaSuccess) goto cleanup;
+        if (cudaMemcpy(d_2, pSrc2, size, cudaMemcpyHostToDevice) != cudaSuccess) goto cleanup;
+        if (cudaMemset(d_r, 0, sizeof(double)) != cudaSuccess) goto cleanup;
 
-        if (cudaMemcpy(d_1, pSrc1, size, cudaMemcpyHostToDevice) != cudaSuccess) {
-            fprintf(stderr, "GpuCompareSquaredSum: cudaMemcpy d_1 failed\n");
-            fflush(stderr);
-            goto cleanup;
-        }
-        if (cudaMemcpy(d_2, pSrc2, size, cudaMemcpyHostToDevice) != cudaSuccess) {
-            fprintf(stderr, "GpuCompareSquaredSum: cudaMemcpy d_2 failed\n");
-            fflush(stderr);
-            goto cleanup;
-        }
-        if (cudaMemset(d_r, 0, sizeof(double)) != cudaSuccess) {
-            fprintf(stderr, "GpuCompareSquaredSum: cudaMemset d_r failed\n");
-            fflush(stderr);
-            goto cleanup;
-        }
-
-        // Check for integer overflow before kernel launch
         numBlocks = (size + 255) / 256;
         if (numBlocks > INT_MAX) {
-            fprintf(stderr, "GpuCompareSquaredSum: Block count exceeds INT_MAX\n");
-            fflush(stderr);
 #ifdef AD_LOGGER_ENABLE
             AD_LOG("GPU: Block count exceeds INT_MAX, cannot launch kernel");
 #endif
             goto cleanup;
         }
 
-        fprintf(stderr, "GpuCompareSquaredSum: Launching kernel with %zu blocks\n", numBlocks);
-        fflush(stderr);
-
         SquaredSumKernel<<< (int)numBlocks, 256, 256 * sizeof(double) >>>(d_1, d_2, size, d_r);
         
         err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GpuCompareSquaredSum: Kernel launch failed: %s\n", cudaGetErrorString(err));
-            fflush(stderr);
-            goto cleanup;
-        }
+        if (err != cudaSuccess) goto cleanup;
 
         err = cudaDeviceSynchronize();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GpuCompareSquaredSum: Device synchronize failed: %s\n", cudaGetErrorString(err));
-            fflush(stderr);
-            goto cleanup;
-        }
-
-        fprintf(stderr, "GpuCompareSquaredSum: Copying result from device\n");
-        fflush(stderr);
+        if (err != cudaSuccess) goto cleanup;
 
         err = cudaMemcpy(&h_r, d_r, sizeof(double), cudaMemcpyDeviceToHost);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GpuCompareSquaredSum: cudaMemcpy result failed: %s\n", cudaGetErrorString(err));
-            fflush(stderr);
-            goto cleanup;
-        }
-
-        fprintf(stderr, "GpuCompareSquaredSum: Success, result=%f\n", h_r);
-        fflush(stderr);
+        if (err != cudaSuccess) goto cleanup;
 
     cleanup:
         if (d_1) cudaFree(d_1);
@@ -811,5 +705,206 @@ namespace ad
 
         AD_DEBUG("GpuCompareAllVsAll: Complete\n");
         return true;
+    }
+
+    // --- SSIM AllVsAll kernel ---
+
+    __global__ void SsimAllVsAllKernel(
+        const uint8_t* thumbnails,
+        const float* averageArray,
+        const float* varianceArray,
+        const uint64_t* crcArray,
+        size_t thumbSize,
+        size_t count,
+        double ssimThreshold,
+        double addDiffForCrcMismatch,
+        size_t maxMatches,
+        Match* results,
+        size_t* matchCount)
+    {
+        extern __shared__ uint8_t shared_thumb[];
+
+        const double C1 = 6.5025;   // (0.01 * 255)^2
+        const double C2 = 58.5225;  // (0.03 * 255)^2
+
+        for (size_t i = blockIdx.x; i < count; i += gridDim.x) {
+            const uint8_t* thumb1_global = thumbnails + i * thumbSize;
+
+            for (size_t p = threadIdx.x; p < thumbSize; p += blockDim.x) {
+                shared_thumb[p] = thumb1_global[p];
+            }
+            __syncthreads();
+
+            size_t numThreads = blockDim.x;
+
+            for (size_t j = i + 1 + threadIdx.x; j < count; j += numThreads) {
+                const uint8_t* thumb2 = thumbnails + j * thumbSize;
+
+                // Dot product reduction
+                double dotProduct = 0;
+                for (size_t p = 0; p < thumbSize; p++) {
+                    dotProduct += (double)shared_thumb[p] * (double)thumb2[p];
+                }
+
+                double mu_x = (double)averageArray[i];
+                double mu_y = (double)averageArray[j];
+                double sigma_x2 = (double)varianceArray[i];
+                double sigma_y2 = (double)varianceArray[j];
+                double sigma_xy = dotProduct / (double)thumbSize - mu_x * mu_y;
+
+                double ssim = (2.0 * mu_x * mu_y + C1) * (2.0 * sigma_xy + C2) /
+                              ((mu_x * mu_x + mu_y * mu_y + C1) * (sigma_x2 + sigma_y2 + C2));
+
+                if (ssim > 2.0 || ssim < -2.0) continue;
+
+                double difference = 100.0 - ssim * 100.0;
+                if (difference < 0.0) difference = 0.0;
+
+                if (difference <= ssimThreshold) {
+                    size_t idx = atomicAdd(matchCount, (size_t)1);
+                    if (idx < maxMatches) {
+                        if (crcArray[i] != crcArray[j])
+                            difference += addDiffForCrcMismatch;
+                        results[idx].image1 = (uint32_t)i;
+                        results[idx].image2 = (uint32_t)j;
+                        results[idx].difference = (float)difference;
+                    }
+                }
+            }
+            __syncthreads();
+        }
+    }
+
+    bool GpuCompareAllVsAllSsim(
+        const uint8_t* allThumbnails,
+        const float* allAverages,
+        const float* allVariances,
+        const uint64_t* allCrcArray,
+        size_t count,
+        size_t thumbSize,
+        double ssimThreshold,
+        double addDiffForCrcMismatch,
+        void* callbackContext,
+        GpuMatchCallback callback,
+        size_t maxMatchesPerBatch)
+    {
+        cudaGetLastError();
+
+        if (!allThumbnails || !allAverages || !allVariances || !allCrcArray || count == 0 || thumbSize == 0 || !callback)
+            return false;
+
+        uint8_t* d_thumbnails = nullptr;
+        float* d_averageArray = nullptr;
+        float* d_varianceArray = nullptr;
+        uint64_t* d_crcArray = nullptr;
+        Match* d_results = nullptr;
+        size_t* d_matchCount = nullptr;
+
+        cudaError_t err;
+
+        // VRAM check
+        size_t freeMem = 0, totalMem = 0;
+        cudaMemGetInfo(&freeMem, &totalMem);
+        size_t requiredMem = count * thumbSize + count * sizeof(float) * 2 + count * sizeof(uint64_t) + maxMatchesPerBatch * sizeof(Match);
+
+        if (requiredMem > freeMem * 9 / 10)
+            return false;
+
+        // Allocate
+        err = cudaMalloc(&d_thumbnails, count * thumbSize);
+        if (err != cudaSuccess) return false;
+
+        err = cudaMalloc(&d_averageArray, count * sizeof(float));
+        if (err != cudaSuccess) { cudaFree(d_thumbnails); return false; }
+
+        err = cudaMalloc(&d_varianceArray, count * sizeof(float));
+        if (err != cudaSuccess) { cudaFree(d_thumbnails); cudaFree(d_averageArray); return false; }
+
+        err = cudaMalloc(&d_crcArray, count * sizeof(uint64_t));
+        if (err != cudaSuccess) { cudaFree(d_thumbnails); cudaFree(d_averageArray); cudaFree(d_varianceArray); return false; }
+
+        err = cudaMalloc(&d_results, maxMatchesPerBatch * sizeof(Match));
+        if (err != cudaSuccess) { cudaFree(d_thumbnails); cudaFree(d_averageArray); cudaFree(d_varianceArray); cudaFree(d_crcArray); return false; }
+
+        err = cudaMalloc(&d_matchCount, sizeof(size_t));
+        if (err != cudaSuccess) { cudaFree(d_thumbnails); cudaFree(d_averageArray); cudaFree(d_varianceArray); cudaFree(d_crcArray); cudaFree(d_results); return false; }
+
+        // Upload
+        err = cudaMemcpy(d_thumbnails, allThumbnails, count * thumbSize, cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) goto ssim_cleanup;
+
+        err = cudaMemcpy(d_averageArray, allAverages, count * sizeof(float), cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) goto ssim_cleanup;
+
+        err = cudaMemcpy(d_varianceArray, allVariances, count * sizeof(float), cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) goto ssim_cleanup;
+
+        err = cudaMemcpy(d_crcArray, allCrcArray, count * sizeof(uint64_t), cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) goto ssim_cleanup;
+
+        {
+            size_t h_matchCount = 0;
+            err = cudaMemcpy(d_matchCount, &h_matchCount, sizeof(size_t), cudaMemcpyHostToDevice);
+            if (err != cudaSuccess) goto ssim_cleanup;
+        }
+
+        // Launch kernel
+        {
+            int threadsPerBlock = 256;
+            size_t blocks = count;
+            if (blocks > 65535) blocks = 65535;
+            if (blocks == 0) blocks = 1;
+
+            SsimAllVsAllKernel<<<(int)blocks, threadsPerBlock, thumbSize>>>(
+                d_thumbnails, d_averageArray, d_varianceArray, d_crcArray,
+                thumbSize, count, ssimThreshold, addDiffForCrcMismatch,
+                maxMatchesPerBatch, d_results, d_matchCount);
+
+            err = cudaGetLastError();
+            if (err != cudaSuccess) goto ssim_cleanup;
+
+            err = cudaDeviceSynchronize();
+            if (err != cudaSuccess) goto ssim_cleanup;
+        }
+
+        // Readback
+        {
+            size_t h_matchCount = 0;
+            cudaMemcpy(&h_matchCount, d_matchCount, sizeof(size_t), cudaMemcpyDeviceToHost);
+
+            size_t matchesToRead = (h_matchCount < maxMatchesPerBatch) ? h_matchCount : maxMatchesPerBatch;
+            if (matchesToRead > 0) {
+                std::vector<Match> h_batch(maxMatchesPerBatch);
+                size_t remaining = matchesToRead;
+                size_t offset = 0;
+
+                while (remaining > 0) {
+                    size_t batchSize = (remaining < maxMatchesPerBatch) ? remaining : maxMatchesPerBatch;
+                    err = cudaMemcpy(h_batch.data(), d_results + offset, batchSize * sizeof(Match), cudaMemcpyDeviceToHost);
+                    if (err != cudaSuccess) break;
+
+                    callback(h_batch.data(), batchSize, callbackContext);
+                    remaining -= batchSize;
+                    offset += batchSize;
+                }
+            }
+        }
+
+        cudaFree(d_thumbnails);
+        cudaFree(d_averageArray);
+        cudaFree(d_varianceArray);
+        cudaFree(d_crcArray);
+        cudaFree(d_results);
+        cudaFree(d_matchCount);
+        return true;
+
+    ssim_cleanup:
+        cudaFree(d_thumbnails);
+        cudaFree(d_averageArray);
+        cudaFree(d_varianceArray);
+        cudaFree(d_crcArray);
+        cudaFree(d_results);
+        cudaFree(d_matchCount);
+        return false;
     }
 }

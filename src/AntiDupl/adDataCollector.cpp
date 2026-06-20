@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -136,6 +136,19 @@ namespace ad
 			TPixelData & data = *pImageData->data;
             ReduceGray2x2(*m_pGrayBuffers.back(), TView(data.side, data.side, data.side, TView::Gray8, data.main));
             data.filled = true;
+
+            // Предрассчитываем SSIM-статистику — потокобезопасно, каждый файл в одном потоке
+            if (data.average == 0) {
+                uint64_t sum = 0, sumSq = 0;
+                const size_t n = data.side * data.side;
+                for (size_t k = 0; k < n; k++) {
+                    sum += data.main[k];
+                    sumSq += (uint64_t)data.main[k] * data.main[k];
+                }
+                data.average = (float)sum / (float)n;
+                float avgSq = (float)sumSq / (float)n;
+                data.varianceSquare = fabs(avgSq - (data.average * data.average));
+            }
 
             // Upload thumbnail to GPU — only for non-AllVsAll mode
             // In AllVsAll mode, ExecuteGpuAllVsAllComparison does its own mass upload

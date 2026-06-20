@@ -206,6 +206,10 @@ namespace ad
             return false;
         }
 
+        if (!dbInfo.Enabled) {
+            return false; // Database is disabled in registry
+        }
+
         // Determine database folder path
         std::wstring dbFolder = dbInfo.Folder;
         if (dbFolder.empty()) {
@@ -215,12 +219,14 @@ namespace ad
             dbFolder = ResolveDbPath(dbFolder);
         }
 
-        // Load images from database folder
+        // Запоминаем текущий размер перед загрузкой — добавляем ТОЛЬКО новые записи
+        const size_t prevCount = m_pImageDataPtrs->size();
+
         adError result = m_pImageDataStorage->Load(dbFolder.c_str(), true);
         if (result == AD_OK) {
             const TImageDataStorage::TStorage& storage = m_pImageDataStorage->Storage();
             for (TImageDataStorage::TStorage::const_iterator it = storage.begin(); it != storage.end(); ++it) {
-                if (it->second && it->second->data) {
+                if (it->second && it->second->data && it->second->globalIdx >= prevCount) {
                     m_pImageDataPtrs->push_back(it->second);
                 }
             }

@@ -4,6 +4,7 @@
 */
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
@@ -15,6 +16,7 @@ namespace AntiDupl.NET.WinForms.Forms
         private DataGridView m_grid;
         private Button m_btnRemove;
         private Button m_btnOpenFolder;
+        private Button m_btnRefresh;
         private Button m_btnClose;
         private Label m_lblInfo;
 
@@ -46,9 +48,18 @@ namespace AntiDupl.NET.WinForms.Forms
             m_grid.AutoGenerateColumns = false;
             m_grid.AllowUserToAddRows = false;
             m_grid.AllowUserToDeleteRows = false;
-            m_grid.ReadOnly = true;
+            // m_grid.ReadOnly = true; // Убираем, чтобы чекбокс Enabled работал
             m_grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             m_grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
+            // Column: Enabled (Checkbox)
+            var colEnabled = new DataGridViewCheckBoxColumn();
+            colEnabled.Name = "Enabled";
+            colEnabled.DataPropertyName = "Enabled";
+            colEnabled.HeaderText = "On";
+            colEnabled.Width = 40;
+            colEnabled.ReadOnly = false;
+            m_grid.Columns.Add(colEnabled);
 
             var colName = new DataGridViewTextBoxColumn();
             colName.Name = "Name";
@@ -102,14 +113,21 @@ namespace AntiDupl.NET.WinForms.Forms
             m_btnRemove.Location = new Point(140, 5);
             m_btnRemove.Click += BtnRemove_Click;
 
+            m_btnRefresh = new Button();
+            m_btnRefresh.Text = "Refresh";
+            m_btnRefresh.Size = new Size(120, 30);
+            m_btnRefresh.Location = new Point(270, 5);
+            m_btnRefresh.Click += (s, e) => LoadDatabases();
+
             m_btnClose = new Button();
             m_btnClose.Text = "Close";
             m_btnClose.Size = new Size(120, 30);
-            m_btnClose.Location = new Point(270, 5);
+            m_btnClose.Location = new Point(400, 5);
             m_btnClose.Click += (s, e) => this.Close();
 
             btnPanel.Controls.Add(m_btnOpenFolder);
             btnPanel.Controls.Add(m_btnRemove);
+            btnPanel.Controls.Add(m_btnRefresh);
             btnPanel.Controls.Add(m_btnClose);
 
             this.Controls.Add(m_grid);
@@ -119,9 +137,42 @@ namespace AntiDupl.NET.WinForms.Forms
 
         private void LoadDatabases()
         {
+            m_grid.CellContentClick -= Grid_CellContentClick;
             var databases = LoadRegistry(""); // Uses ExeDir internally
-            m_grid.DataSource = databases;
+            m_grid.DataSource = new BindingList<DbEntry>(databases);
+            m_grid.CellContentClick += Grid_CellContentClick;
             m_grid.Refresh();
+        }
+
+        private void Grid_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.ColumnIndex == m_grid.Columns["Enabled"].Index && e.RowIndex >= 0) {
+                // Commit edit immediately
+                m_grid.EndEdit();
+                SaveDatabases();
+            }
+        }
+
+        private void SaveDatabases()
+        {
+            var list = m_grid.DataSource as BindingList<DbEntry>;
+            if (list == null) return;
+
+            string filePath = Path.Combine(GetRegistryDir(), RegistryFileName);
+            Directory.CreateDirectory(GetRegistryDir());
+
+            string content = "<DatabaseRegistry>\n";
+            foreach (var entry in list) {
+                content += "  <Database";
+                content += $" Path=\"{entry.Path}\"";
+                if (!string.IsNullOrEmpty(entry.Folder)) content += $" Folder=\"{entry.Folder}\"";
+                if (!string.IsNullOrEmpty(entry.Name)) content += $" Name=\"{entry.Name}\"";
+                content += $" Enabled=\"{(entry.Enabled ? "true" : "false")}\"";
+                content += $" ThumbSize=\"{entry.ThumbSize}\"";
+                content += $" Count=\"{entry.ImageCount}\" Status=\"{entry.Status}\"/>\n";
+            }
+            content += "</DatabaseRegistry>\n";
+            File.WriteAllText(filePath, content);
         }
 
         private void BtnOpenFolder_Click(object sender, EventArgs e)
@@ -195,7 +246,9 @@ namespace AntiDupl.NET.WinForms.Forms
                 entry.Folder = GetAttr(tag, "Folder");
                 entry.ImageCount = int.Parse(GetAttr(tag, "Count") ?? "0");
                 entry.Status = GetAttr(tag, "Status") ?? "Ready";
-                
+                entry.Enabled = GetAttr(tag, "Enabled") != "false"; // Default true
+                entry.ThumbSize = int.Parse(GetAttr(tag, "ThumbSize") ?? "32");
+
                 // Fallback for old entries that don't have Name or Folder
                 if (string.IsNullOrEmpty(entry.Name)) {
                     if (!string.IsNullOrEmpty(entry.Path)) {
@@ -258,11 +311,29 @@ namespace AntiDupl.NET.WinForms.Forms
 
         public class DbEntry
         {
+            public bool Enabled { get; set; }
             public string Name { get; set; }
             public string Path { get; set; }
             public string Folder { get; set; }
             public int ImageCount { get; set; }
+            public int ThumbSize { get; set; } = 32;
             public string Status { get; set; }
+        }
+
+        /// <summary>
+        /// Reads enabled database paths from ad_database.xml for search integration.
+        /// Returns paths where Enabled=true and Status=Ready.
+        /// </summary>
+        public static List<string> GetEnabledDatabasePaths()
+        {
+            var paths = new List<string>();
+            var entries = LoadRegistry("");
+            foreach (var entry in entries)
+            {
+                if (entry.Enabled && entry.Status == "Ready" && !string.IsNullOrEmpty(entry.Path))
+                    paths.Add(entry.Path);
+            }
+            return paths;
         }
     }
 }

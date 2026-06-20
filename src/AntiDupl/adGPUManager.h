@@ -40,14 +40,14 @@ namespace ad
 
         bool UploadThumbnail(size_t index, const uint8_t* pData) {
             if (!m_available) return false;
-            std::lock_guard<std::mutex> lock(m_mutex);
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return GpuUploadThumbnail(index, pData);
         }
 
         bool CompareOneVsMany(const uint8_t* pQuery, size_t startIdx, size_t count, double threshold, 
                               size_t* pMatchIndices, double* pMatchDifferences, size_t* pMatchCount, size_t maxMatches) {
             if (!m_available) return false;
-            std::lock_guard<std::mutex> lock(m_mutex);
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return GpuCompareOneVsMany(pQuery, startIdx, count, threshold, 
                                                     pMatchIndices, pMatchDifferences, pMatchCount, maxMatches);
         }
@@ -55,14 +55,14 @@ namespace ad
         bool CompareOneVsList(const uint8_t* pQuery, const size_t* pIndices, size_t count, double threshold, 
                               size_t* pMatchIndices, double* pMatchDifferences, size_t* pMatchCount, size_t maxMatches) {
             if (!m_available) return false;
-            std::lock_guard<std::mutex> lock(m_mutex);
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return GpuCompareOneVsList(pQuery, pIndices, count, threshold, 
                                                     pMatchIndices, pMatchDifferences, pMatchCount, maxMatches);
         }
 
         void ClearBuffer() {
             if (!m_available) return;
-            std::lock_guard<std::mutex> lock(m_mutex);
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             size_t size = m_capacity; // Reuse current capacity
             GpuReleaseBuffer(); 
             GpuCreateBuffer(size, m_thumbSize);
@@ -83,10 +83,30 @@ namespace ad
             GpuMatchCallback callback,
             size_t maxMatchesPerBatch) {
             if (!m_available) return false;
-            std::lock_guard<std::mutex> lock(m_mutex);
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return GpuCompareAllVsAll(allThumbnails, allCrcArray, count, thumbSize,
                                                     threshold, maxDifference, addDiffForCrcMismatch,
                                                     callbackContext, callback, maxMatchesPerBatch);
+        }
+
+        // SSIM AllVsAll comparison
+        bool CompareAllVsAllSsim(
+            const uint8_t* allThumbnails,
+            const float* allAverages,
+            const float* allVariances,
+            const uint64_t* allCrcArray,
+            size_t count,
+            size_t thumbSize,
+            double ssimThreshold,
+            double addDiffForCrcMismatch,
+            void* callbackContext,
+            GpuMatchCallback callback,
+            size_t maxMatchesPerBatch) {
+            if (!m_available) return false;
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            return GpuCompareAllVsAllSsim(allThumbnails, allAverages, allVariances, allCrcArray,
+                                          count, thumbSize, ssimThreshold, addDiffForCrcMismatch,
+                                          callbackContext, callback, maxMatchesPerBatch);
         }
 
     private:
@@ -94,7 +114,7 @@ namespace ad
         GpuDeviceInfo m_deviceInfo;
         size_t m_capacity;
         size_t m_thumbSize;
-        mutable std::mutex m_mutex;
+        mutable std::recursive_mutex m_mutex;
     };
 }
 

@@ -34,6 +34,7 @@ using System.IO;
 
 using AntiDupl.NET.Core;
 using AntiDupl.NET.Core.Original;
+using AntiDupl.NET.WinForms.Forms;
 
 namespace AntiDupl.NET.WinForms
 {
@@ -146,6 +147,29 @@ namespace AntiDupl.NET.WinForms
         private void CoreThreadTask()
         {
             m_startDateTime = DateTime.Now;
+
+            // Add enabled database paths from ad_database.xml to search paths
+            var dbPaths = Forms.DatabaseManagerForm.GetEnabledDatabasePaths();
+            if (dbPaths.Count > 0)
+            {
+                var merged = new List<CorePathWithSubFolder>(m_coreOptions.searchPath);
+                foreach (var dbPath in dbPaths)
+                {
+                    bool exists = false;
+                    foreach (var existing in merged)
+                    {
+                        if (string.Equals(existing.path, dbPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (!exists)
+                        merged.Add(new CorePathWithSubFolder(dbPath, true));
+                }
+                m_coreOptions.searchPath = merged.ToArray();
+            }
+
             m_coreOptions.Set(m_core, m_options.onePath);
             m_state = State.ClearResults;
             m_core.Clear(CoreDll.FileType.Result);

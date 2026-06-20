@@ -36,6 +36,7 @@ namespace ad
         int ThumbSize;
         size_t ImageCount;
         std::wstring Status; // Ready, Processing
+        bool Enabled;           // Is this database active for search?
     };
 
     class TDatabaseRegistry {

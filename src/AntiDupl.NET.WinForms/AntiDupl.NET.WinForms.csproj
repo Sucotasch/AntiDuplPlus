@@ -1,8 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net6.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>Icon.ico</ApplicationIcon>
@@ -10,7 +10,7 @@
     <FileVersion>2.3.11.1</FileVersion>
     <Platforms>x64</Platforms>
     <Company>ErmIg</Company>
-    <Copyright>ErmIg © 2002-2023</Copyright>
+    <Copyright>ErmIg © 2002-2026</Copyright>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 	<AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <StartupObject>AntiDupl.NET.WinForms.Program</StartupObject>

@@ -25,6 +25,8 @@
 #define __adResultStorage_h__
 
 #include "adConfig.h"
+#include <map>
+#include <string>
 
 namespace ad
 {
@@ -94,6 +96,8 @@ namespace ad
 
         adError Load(const TChar* fileName, bool check);
         adError Save(const TChar* fileName) const;
+
+        void FilterByPool(int poolCompareMode, const std::map<std::wstring, int>& dbPoolMap);
 
     private:
         TImageInfoStorage *m_pImageInfoStorage;

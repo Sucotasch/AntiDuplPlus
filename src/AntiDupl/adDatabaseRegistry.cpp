@@ -84,6 +84,9 @@ namespace ad
                 std::wstring enabledStr = GetXmlAttr(line, L"Enabled");
                 db.Enabled = (enabledStr.empty() || enabledStr == L"true"); // Default to true
 
+                std::wstring poolStr = GetXmlAttr(line, L"Pool");
+                try { db.Pool = std::stoi(poolStr); } catch (...) { db.Pool = 0; }
+
                 if (!db.Path.empty()) {
                     databases.push_back(db);
                 }
@@ -103,7 +106,9 @@ namespace ad
             if (!db.Name.empty()) file << L" Name=\"" << db.Name << L"\"";
             file << L" Enabled=\"" << (db.Enabled ? L"true" : L"false") << L"\"";
             file << L" ThumbSize=\"" << db.ThumbSize << L"\" Count=\"" << db.ImageCount
-                 << L"\" Status=\"" << db.Status << L"\"/>\n";
+                 << L"\" Status=\"" << db.Status << L"\"";
+            if (db.Pool != 0) file << L" Pool=\"" << db.Pool << L"\"";
+            file << L"/>\n";
         }
         file << L"</DatabaseRegistry>\n";
         return true;
@@ -163,5 +168,29 @@ namespace ad
             }
         }
         return false;
+    }
+
+    bool TDatabaseRegistry::UpdateCount(const std::wstring& imagePath, int delta, const std::wstring& userPath) {
+        std::vector<TDatabaseInfo> databases;
+        Load(databases, userPath);
+
+        std::wstring searchPath = imagePath;
+        std::transform(searchPath.begin(), searchPath.end(), searchPath.begin(), ::towlower);
+
+        bool found = false;
+        for (auto& db : databases) {
+            std::wstring dbPath = db.Path;
+            std::transform(dbPath.begin(), dbPath.end(), dbPath.begin(), ::towlower);
+
+            if (searchPath.find(dbPath) == 0 || dbPath.find(searchPath) == 0) {
+                int newCount = (int)db.ImageCount + delta;
+                if (newCount < 0) newCount = 0;
+                db.ImageCount = (size_t)newCount;
+                found = true;
+                break;
+            }
+        }
+
+        return found ? Save(databases, userPath) : false;
     }
 }

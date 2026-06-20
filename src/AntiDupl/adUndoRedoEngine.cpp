@@ -28,6 +28,7 @@
 #include "adResult.h"
 #include "adRecycleBin.h"
 #include "adMistakeStorage.h"
+#include "adDatabaseRegistry.h"
 #include "adImageInfoStorage.h"
 #include "adUndoRedoTypes.h"
 #include "adUndoRedoEngine.h"
@@ -566,6 +567,8 @@ namespace ad
         if(m_pRecycleBin->Delete(pImageInfo))
         {
             m_pCurrent->change->deletedImages.push_back(pImageInfo);
+            // Update database count
+            TDatabaseRegistry::UpdateCount(pImageInfo->path.Original(), -1, m_pOptions->userPath);
             return true;
         }
         return false;

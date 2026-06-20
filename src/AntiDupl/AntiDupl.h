@@ -389,6 +389,16 @@ extern "C"
 		AD_COMPARING_SIZE
 	};
 
+	enum adPoolCompareMode : adInt32
+	{
+		AD_POOL_COMPARE_NONE = 0,
+		AD_POOL_COMPARE_POOL1_INTERNAL = 1,
+		AD_POOL_COMPARE_POOL2_INTERNAL = 2,
+		AD_POOL_COMPARE_CROSS = 3,
+		AD_POOL_COMPARE_ALL = 4,
+		AD_POOL_COMPARE_SIZE
+	};
+
     /*------------Structures-----------------------------------------------------*/
 
     struct adSearchOptions
@@ -428,6 +438,7 @@ extern "C"
         adBool compareInsideOneFolder;
 		adBool compareInsideOneSearchPath;
 		adAlgorithmComparing algorithmComparing;
+		adPoolCompareMode poolCompareMode;
     };
     typedef adCompareOptions* adCompareOptionsPtr;
 	

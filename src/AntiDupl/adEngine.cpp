@@ -28,6 +28,7 @@
 #include "adResult.h"
 #include "adResultStorage.h"
 #include "adImageDataStorage.h"
+#include "adDatabaseRegistry.h"
 #include "adMistakeStorage.h"
 #include "adThreadManagement.h"
 #include "adSearcher.h"
@@ -354,16 +355,32 @@ namespace ad
         const size_t BATCH_MATCHES = 5000000;
         bool success = false;
 
+        // Build pool mask for GPU filtering
+        int poolCompareMode = m_pOptions->compare.poolCompareMode;
+        std::vector<uint8_t> poolMask;
+        if (poolCompareMode != 0) {
+            poolMask.resize(validCount, 0);
+            for (size_t k = 0; k < validCount; k++) {
+                // Look up pool from database registry
+                TDatabaseInfo dbInfo;
+                if (TDatabaseRegistry::FindByPath(imageByIndex[k]->path.Original(), dbInfo, m_pOptions->userPath)) {
+                    poolMask[k] = (uint8_t)dbInfo.Pool;
+                }
+            }
+        }
+
         if (useSsim) {
             // SSIM mode
             double ssimThreshold = (double)m_pOptions->compare.thresholdDifference;
-            AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: SSIM mode, threshold=%f\n", ssimThreshold);
+            AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: SSIM mode, threshold=%f, poolMode=%d\n", ssimThreshold, poolCompareMode);
 
             success = m_pGpuManager->CompareAllVsAllSsim(
                 allThumbnails.data(),
                 averageArray.data(),
                 varianceArray.data(),
                 allCrcArray.data(),
+                poolMask.empty() ? nullptr : poolMask.data(),
+                poolCompareMode,
                 validCount,
                 thumbSize,
                 ssimThreshold,
@@ -381,11 +398,13 @@ namespace ad
             double maxDifference = (double)(Simd::Square(PIXEL_MAX_DIFFERENCE) * thumbSize);
             ctx.maxDifference = maxDifference;
 
-            AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: MS mode, threshold=%f, maxDifference=%f\n", threshold, maxDifference);
+            AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: MS mode, threshold=%f, maxDifference=%f, poolMode=%d\n", threshold, maxDifference, poolCompareMode);
 
             success = m_pGpuManager->CompareAllVsAll(
                 allThumbnails.data(),
                 allCrcArray.data(),
+                poolMask.empty() ? nullptr : poolMask.data(),
+                poolCompareMode,
                 validCount,
                 thumbSize,
                 threshold,
@@ -523,6 +542,21 @@ namespace ad
 
         m_pImageDataPtrs->clear();
         m_pStatus->Reset();
+
+        // Apply pool filtering if configured
+        if (m_pOptions->compare.poolCompareMode != 0)
+        {
+            AD_DEBUG("Search: Applying pool filter\n");
+            std::map<std::wstring, int> dbPoolMap;
+            // Build pool map from registry
+            std::vector<TDatabaseInfo> databases;
+            TDatabaseRegistry::Load(databases, m_pOptions->userPath);
+            for (const auto& db : databases) {
+                if (!db.Path.empty())
+                    dbPoolMap[db.Path] = db.Pool;
+            }
+            m_pResult->FilterByPool(m_pOptions->compare.poolCompareMode, dbPoolMap);
+        }
 
         AD_DEBUG("Search: Completed successfully\n");
     }

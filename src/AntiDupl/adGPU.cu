@@ -74,6 +74,8 @@ namespace ad
     __global__ void AllVsAllKernel(
         const uint8_t* thumbnails,     // Все thumbnails в VRAM
         const uint64_t* crcArray,      // CRC32c для каждого изображения
+        const uint8_t* poolMask,       // Pool ID на изображение (nullptr = без фильтрации)
+        int poolCompareMode,           // 0=none, 1=p1, 2=p2, 3=cross, 4=all
         size_t thumbSize,              // Размер одного thumbnail (1024)
         size_t count,                  // Общее количество изображений
         double threshold,              // Порог squared difference
@@ -100,6 +102,20 @@ namespace ad
             size_t numThreads = blockDim.x;
 
             for (size_t j = i + 1 + threadIdx.x; j < count; j += numThreads) {
+                // Pool filtering — пропускаем пары не соответствующие режиму
+                if (poolMask && poolCompareMode != 0) {
+                    uint8_t pi = poolMask[i];
+                    uint8_t pj = poolMask[j];
+                    bool keep = false;
+                    switch (poolCompareMode) {
+                        case 1: keep = (pi == 1 && pj == 1); break;
+                        case 2: keep = (pi == 2 && pj == 2); break;
+                        case 3: keep = (pi == 1 && pj == 2) || (pi == 2 && pj == 1); break;
+                        case 4: keep = (pi > 0 && pj > 0); break;
+                    }
+                    if (!keep) continue;
+                }
+
                 const uint8_t* thumb2 = thumbnails + j * thumbSize;
 
                 // Вычисляем squared difference из shared memory
@@ -505,6 +521,8 @@ namespace ad
     bool GpuCompareAllVsAll(
         const uint8_t* allThumbnails,     // Все thumbnails в RAM
         const uint64_t* allCrcArray,      // CRC32c для каждого изображения
+        const uint8_t* poolMask,          // Pool ID на изображение (nullptr = без фильтрации)
+        int poolCompareMode,              // 0=none, 1=p1, 2=p2, 3=cross, 4=all
         size_t count,                      // Количество изображений
         size_t thumbSize,                  // Размер одного thumbnail (1024)
         double threshold,                  // Порог squared difference
@@ -530,6 +548,7 @@ namespace ad
         // Выделяем VRAM для thumbnails
         uint8_t* d_thumbnails = nullptr;
         uint64_t* d_crcArray = nullptr;
+        uint8_t* d_poolMask = nullptr;
         Match* d_results = nullptr;
         size_t* d_matchCount = nullptr;
 
@@ -633,10 +652,18 @@ namespace ad
         if (blocks > 65535) blocks = 65535;
         if (blocks == 0) blocks = 1;
 
+        // Upload poolMask to GPU if provided
+        if (poolMask && poolCompareMode != 0) {
+            err = cudaMalloc(&d_poolMask, count * sizeof(uint8_t));
+            if (err == cudaSuccess) {
+                cudaMemcpy(d_poolMask, poolMask, count * sizeof(uint8_t), cudaMemcpyHostToDevice);
+            }
+        }
+
         AD_DEBUG_FMT("GpuCompareAllVsAll: Launching %zu blocks, %d threads/block\n", blocks, threadsPerBlock);
 
         AllVsAllKernel<<<(int)blocks, threadsPerBlock, thumbSize>>>(
-            d_thumbnails, d_crcArray, thumbSize, count, threshold, maxDifference, addDiffForCrcMismatch,
+            d_thumbnails, d_crcArray, d_poolMask, poolCompareMode, thumbSize, count, threshold, maxDifference, addDiffForCrcMismatch,
             maxMatchesPerBatch, d_results, d_matchCount);
 
         err = cudaGetLastError();
@@ -700,6 +727,7 @@ namespace ad
         // 12. Освобождаем VRAM
         cudaFree(d_thumbnails);
         cudaFree(d_crcArray);
+        if (d_poolMask) cudaFree(d_poolMask);
         cudaFree(d_results);
         cudaFree(d_matchCount);
 
@@ -714,6 +742,8 @@ namespace ad
         const float* averageArray,
         const float* varianceArray,
         const uint64_t* crcArray,
+        const uint8_t* poolMask,
+        int poolCompareMode,
         size_t thumbSize,
         size_t count,
         double ssimThreshold,
@@ -738,6 +768,20 @@ namespace ad
             size_t numThreads = blockDim.x;
 
             for (size_t j = i + 1 + threadIdx.x; j < count; j += numThreads) {
+                // Pool filtering
+                if (poolMask && poolCompareMode != 0) {
+                    uint8_t pi = poolMask[i];
+                    uint8_t pj = poolMask[j];
+                    bool keep = false;
+                    switch (poolCompareMode) {
+                        case 1: keep = (pi == 1 && pj == 1); break;
+                        case 2: keep = (pi == 2 && pj == 2); break;
+                        case 3: keep = (pi == 1 && pj == 2) || (pi == 2 && pj == 1); break;
+                        case 4: keep = (pi > 0 && pj > 0); break;
+                    }
+                    if (!keep) continue;
+                }
+
                 const uint8_t* thumb2 = thumbnails + j * thumbSize;
 
                 // Dot product reduction
@@ -780,6 +824,8 @@ namespace ad
         const float* allAverages,
         const float* allVariances,
         const uint64_t* allCrcArray,
+        const uint8_t* poolMask,
+        int poolCompareMode,
         size_t count,
         size_t thumbSize,
         double ssimThreshold,
@@ -797,6 +843,7 @@ namespace ad
         float* d_averageArray = nullptr;
         float* d_varianceArray = nullptr;
         uint64_t* d_crcArray = nullptr;
+        uint8_t* d_poolMask = nullptr;
         Match* d_results = nullptr;
         size_t* d_matchCount = nullptr;
 
@@ -855,8 +902,17 @@ namespace ad
             if (blocks > 65535) blocks = 65535;
             if (blocks == 0) blocks = 1;
 
+            // Upload poolMask to GPU if provided
+            if (poolMask && poolCompareMode != 0) {
+                err = cudaMalloc(&d_poolMask, count * sizeof(uint8_t));
+                if (err == cudaSuccess) {
+                    cudaMemcpy(d_poolMask, poolMask, count * sizeof(uint8_t), cudaMemcpyHostToDevice);
+                }
+            }
+
             SsimAllVsAllKernel<<<(int)blocks, threadsPerBlock, thumbSize>>>(
                 d_thumbnails, d_averageArray, d_varianceArray, d_crcArray,
+                d_poolMask, poolCompareMode,
                 thumbSize, count, ssimThreshold, addDiffForCrcMismatch,
                 maxMatchesPerBatch, d_results, d_matchCount);
 
@@ -894,6 +950,7 @@ namespace ad
         cudaFree(d_averageArray);
         cudaFree(d_varianceArray);
         cudaFree(d_crcArray);
+        if (d_poolMask) cudaFree(d_poolMask);
         cudaFree(d_results);
         cudaFree(d_matchCount);
         return true;
@@ -903,6 +960,7 @@ namespace ad
         cudaFree(d_averageArray);
         cudaFree(d_varianceArray);
         cudaFree(d_crcArray);
+        if (d_poolMask) cudaFree(d_poolMask);
         cudaFree(d_results);
         cudaFree(d_matchCount);
         return false;

@@ -467,4 +467,66 @@ namespace ad
         return false;
     }
     //-------------------------------------------------------------------------
+
+    void TResultStorage::FilterByPool(int poolCompareMode, const std::map<std::wstring, int>& dbPoolMap)
+    {
+        if (poolCompareMode == 0) return; // No filtering
+
+        TCriticalSection::TLocker locker(m_pCriticalSection);
+
+        TUndoRedoStage *pCurrent = m_pUndoRedoEngine->Current();
+        TResultPtrVector &results = pCurrent->results;
+
+        // Helper to get pool for an image path
+        auto getPool = [&dbPoolMap](const TPath& path) -> int {
+            auto it = dbPoolMap.find(path.Original());
+            if (it != dbPoolMap.end()) return it->second;
+            // Try case-insensitive lookup
+            std::wstring lowerPath = path.Original();
+            std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+            for (auto& kv : dbPoolMap) {
+                std::wstring lowerKey = kv.first;
+                std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(), ::towlower);
+                if (lowerKey == lowerPath) return kv.second;
+            }
+            return 0;
+        };
+
+        TResultPtrVector filtered;
+        for (auto it = results.begin(); it != results.end(); ++it)
+        {
+            TResult* pResult = *it;
+            if (!pResult || pResult->type != AD_RESULT_DUPL_IMAGE_PAIR)
+            {
+                filtered.push_back(pResult);
+                continue;
+            }
+
+            int pool1 = getPool(pResult->first->path);
+            int pool2 = pResult->second ? getPool(pResult->second->path) : 0;
+
+            bool keep = false;
+            switch (poolCompareMode)
+            {
+            case 1: // Pool1 internal
+                keep = (pool1 == 1 && pool2 == 1);
+                break;
+            case 2: // Pool2 internal
+                keep = (pool1 == 2 && pool2 == 2);
+                break;
+            case 3: // Cross-pool
+                keep = (pool1 == 1 && pool2 == 2) || (pool1 == 2 && pool2 == 1);
+                break;
+            case 4: // All pools
+                keep = (pool1 > 0 && pool2 > 0);
+                break;
+            }
+
+            if (keep)
+                filtered.push_back(pResult);
+        }
+
+        results.swap(filtered);
+        SetGroup();
+    }
 }

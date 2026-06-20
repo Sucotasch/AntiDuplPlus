@@ -74,6 +74,8 @@ namespace ad
         bool CompareAllVsAll(
             const uint8_t* allThumbnails,
             const uint64_t* allCrcArray,
+            const uint8_t* poolMask,
+            int poolCompareMode,
             size_t count,
             size_t thumbSize,
             double threshold,
@@ -84,9 +86,9 @@ namespace ad
             size_t maxMatchesPerBatch) {
             if (!m_available) return false;
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
-            return GpuCompareAllVsAll(allThumbnails, allCrcArray, count, thumbSize,
-                                                    threshold, maxDifference, addDiffForCrcMismatch,
-                                                    callbackContext, callback, maxMatchesPerBatch);
+            return GpuCompareAllVsAll(allThumbnails, allCrcArray, poolMask, poolCompareMode,
+                                      count, thumbSize, threshold, maxDifference, addDiffForCrcMismatch,
+                                      callbackContext, callback, maxMatchesPerBatch);
         }
 
         // SSIM AllVsAll comparison
@@ -95,6 +97,8 @@ namespace ad
             const float* allAverages,
             const float* allVariances,
             const uint64_t* allCrcArray,
+            const uint8_t* poolMask,
+            int poolCompareMode,
             size_t count,
             size_t thumbSize,
             double ssimThreshold,
@@ -105,6 +109,7 @@ namespace ad
             if (!m_available) return false;
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return GpuCompareAllVsAllSsim(allThumbnails, allAverages, allVariances, allCrcArray,
+                                          poolMask, poolCompareMode,
                                           count, thumbSize, ssimThreshold, addDiffForCrcMismatch,
                                           callbackContext, callback, maxMatchesPerBatch);
         }

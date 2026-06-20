@@ -37,6 +37,7 @@ namespace ad
         size_t ImageCount;
         std::wstring Status; // Ready, Processing
         bool Enabled;           // Is this database active for search?
+        int Pool;               // 0=None, 1=Pool1 (Reference), 2=Pool2 (Target)
     };
 
     class TDatabaseRegistry {
@@ -46,6 +47,7 @@ namespace ad
         static bool AddOrUpdate(const TDatabaseInfo& db, const std::wstring& userPath);
         static bool Remove(const std::wstring& path, const std::wstring& userPath);
         static bool FindByPath(const std::wstring& path, TDatabaseInfo& out, const std::wstring& userPath);
+        static bool UpdateCount(const std::wstring& imagePath, int delta, const std::wstring& userPath);
     };
 }
 

@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2023 Yermalayeu Ihar,
@@ -50,6 +50,7 @@ namespace ad
         int links;
         bool removed;
 		bool selected;
+		bool neverDelete;
         
         TImageInfo();
         TImageInfo(const TString& path_);

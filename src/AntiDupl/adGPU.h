@@ -70,6 +70,8 @@ namespace ad
     bool GpuCompareAllVsAll(
         const uint8_t* allThumbnails,     // Все thumbnails в RAM
         const uint64_t* allCrcArray,      // CRC32c для каждого изображения
+        const uint8_t* poolMask,          // Pool ID на изображение (nullptr = без фильтрации)
+        int poolCompareMode,              // 0=none, 1=p1, 2=p2, 3=cross, 4=all
         size_t count,                      // Количество изображений
         size_t thumbSize,                  // Размер одного thumbnail (1024)
         double threshold,                  // Порог squared difference
@@ -85,6 +87,8 @@ namespace ad
         const float* allAverages,
         const float* allVariances,
         const uint64_t* allCrcArray,
+        const uint8_t* poolMask,
+        int poolCompareMode,
         size_t count,
         size_t thumbSize,
         double ssimThreshold,

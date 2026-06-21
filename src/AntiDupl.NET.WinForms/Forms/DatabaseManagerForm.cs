@@ -8,6 +8,7 @@ using System.ComponentModel;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace AntiDupl.NET.WinForms.Forms
@@ -31,6 +32,7 @@ namespace AntiDupl.NET.WinForms.Forms
         private Button m_btnRemovePool2;
         private Button m_btnOpenFolder;
         private Button m_btnRefresh;
+        private Button m_btnUpdateAll;
         private Button m_btnClose;
 
         // Pool mode
@@ -38,13 +40,17 @@ namespace AntiDupl.NET.WinForms.Forms
         private Label m_lblInfo;
 
         private const string RegistryFileName = "ad_database.xml";
+        private const string PoolModeRegKey = @"Software\AntiDupl.NET\DatabaseManager";
         private List<DbEntry> m_allEntries = new List<DbEntry>();
         private bool m_dirty = false;
-        private static int s_poolCompareMode = 0;
+        private static int s_poolCompareMode = -1;
 
         public DatabaseManagerForm()
         {
             InitializeComponent();
+            if (s_poolCompareMode < 0)
+                s_poolCompareMode = LoadPoolMode();
+            m_cmbPoolMode.SelectedIndex = s_poolCompareMode;
             LoadDatabases();
             this.FormClosing += (s, e) => { if (m_dirty) SaveDatabases(); };
         }
@@ -85,10 +91,12 @@ namespace AntiDupl.NET.WinForms.Forms
                 "Cross - Pool1 vs Pool2 only", 
                 "All Pools - Only pooled images (Pool1+Pool2)" 
             });
-            m_cmbPoolMode.SelectedIndex = 0;
             m_cmbPoolMode.Location = new Point(170, 4);
             m_cmbPoolMode.Width = 200;
-            m_cmbPoolMode.SelectedIndexChanged += (s, e) => { s_poolCompareMode = m_cmbPoolMode.SelectedIndex; };
+            m_cmbPoolMode.SelectedIndexChanged += (s, e) => { 
+                s_poolCompareMode = m_cmbPoolMode.SelectedIndex;
+                SavePoolMode();
+            };
 
             poolModePanel.Controls.Add(lblPoolMode);
             poolModePanel.Controls.Add(m_cmbPoolMode);
@@ -103,10 +111,12 @@ namespace AntiDupl.NET.WinForms.Forms
 
             m_btnOpenFolder = CreateButton("Open Folder", 10, BtnOpenFolder_Click);
             m_btnRefresh = CreateButton("Refresh", 140, (s, e) => LoadDatabases());
-            m_btnClose = CreateButton("Close", 270, (s, e) => this.Close());
+            m_btnUpdateAll = CreateButton("Update All", 270, (s, e) => UpdateAllDatabases());
+            m_btnClose = CreateButton("Close", 400, (s, e) => this.Close());
 
             btnPanel.Controls.Add(m_btnOpenFolder);
             btnPanel.Controls.Add(m_btnRefresh);
+            btnPanel.Controls.Add(m_btnUpdateAll);
             btnPanel.Controls.Add(m_btnClose);
 
             // Center: 3-panel split
@@ -241,6 +251,24 @@ namespace AntiDupl.NET.WinForms.Forms
             colStatus.Width = 55;
             grid.Columns.Add(colStatus);
 
+            var colUpdate = new DataGridViewButtonColumn();
+            colUpdate.Name = "Update";
+            colUpdate.HeaderText = "";
+            colUpdate.Text = "Update";
+            colUpdate.UseColumnTextForButtonValue = true;
+            colUpdate.Width = 65;
+            colUpdate.FlatStyle = FlatStyle.Flat;
+            grid.Columns.Add(colUpdate);
+
+            var colDelete = new DataGridViewButtonColumn();
+            colDelete.Name = "Delete";
+            colDelete.HeaderText = "";
+            colDelete.Text = "Delete";
+            colDelete.UseColumnTextForButtonValue = true;
+            colDelete.Width = 65;
+            colDelete.FlatStyle = FlatStyle.Flat;
+            grid.Columns.Add(colDelete);
+
             return grid;
         }
 
@@ -257,13 +285,233 @@ namespace AntiDupl.NET.WinForms.Forms
             var grid = sender as DataGridView;
             if (grid == null) return;
 
-            // Check if click is on Enabled column
-            if (grid.Columns[e.ColumnIndex].Name == "Enabled")
+            string colName = grid.Columns[e.ColumnIndex].Name;
+
+            if (colName == "Enabled")
             {
                 grid.EndEdit();
                 m_dirty = true;
                 SaveDatabases();
             }
+            else if (colName == "Update")
+            {
+                var entry = grid.Rows[e.RowIndex].DataBoundItem as DbEntry;
+                if (entry != null) UpdateDatabase(entry);
+            }
+            else if (colName == "Delete")
+            {
+                var entry = grid.Rows[e.RowIndex].DataBoundItem as DbEntry;
+                if (entry != null) DeleteDatabase(entry);
+            }
+        }
+
+        private void UpdateDatabase(DbEntry entry)
+        {
+            if (string.IsNullOrEmpty(entry.Path) || string.IsNullOrEmpty(entry.Folder))
+            {
+                MessageBox.Show("Database path or folder is not set.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string nvJpegPath = Path.Combine(GetExeDir(), "NvJpegCollector.exe");
+            if (!File.Exists(nvJpegPath))
+            {
+                MessageBox.Show("NvJpegCollector.exe not found in program directory.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string dbParent = Path.GetDirectoryName(entry.Folder);
+            string dbName = Path.GetFileName(entry.Folder);
+
+            var result = MessageBox.Show(
+                $"Update database \"{entry.Name}\"?\n\nSource: {entry.Path}\nDatabase: {entry.Folder}\n\nThis will add new files and remove deleted files from the database.",
+                "Update Database", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes) return;
+
+            entry.Status = "Updating...";
+            SaveDatabases();
+            RefreshAllGrids();
+
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = nvJpegPath,
+                    Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --update",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                using (var proc = System.Diagnostics.Process.Start(psi))
+                {
+                    string stdout = proc.StandardOutput.ReadToEnd();
+                    string stderr = proc.StandardError.ReadToEnd();
+                    proc.WaitForExit();
+
+                    if (proc.ExitCode == 0)
+                    {
+                        // Parse count from output
+                        int newCount = entry.ImageCount;
+                        var lines = stdout.Split('\n');
+                        foreach (var line in lines)
+                        {
+                            if (line.Contains("[UPDATE] Final database:"))
+                            {
+                                var parts = line.Split(':');
+                                if (parts.Length >= 2 && int.TryParse(parts[parts.Length - 1].Trim().Split(' ')[0], out int c))
+                                    newCount = c;
+                            }
+                        }
+
+                        entry.ImageCount = newCount;
+                        entry.Status = "Ready";
+                        MessageBox.Show($"Database updated successfully.\n{newCount} images.", "Update Complete",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        entry.Status = "Error";
+                        MessageBox.Show($"Update failed (exit code {proc.ExitCode}):\n{stderr}\n{stdout}", "Update Error",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                entry.Status = "Error";
+                MessageBox.Show($"Update failed: {ex.Message}", "Update Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+
+            SaveDatabases();
+            RefreshAllGrids();
+        }
+
+        private void DeleteDatabase(DbEntry entry)
+        {
+            var result = MessageBox.Show(
+                $"Delete database \"{entry.Name}\"?\n\nFolder: {entry.Folder}\n\nThe database folder will be moved to the Recycle Bin.",
+                "Delete Database", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+
+            if (result != DialogResult.Yes) return;
+
+            try
+            {
+                if (!string.IsNullOrEmpty(entry.Folder) && Directory.Exists(entry.Folder))
+                {
+                    var shf = new SHFILEOPSTRUCT();
+                    shf.wFunc = FO_DELETE;
+                    shf.pFrom = entry.Folder + "\0\0";
+                    shf.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT;
+                    int ret = SHFileOperation(ref shf);
+
+                    if (ret != 0)
+                    {
+                        MessageBox.Show($"Failed to move to Recycle Bin (error {ret}).", "Delete Error",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                }
+
+                m_allEntries.Remove(entry);
+                SaveDatabases();
+                RefreshAllGrids();
+                MessageBox.Show($"Database \"{entry.Name}\" moved to Recycle Bin.", "Deleted",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Delete failed: {ex.Message}", "Delete Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void UpdateAllDatabases()
+        {
+            var entriesToUpdate = m_allEntries.Where(e => e.Enabled && !string.IsNullOrEmpty(e.Path) && !string.IsNullOrEmpty(e.Folder)).ToList();
+            if (entriesToUpdate.Count == 0)
+            {
+                MessageBox.Show("No databases to update.", "Update All", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string nvJpegPath = Path.Combine(GetExeDir(), "NvJpegCollector.exe");
+            if (!File.Exists(nvJpegPath))
+            {
+                MessageBox.Show("NvJpegCollector.exe not found in program directory.", "Update All", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var confirm = MessageBox.Show(
+                $"Update {entriesToUpdate.Count} database(s)?\n\nThis may take a while.",
+                "Update All", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes) return;
+
+            int successCount = 0, failCount = 0;
+            foreach (var entry in entriesToUpdate)
+            {
+                entry.Status = "Updating...";
+                SaveDatabases();
+                RefreshAllGrids();
+                Application.DoEvents();
+
+                try
+                {
+                    string dbParent = Path.GetDirectoryName(entry.Folder);
+                    string dbName = Path.GetFileName(entry.Folder);
+
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = nvJpegPath,
+                        Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --update",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    };
+
+                    using (var proc = System.Diagnostics.Process.Start(psi))
+                    {
+                        string stdout = proc.StandardOutput.ReadToEnd();
+                        proc.WaitForExit();
+
+                        if (proc.ExitCode == 0)
+                        {
+                            int newCount = entry.ImageCount;
+                            foreach (var line in stdout.Split('\n'))
+                            {
+                                if (line.Contains("[UPDATE] Final database:"))
+                                {
+                                    var parts = line.Split(':');
+                                    if (parts.Length >= 2 && int.TryParse(parts[parts.Length - 1].Trim().Split(' ')[0], out int c))
+                                        newCount = c;
+                                }
+                            }
+                            entry.ImageCount = newCount;
+                            entry.Status = "Ready";
+                            successCount++;
+                        }
+                        else
+                        {
+                            entry.Status = "Error";
+                            failCount++;
+                        }
+                    }
+                }
+                catch
+                {
+                    entry.Status = "Error";
+                    failCount++;
+                }
+            }
+
+            SaveDatabases();
+            RefreshAllGrids();
+            MessageBox.Show(
+                $"Update complete.\n\nUpdated: {successCount}\nFailed: {failCount}",
+                "Update All", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void RefreshAllGrids()
@@ -476,6 +724,58 @@ namespace AntiDupl.NET.WinForms.Forms
         public static int GetPoolCompareMode()
         {
             return s_poolCompareMode;
+        }
+
+        private static void SavePoolMode()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(PoolModeRegKey))
+                {
+                    key.SetValue("PoolCompareMode", s_poolCompareMode, Microsoft.Win32.RegistryValueKind.DWord);
+                }
+            }
+            catch { }
+        }
+
+        private static int LoadPoolMode()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(PoolModeRegKey))
+                {
+                    if (key != null)
+                    {
+                        var val = key.GetValue("PoolCompareMode");
+                        if (val is int v && v >= 0 && v <= 4)
+                            return v;
+                    }
+                }
+            }
+            catch { }
+            return 0;
+        }
+
+        // --- Win32 Recycle Bin ---
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        static extern int SHFileOperation(ref SHFILEOPSTRUCT lpFileOp);
+
+        const int FO_DELETE = 3;
+        const int FOF_ALLOWUNDO = 0x40;
+        const int FOF_NOCONFIRMATION = 0x10;
+        const int FOF_SILENT = 0x4;
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct SHFILEOPSTRUCT
+        {
+            public IntPtr hwnd;
+            public uint wFunc;
+            [MarshalAs(UnmanagedType.LPWStr)] public string pFrom;
+            [MarshalAs(UnmanagedType.LPWStr)] public string pTo;
+            public ushort fFlags;
+            public bool fAnyOperationsAborted;
+            public IntPtr hNameMappings;
+            [MarshalAs(UnmanagedType.LPWStr)] public string lpszProgressTitle;
         }
     }
 }

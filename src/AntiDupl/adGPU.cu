@@ -691,6 +691,20 @@ namespace ad
 
         // 10. Считываем total match count
         cudaMemcpy(&h_matchCount, d_matchCount, sizeof(size_t), cudaMemcpyDeviceToHost);
+
+        // Log match count
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"  GPU matches found: %zu\n", h_matchCount);
+                fclose(logFile);
+            }
+        }
+
         AD_DEBUG_FMT("GpuCompareAllVsAll: Found %zu total matches (buffer capacity: %zu)\n", h_matchCount, maxMatchesPerBatch);
 
         // Ограничиваем чтение размером буфера

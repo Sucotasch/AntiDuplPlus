@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -149,6 +149,33 @@ namespace AntiDupl.NET.WinForms
                 {
                     Items.Add(m_mistakeItem);
                 }
+
+                // Auto-Select submenu
+                if (m_core.CanApply(CoreDll.ActionEnableType.DuplPair))
+                {
+                    Items.Add(new ToolStripSeparator());
+                    var autoSelectMenu = new ToolStripMenuItem("Auto-Select...");
+                    autoSelectMenu.DropDownItems.Add("Older", null, (s, e) => DoAutoSelect(AutoSelectCriteria.Older));
+                    autoSelectMenu.DropDownItems.Add("Newer", null, (s, e) => DoAutoSelect(AutoSelectCriteria.Newer));
+                    autoSelectMenu.DropDownItems.Add("Smaller File", null, (s, e) => DoAutoSelect(AutoSelectCriteria.SmallerFile));
+                    autoSelectMenu.DropDownItems.Add("Larger File", null, (s, e) => DoAutoSelect(AutoSelectCriteria.LargerFile));
+                    autoSelectMenu.DropDownItems.Add("Lower Resolution", null, (s, e) => DoAutoSelect(AutoSelectCriteria.LowerResolution));
+                    autoSelectMenu.DropDownItems.Add("Higher Resolution", null, (s, e) => DoAutoSelect(AutoSelectCriteria.HigherResolution));
+                    autoSelectMenu.DropDownItems.Add("Worse Quality", null, (s, e) => DoAutoSelect(AutoSelectCriteria.WorseQuality));
+                    autoSelectMenu.DropDownItems.Add("Better Quality", null, (s, e) => DoAutoSelect(AutoSelectCriteria.BetterQuality));
+                    autoSelectMenu.DropDownItems.Add(new ToolStripSeparator());
+                    autoSelectMenu.DropDownItems.Add("From Pool1", null, (s, e) => DoAutoSelect(AutoSelectCriteria.FromPool1));
+                    autoSelectMenu.DropDownItems.Add("From Pool2", null, (s, e) => DoAutoSelect(AutoSelectCriteria.FromPool2));
+                    autoSelectMenu.DropDownItems.Add(new ToolStripSeparator());
+                    autoSelectMenu.DropDownItems.Add("Invert Selection", null, (s, e) => { AutoSelector.InvertSides(m_core); m_mainSplitContainer.UpdateResults(); });
+                    autoSelectMenu.DropDownItems.Add("Deselect All", null, (s, e) => { AutoSelector.ClearAll(m_core); m_mainSplitContainer.UpdateResults(); });
+                    Items.Add(autoSelectMenu);
+
+                    // Execute actions
+                    Items.Add(new ToolStripSeparator());
+                    Items.Add("Delete Selected", null, (s, e) => { int n = AutoSelector.Execute(m_core, true); MessageBox.Show($"Deleted {n} images.", "Delete", MessageBoxButtons.OK, MessageBoxIcon.Information); m_mainSplitContainer.UpdateResults(); });
+                    Items.Add("Move Selected to Folder...", null, OnMoveSelectedToFolder);
+                }
             }
         }
 
@@ -175,6 +202,30 @@ namespace AntiDupl.NET.WinForms
         private void OnOptionsChanged()
         {
             m_mistakeItem.Enabled = m_coreOptions.advancedOptions.mistakeDataBase;
+        }
+
+        private void DoAutoSelect(AutoSelectCriteria criteria)
+        {
+            int affected = AutoSelector.Apply(m_core, criteria);
+            MessageBox.Show($"Marked {affected} images for action.", "Auto-Select",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            m_mainSplitContainer.UpdateResults();
+        }
+
+        private void OnMoveSelectedToFolder(object sender, EventArgs e)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "Select folder to move marked images";
+                dialog.ShowNewFolderButton = true;
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    int moved = AutoSelector.Execute(m_core, false, dialog.SelectedPath);
+                    MessageBox.Show($"Moved {moved} images to:\n{dialog.SelectedPath}", "Move",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    m_mainSplitContainer.UpdateResults();
+                }
+            }
         }
         
         public void SetViewMode(ResultsOptions.ViewMode viewMode)

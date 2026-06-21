@@ -33,7 +33,7 @@ namespace AntiDupl.NET.WinForms
 {
     /// <summary>
     /// Setting for table out (ListView).
-    /// Установки для таблицы вывода.
+    /// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ.
     /// </summary>
     public class ResultsOptions
     {
@@ -470,9 +470,13 @@ namespace AntiDupl.NET.WinForms
             columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.Hint].width = 30;
             columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.Hint].order = 5;
 
+            columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.Target].visible = true;
+            columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.Target].width = 50;
+            columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.Target].order = 6;
+
             columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.FileName].visible = true;
             columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.FileName].width = 100;
-            columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.FileName].order = 6;
+            columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.FileName].order = 7;
 
             columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.FileDirectory].visible = true;
             columnOptionsVertical[(int)ResultsListView.ColumnsTypeVertical.FileDirectory].width = 230;
@@ -528,6 +532,10 @@ namespace AntiDupl.NET.WinForms
             columnOptionsHorizontal[(int)ResultsListView.ColumnsTypeHorizontal.Hint].visible = true;
             columnOptionsHorizontal[(int)ResultsListView.ColumnsTypeHorizontal.Hint].width = 30;
             columnOptionsHorizontal[(int)ResultsListView.ColumnsTypeHorizontal.Hint].order = 5;
+
+            columnOptionsHorizontal[(int)ResultsListView.ColumnsTypeHorizontal.Target].visible = true;
+            columnOptionsHorizontal[(int)ResultsListView.ColumnsTypeHorizontal.Target].width = 50;
+            columnOptionsHorizontal[(int)ResultsListView.ColumnsTypeHorizontal.Target].order = 6;
 
             columnOptionsHorizontal[(int)ResultsListView.ColumnsTypeHorizontal.FirstFileDirectory].visible = true;
             columnOptionsHorizontal[(int)ResultsListView.ColumnsTypeHorizontal.FirstFileDirectory].width = 230;

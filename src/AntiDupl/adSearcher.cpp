@@ -193,24 +193,18 @@ namespace ad
     }
 
     bool TSearcher::LoadDatabase(const std::wstring& path) {
-        // Get user path from options
         std::wstring userPath = m_pOptions->userPath;
 
-        // Check registry for ready database
         TDatabaseInfo dbInfo;
-        if (!TDatabaseRegistry::FindByPath(path, dbInfo, userPath)) {
+        if (!TDatabaseRegistry::FindByPath(path, dbInfo, userPath))
             return false;
-        }
 
-        if (dbInfo.Status != L"Ready") {
+        if (dbInfo.Status != L"Ready")
             return false;
-        }
 
-        if (!dbInfo.Enabled) {
-            return false; // Database is disabled in registry
-        }
+        if (!dbInfo.Enabled)
+            return false;
 
-        // Determine database folder path
         std::wstring dbFolder = dbInfo.Folder;
         if (dbFolder.empty()) {
             dbFolder = path;
@@ -223,6 +217,7 @@ namespace ad
         const size_t prevCount = m_pImageDataPtrs->size();
 
         adError result = m_pImageDataStorage->Load(dbFolder.c_str(), true);
+
         if (result == AD_OK) {
             const TImageDataStorage::TStorage& storage = m_pImageDataStorage->Storage();
             for (TImageDataStorage::TStorage::const_iterator it = storage.begin(); it != storage.end(); ++it) {

@@ -477,19 +477,28 @@ namespace ad
         TUndoRedoStage *pCurrent = m_pUndoRedoEngine->Current();
         TResultPtrVector &results = pCurrent->results;
 
-        // Helper to get pool for an image path
+        // Helper to get pool for an image path - uses prefix matching
         auto getPool = [&dbPoolMap](const TPath& path) -> int {
-            auto it = dbPoolMap.find(path.Original());
+            std::wstring imgPath = path.Original();
+            std::wstring lowerImgPath = imgPath;
+            std::transform(lowerImgPath.begin(), lowerImgPath.end(), lowerImgPath.begin(), ::towlower);
+
+            // Exact match first
+            auto it = dbPoolMap.find(imgPath);
             if (it != dbPoolMap.end()) return it->second;
-            // Try case-insensitive lookup
-            std::wstring lowerPath = path.Original();
-            std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+
+            // Prefix match: image path starts with database path
+            int bestPool = 0;
+            size_t bestLen = 0;
             for (auto& kv : dbPoolMap) {
                 std::wstring lowerKey = kv.first;
                 std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(), ::towlower);
-                if (lowerKey == lowerPath) return kv.second;
+                if (lowerImgPath.find(lowerKey) == 0 && lowerKey.length() > bestLen) {
+                    bestPool = kv.second;
+                    bestLen = lowerKey.length();
+                }
             }
-            return 0;
+            return bestPool;
         };
 
         TResultPtrVector filtered;

@@ -98,6 +98,8 @@ namespace ad
 
 		bool LoadIndex(TIndex & index, const TChar *fileName, bool allLoad = false) const;
 		bool LoadData(TData & data, const TChar *path, short key);
+		adError LoadCollectorNative(const TChar *path, uint32_t thumbSizeFromHeader, bool allLoad);
+		bool LoadCollectorData(const TChar *path, TData & data, short key);
 	};
     //-------------------------------------------------------------------------
 }

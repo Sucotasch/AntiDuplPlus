@@ -287,6 +287,19 @@ namespace ad
 
     adError TPathContainer::Import(adPathWSFPtr pPath, adSize pathCount)
     {
+        // [C#5] Log Import
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"[C#5] Import: pathCount=%zu\n", pathCount);
+                fclose(logFile);
+            }
+        }
+
         if(pathCount == 0)
         {
             m_paths.clear();
@@ -310,7 +323,19 @@ namespace ad
 				}
 
 				if ((pPath[i][MAX_PATH_EX] != TRUE) && (pPath[i][MAX_PATH_EX] != FALSE))
+				{
+                    // Log validation error
+                    wchar_t exePath[MAX_PATH];
+                    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+                    std::wstring logPath(exePath);
+                    logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+                    FILE* logFile = _wfopen(logPath.c_str(), L"a");
+                    if (logFile) {
+                        fwprintf(logFile, L"  Import FAILED: validation error at path %zu, flag=%d\n", i, pPath[i][MAX_PATH_EX]);
+                        fclose(logFile);
+                    }
 					return AD_ERROR_INVALID_PARAMETER_COMBINATION;
+				}
 				TPath pat(sPath, pPath[i][MAX_PATH_EX]);
 				tmp[i] = pat;
 			}
@@ -430,6 +455,19 @@ namespace ad
                 case TPath::EQUAL:
                     break;
                 }
+            }
+        }
+
+        // [C#6] Log Set result
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"[C#6] Set: tmp.size=%zu, m_paths.size=%zu\n", tmp.size(), m_paths.size());
+                fclose(logFile);
             }
         }
         if(m_defaultPathEnabled && m_paths.size() == 0)

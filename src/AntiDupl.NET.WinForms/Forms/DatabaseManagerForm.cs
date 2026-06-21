@@ -39,11 +39,14 @@ namespace AntiDupl.NET.WinForms.Forms
 
         private const string RegistryFileName = "ad_database.xml";
         private List<DbEntry> m_allEntries = new List<DbEntry>();
+        private bool m_dirty = false;
+        private static int s_poolCompareMode = 0;
 
         public DatabaseManagerForm()
         {
             InitializeComponent();
             LoadDatabases();
+            this.FormClosing += (s, e) => { if (m_dirty) SaveDatabases(); };
         }
 
         private void InitializeComponent()
@@ -75,10 +78,17 @@ namespace AntiDupl.NET.WinForms.Forms
 
             m_cmbPoolMode = new ComboBox();
             m_cmbPoolMode.DropDownStyle = ComboBoxStyle.DropDownList;
-            m_cmbPoolMode.Items.AddRange(new object[] { "None (All)", "Pool1 Internal", "Pool2 Internal", "Cross (Pool1 vs Pool2)", "All Pools" });
+            m_cmbPoolMode.Items.AddRange(new object[] { 
+                "None - Compare all (no pool filter)", 
+                "Pool1 Internal - Only Pool1 vs Pool1", 
+                "Pool2 Internal - Only Pool2 vs Pool2", 
+                "Cross - Pool1 vs Pool2 only", 
+                "All Pools - Only pooled images (Pool1+Pool2)" 
+            });
             m_cmbPoolMode.SelectedIndex = 0;
             m_cmbPoolMode.Location = new Point(170, 4);
             m_cmbPoolMode.Width = 200;
+            m_cmbPoolMode.SelectedIndexChanged += (s, e) => { s_poolCompareMode = m_cmbPoolMode.SelectedIndex; };
 
             poolModePanel.Controls.Add(lblPoolMode);
             poolModePanel.Controls.Add(m_cmbPoolMode);
@@ -200,6 +210,7 @@ namespace AntiDupl.NET.WinForms.Forms
             grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             grid.RowHeadersVisible = false;
+            grid.CellContentClick += Grid_CellContentClick;
 
             var colEnabled = new DataGridViewCheckBoxColumn();
             colEnabled.Name = "Enabled";
@@ -237,6 +248,22 @@ namespace AntiDupl.NET.WinForms.Forms
         {
             m_allEntries = LoadRegistry("");
             RefreshAllGrids();
+            m_dirty = false;
+        }
+
+        private void Grid_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.ColumnIndex < 0 || e.RowIndex < 0) return;
+            var grid = sender as DataGridView;
+            if (grid == null) return;
+
+            // Check if click is on Enabled column
+            if (grid.Columns[e.ColumnIndex].Name == "Enabled")
+            {
+                grid.EndEdit();
+                m_dirty = true;
+                SaveDatabases();
+            }
         }
 
         private void RefreshAllGrids()
@@ -412,6 +439,18 @@ namespace AntiDupl.NET.WinForms.Forms
                 if (entry.Enabled && entry.Status == "Ready" && !string.IsNullOrEmpty(entry.Path))
                     paths.Add(entry.Path);
             }
+            
+            // Debug: log to file
+            try {
+                string logPath = System.IO.Path.Combine(GetExeDir(), "cs_debug.log");
+                using (var sw = new System.IO.StreamWriter(logPath, true))
+                {
+                    sw.WriteLine($"GetEnabledDatabasePaths: {entries.Count} entries, {paths.Count} enabled");
+                    foreach (var p in paths)
+                        sw.WriteLine($"  {p}");
+                }
+            } catch { }
+            
             return paths;
         }
 
@@ -429,6 +468,14 @@ namespace AntiDupl.NET.WinForms.Forms
                     map[entry.Path] = entry.Pool;
             }
             return map;
+        }
+
+        /// <summary>
+        /// Gets the current pool comparison mode from the UI.
+        /// </summary>
+        public static int GetPoolCompareMode()
+        {
+            return s_poolCompareMode;
         }
     }
 }

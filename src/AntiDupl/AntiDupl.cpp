@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -374,6 +374,20 @@ DLLAPI adError adPathSetW(adEngineHandle handle, adPathType pathType, adPathPtrW
 // pathType - тип пути, pPaths - указатель на переменную пути, pathSize - количество путей
 DLLAPI adError adPathWithSubFolderSetW(adEngineHandle handle, adPathType pathType, adPathWSFPtr pPaths, adSize pathSize)
 {
+	// [C#4] Log entry with handle address
+	{
+		wchar_t exePath[MAX_PATH];
+		GetModuleFileNameW(NULL, exePath, MAX_PATH);
+		std::wstring logPath(exePath);
+		logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
+		FILE* logFile = _wfopen(logPath.c_str(), L"a");
+		if (logFile) {
+			fwprintf(logFile, L"[C#4] adPathWithSubFolderSetW: handle=%p, pathType=%d, pathSize=%zu, state=%d\n", 
+				(void*)handle, pathType, pathSize, handle->Status()->State());
+			fclose(logFile);
+		}
+	}
+
 	CHECK_HANDLE CHECK_ACCESS LOCK
 
 	ad::TOptions *pOptions = handle->Options();

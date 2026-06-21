@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -44,6 +44,7 @@ namespace AntiDupl.NET.Core
         public bool compareInsideOneFolder;
         public bool compareInsideOneSearchPath;
         public AlgorithmComparing algorithmComparing;
+        public PoolCompareMode poolCompareMode;
 
         public CoreCompareOptions()
         {
@@ -57,6 +58,7 @@ namespace AntiDupl.NET.Core
             typeControl = compareOptions.typeControl;
             ratioControl = compareOptions.ratioControl;
 			algorithmComparing = compareOptions.algorithmComparing;
+            poolCompareMode = compareOptions.poolCompareMode;
             thresholdDifference = compareOptions.thresholdDifference;
             minimalImageSize = compareOptions.minimalImageSize;
             maximalImageSize = compareOptions.maximalImageSize;
@@ -72,6 +74,7 @@ namespace AntiDupl.NET.Core
             typeControl = compareOptions.typeControl != CoreDll.FALSE;
             ratioControl = compareOptions.ratioControl != CoreDll.FALSE;
 			algorithmComparing = compareOptions.algorithmComparing;
+            poolCompareMode = compareOptions.poolCompareMode;
             thresholdDifference = compareOptions.thresholdDifference;
             minimalImageSize = compareOptions.minimalImageSize;
             maximalImageSize = compareOptions.maximalImageSize;
@@ -87,6 +90,7 @@ namespace AntiDupl.NET.Core
             compareOptions.typeControl = typeControl ? CoreDll.TRUE : CoreDll.FALSE;
             compareOptions.ratioControl = ratioControl ? CoreDll.TRUE : CoreDll.FALSE;
 			compareOptions.algorithmComparing = algorithmComparing;
+            compareOptions.poolCompareMode = poolCompareMode;
             compareOptions.thresholdDifference = thresholdDifference;
             compareOptions.minimalImageSize = minimalImageSize;
             compareOptions.maximalImageSize = maximalImageSize;
@@ -108,6 +112,7 @@ namespace AntiDupl.NET.Core
                 typeControl == compareOptions.typeControl &&
                 ratioControl == compareOptions.ratioControl &&
 				algorithmComparing == compareOptions.algorithmComparing &&
+                poolCompareMode == compareOptions.poolCompareMode &&
                 thresholdDifference == compareOptions.thresholdDifference &&
                 minimalImageSize == compareOptions.minimalImageSize &&
                 maximalImageSize == compareOptions.maximalImageSize &&
@@ -222,6 +227,16 @@ namespace AntiDupl.NET.Core
             {
                 algorithmComparing = value;
                 NotifyPropertyChanged("AlgorithmComparing");
+            }
+        }
+
+        public PoolCompareMode PoolCompareMode
+        {
+            get { return poolCompareMode; }
+            set
+            {
+                poolCompareMode = value;
+                NotifyPropertyChanged("PoolCompareMode");
             }
         }
 

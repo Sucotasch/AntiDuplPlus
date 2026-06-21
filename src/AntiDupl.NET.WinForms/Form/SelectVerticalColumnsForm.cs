@@ -91,8 +91,10 @@ namespace AntiDupl.NET.WinForms
             columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.Transform], 0, 5);
             m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.Hint] = InitFactory.CheckBox.Create(OnOptionChanged);
             columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.Hint], 1, 0);
+            m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.Target] = InitFactory.CheckBox.Create(OnOptionChanged);
+            columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.Target], 1, 1);
             m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.FileName] = InitFactory.CheckBox.Create(OnOptionChanged);
-            columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.FileName], 1, 1);
+            columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.FileName], 1, 2);
             m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.FileDirectory] = InitFactory.CheckBox.Create(OnOptionChanged);
             columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.FileDirectory], 1, 2);
             m_checkBoxes[(int)ResultsListView.ColumnsTypeVertical.ImageSize] = InitFactory.CheckBox.Create(OnOptionChanged);

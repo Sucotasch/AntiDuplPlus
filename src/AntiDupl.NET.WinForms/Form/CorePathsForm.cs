@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2014 Borisov Dmitry.
@@ -107,7 +107,7 @@ namespace AntiDupl.NET.WinForms
 
             m_searchTabPage = new TabPage();
             m_searchTabPage.Tag = CoreDll.PathType.Search;
-            m_tabControl.Controls.Add(m_searchTabPage);
+            // Search tab hidden - Database Manager is now the source of truth for search paths
 
             m_toolTip = new ToolTip();
             m_toolTip.ShowAlways = true;

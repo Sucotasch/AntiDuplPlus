@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2015 Borisov Dmitry.
@@ -49,6 +49,7 @@ namespace AntiDupl.NET.WinForms
             Defect,
             Transform,
             Hint,
+            Target,
             FileName,
             FileDirectory,
             ImageSize,
@@ -69,6 +70,7 @@ namespace AntiDupl.NET.WinForms
             Defect,
             Transform,
             Hint,
+            Target,
             FirstFileName,
             FirstFileDirectory,
             FirstImageSize,
@@ -187,7 +189,8 @@ namespace AntiDupl.NET.WinForms
             Columns[(int)ColumnsTypeVertical.Difference].Name = s.ResultsListView_Difference_Column_Text;
             Columns[(int)ColumnsTypeVertical.Defect].Name = s.ResultsListView_Defect_Column_Text;
             Columns[(int)ColumnsTypeVertical.Transform].Name = s.ResultsListView_Transform_Column_Text;
-            Columns[(int)ColumnsTypeVertical.Hint].Name = s.ResultsListView_Hint_Column_Text;
+                Columns[(int)ColumnsTypeVertical.Hint].Name = s.ResultsListView_Hint_Column_Text;
+                Columns[(int)ColumnsTypeVertical.Target].Name = "Target";
             if (m_options.resultsOptions.viewMode == ResultsOptions.ViewMode.VerticalPairTable)
             {
                 Columns[(int)ColumnsTypeVertical.FileName].Name = s.ResultsListView_FileName_Column_Text;
@@ -412,6 +415,17 @@ namespace AntiDupl.NET.WinForms
                     row.updated = false;
                     if (selection != null)
                         row.selected = selection[i];
+
+                    // Update Target column from sideCache
+                    if (Columns.Contains("Target") && i < m_results.Length)
+                    {
+                        var side = AutoSelector.GetSide(i);
+                        string display = (side == AutoSelectSide.DontCare) ? "" :
+                                         (side == AutoSelectSide.First) ? "1st" : "2nd";
+                        row.Cells["Target"].Value = display;
+                        row.Cells["Target"].Style.BackColor = 
+                            (side != AutoSelectSide.DontCare) ? Color.LightCoral : SystemColors.Window;
+                    }
                 }
                 int current = m_core.GetCurrent();
                 if (current != -1)
@@ -676,6 +690,14 @@ namespace AntiDupl.NET.WinForms
         {
             if (e != null && e.RowIndex >= 0 && e.RowIndex < Rows.Count)
             {
+                // Handle Target column click - cycle through values
+                if (e.Button == MouseButtons.Left && Columns[e.ColumnIndex].Name == "Target")
+                {
+                    CycleTarget(e.RowIndex);
+                    Invalidate();
+                    return;
+                }
+
                 if (e.Button == MouseButtons.Left)
                 {
                     SetCurrentRow(e.RowIndex);
@@ -704,6 +726,38 @@ namespace AntiDupl.NET.WinForms
                 ContextMenuStrip = null;
             }
             base.OnCellMouseDown(e);
+        }
+
+        private void CycleTarget(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= m_results.Length) return;
+            if (m_results[rowIndex].type != CoreDll.ResultType.DuplImagePair) return;
+
+            var current = AutoSelector.GetSide(rowIndex);
+            AutoSelectSide next;
+            if (current == AutoSelectSide.DontCare)
+                next = AutoSelectSide.First;
+            else if (current == AutoSelectSide.First)
+                next = AutoSelectSide.Second;
+            else
+                next = AutoSelectSide.DontCare;
+
+            // Update sideCache
+            if (next == AutoSelectSide.DontCare)
+                AutoSelector.ClearSide(rowIndex);
+            else
+                AutoSelector.SetSide(rowIndex, next);
+
+            // Update cell display
+            string display = (next == AutoSelectSide.DontCare) ? "" :
+                             (next == AutoSelectSide.First) ? "1st" : "2nd";
+            Rows[rowIndex].Cells["Target"].Value = display;
+
+            // Color the cell
+            if (next == AutoSelectSide.DontCare)
+                Rows[rowIndex].Cells["Target"].Style.BackColor = SystemColors.Window;
+            else
+                Rows[rowIndex].Cells["Target"].Style.BackColor = Color.LightCoral;
         }
 
         protected override void OnCellMouseEnter(DataGridViewCellEventArgs e)
@@ -919,6 +973,7 @@ namespace AntiDupl.NET.WinForms
                 Rows[0].Cells[0] = new DataGridViewTextBoxCell();
                 Rows[0].Cells[0].Value = "0";
             }
+
             RowTemplate = new DataGridViewCustomRow();
             RowTemplate.Height = Rows[0].Cells[0].PreferredSize.Height;
             Rows.Clear();

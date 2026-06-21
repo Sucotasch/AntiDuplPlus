@@ -34,6 +34,8 @@
 #include "adSearcher.h"
 #include "adRecycleBin.h"
 #include "adEngine.h"
+
+// Debug logging - removed, using fwprintf to trace.log instead
 #include "adPerformance.h"
 #include "adLogger.h"
 #include "adFileUtils.h"
@@ -240,6 +242,7 @@ namespace ad
         double maxDifference;
         size_t totalProcessed;
         size_t bufferFullCount;
+        size_t totalPairs;
     };
 
     // Callback функция для streaming обработки matches
@@ -265,9 +268,9 @@ namespace ad
             ctx->engine->Result()->AddDuplImagePair(pImage1, pImage2, matches[i].difference, AD_TRANSFORM_TURN_0);
             ctx->totalProcessed++;
             
-            // Обновляем прогресс (для GPU режима)
-            if (ctx->totalProcessed % 10000 == 0) {
-                ctx->engine->Status()->SetProgress(ctx->totalProcessed, ctx->totalProcessed);  // dummy update
+            // Обновляем прогресс для GPU режима
+            if (ctx->totalProcessed % 1000 == 0) {
+                ctx->engine->Status()->SetProgress(ctx->totalProcessed, ctx->totalPairs);
             }
         }
     }
@@ -277,6 +280,19 @@ namespace ad
     bool TEngine::ExecuteGpuAllVsAllComparison()
     {
         AD_DEBUG("ExecuteGpuAllVsAllComparison: Starting\n");
+
+        // Log entry
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"\n=== ExecuteGpuAllVsAllComparison ===\n");
+                fclose(logFile);
+            }
+        }
 
         if (!m_pGpuManager || !m_pGpuManager->IsAvailable()) {
             AD_DEBUG("ExecuteGpuAllVsAllComparison: GPU not available\n");
@@ -313,13 +329,14 @@ namespace ad
         }
         
         size_t validCount = 0;
+        size_t validThumbBytes = 0;
 
         for (TImageDataStorage::TStorage::const_iterator it = storage.begin(); it != storage.end(); ++it) {
             TImageDataPtr pImageData = it->second;
             if (pImageData->data && pImageData->data->filled && pImageData->data->main != nullptr) {
-                // Копируем thumbnail
-                allThumbnails.resize((validCount + 1) * thumbSize);
-                memcpy(&allThumbnails[validCount * thumbSize], pImageData->data->main, thumbSize);
+                allThumbnails.resize(validThumbBytes + thumbSize);
+                memcpy(&allThumbnails[validThumbBytes], pImageData->data->main, thumbSize);
+                validThumbBytes += thumbSize;
                 
                 // Копируем CRC
                 allCrcArray.push_back(pImageData->crc32c);
@@ -339,6 +356,20 @@ namespace ad
 
         AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: %zu valid thumbnails out of %zu\n", validCount, count);
 
+        // Log valid count
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"  Valid thumbnails: %zu / %zu\n", validCount, count);
+                fwprintf(logFile, L"  thumbSize: %zu\n", thumbSize);
+                fclose(logFile);
+            }
+        }
+
         if (validCount < 2) {
             AD_DEBUG("ExecuteGpuAllVsAllComparison: Not enough valid images\n");
             return false;
@@ -351,6 +382,7 @@ namespace ad
         ctx.thumbSize = thumbSize;
         ctx.totalProcessed = 0;
         ctx.bufferFullCount = 0;
+        ctx.totalPairs = validCount * (validCount - 1) / 2;
 
         const size_t BATCH_MATCHES = 5000000;
         bool success = false;
@@ -360,12 +392,30 @@ namespace ad
         std::vector<uint8_t> poolMask;
         if (poolCompareMode != 0) {
             poolMask.resize(validCount, 0);
+            std::vector<TDatabaseInfo> databases;
+            TDatabaseRegistry::Load(databases, m_pOptions->userPath);
+            
+            // Pre-compute lowercase DB paths once
+            std::vector<std::pair<std::wstring, int>> precalcDbPaths;
+            for (const auto& db : databases) {
+                std::wstring lower = db.Path;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+                precalcDbPaths.push_back({lower, db.Pool});
+            }
+            
             for (size_t k = 0; k < validCount; k++) {
-                // Look up pool from database registry
-                TDatabaseInfo dbInfo;
-                if (TDatabaseRegistry::FindByPath(imageByIndex[k]->path.Original(), dbInfo, m_pOptions->userPath)) {
-                    poolMask[k] = (uint8_t)dbInfo.Pool;
+                std::wstring lowerImgPath = imageByIndex[k]->path.Original();
+                std::transform(lowerImgPath.begin(), lowerImgPath.end(), lowerImgPath.begin(), ::towlower);
+                
+                int bestPool = 0;
+                size_t bestLen = 0;
+                for (const auto& dp : precalcDbPaths) {
+                    if (lowerImgPath.find(dp.first) == 0 && dp.first.length() > bestLen) {
+                        bestPool = dp.second;
+                        bestLen = dp.first.length();
+                    }
                 }
+                poolMask[k] = (uint8_t)bestPool;
             }
         }
 
@@ -444,6 +494,37 @@ namespace ad
     {
         AD_DEBUG("Search: Starting\n");
 
+        // [C#7] Log handle address for comparison
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"[C#7] Search: this=%p, m_pOptions=%p, searchPaths.Size()=%zu\n", 
+                    (void*)this, (void*)m_pOptions, m_pOptions->searchPaths.Size());
+                fclose(logFile);
+            }
+        }
+
+        // Log search paths size immediately
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"\n=== Search() called ===\n");
+                fwprintf(logFile, L"  searchPaths.Size() = %zu\n", m_pOptions->searchPaths.Size());
+                for (size_t i = 0; i < m_pOptions->searchPaths.Size(); i++) {
+                    fwprintf(logFile, L"  [%zu] %s\n", i, m_pOptions->searchPaths[i].Original().c_str());
+                }
+                fclose(logFile);
+            }
+        }
+
         AD_FUNCTION_PERFORMANCE_TEST
         m_pStatus->ClearStatistic();
         m_pStatus->SetProgress(0, 0);
@@ -455,19 +536,58 @@ namespace ad
 
         // 1. Try to load all pre-collected databases (not just the first one)
         AD_DEBUG("Search: Checking for pre-collected databases\n");
+        
+        // Log search paths
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"\nSearch: %zu search paths in m_pOptions\n", m_pOptions->searchPaths.Size());
+                for (size_t i = 0; i < m_pOptions->searchPaths.Size(); i++) {
+                    fwprintf(logFile, L"  [%zu] %s\n", i, m_pOptions->searchPaths[i].Original().c_str());
+                }
+                fwprintf(logFile, L"  userPath: %s\n", m_pOptions->userPath.c_str());
+                fclose(logFile);
+            }
+        }
+
         bool dbLoaded = false;
         for (size_t i = 0; i < m_pOptions->searchPaths.Size(); i++) {
             const TPath& searchPath = m_pOptions->searchPaths[i];
+            // Log before LoadDatabase
+            {
+                wchar_t exePath[MAX_PATH];
+                GetModuleFileNameW(NULL, exePath, MAX_PATH);
+                std::wstring logPath(exePath);
+                logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
+                FILE* logFile = _wfopen(logPath.c_str(), L"a");
+                if (logFile) {
+                    fwprintf(logFile, L"[C#8] LoadDatabase: path=%s\n", searchPath.Original().c_str());
+                    fclose(logFile);
+                }
+            }
             if (m_pSearcher->LoadDatabase(searchPath.Original())) {
                 dbLoaded = true;
-                AD_DEBUG("Search: Database loaded successfully\n");
             }
         }
 
         if (!dbLoaded) {
-            AD_DEBUG("Search: No pre-collected database found, scanning files\n");
+            // Log that SearchImages is being used instead
+            {
+                wchar_t exePath[MAX_PATH];
+                GetModuleFileNameW(NULL, exePath, MAX_PATH);
+                std::wstring logPath(exePath);
+                logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
+                FILE* logFile = _wfopen(logPath.c_str(), L"a");
+                if (logFile) {
+                    fwprintf(logFile, L"[C#9] SearchImages: No databases loaded, scanning files\n");
+                    fclose(logFile);
+                }
+            }
             m_pSearcher->SearchImages();
-            AD_DEBUG("Search: SearchImages completed\n");
         }
 
         // 2. Start collection threads
@@ -480,6 +600,25 @@ namespace ad
                        (m_pOptions->compare.algorithmComparing == AD_COMPARING_SQUARED_SUM ||
                         m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM) &&
                        m_pOptions->advanced.ignoreFrameWidth == 0);
+
+        // Log GPU status
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"w");
+            if (logFile) {
+                fwprintf(logFile, L"GPU Debug:\n");
+                fwprintf(logFile, L"  GpuManager: %s\n", m_pGpuManager ? L"OK" : L"NULL");
+                fwprintf(logFile, L"  IsAvailable: %s\n", (m_pGpuManager && m_pGpuManager->IsAvailable()) ? L"YES" : L"NO");
+                fwprintf(logFile, L"  Algorithm: %d (0=SqSum, 1=SSIM)\n", m_pOptions->compare.algorithmComparing);
+                fwprintf(logFile, L"  ignoreFrameWidth: %d\n", m_pOptions->advanced.ignoreFrameWidth);
+                fwprintf(logFile, L"  useGpu: %s\n", useGpu ? L"YES" : L"NO");
+                fwprintf(logFile, L"  Images: %zu\n", m_pImageDataPtrs->size());
+                fclose(logFile);
+            }
+        }
 
         if (useGpu)
         {
@@ -503,14 +642,43 @@ namespace ad
         size_t current = 0, total = m_pImageDataPtrs->size();
         AD_DEBUG("Search: Total images to process\n");
 
+        // Step log: entering collection
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"  Collection: total=%zu, useGpu=%d\n", total, useGpu ? 1 : 0);
+                fclose(logFile);
+            }
+        }
+
         for(TImageDataPtrs::iterator it = m_pImageDataPtrs->begin();
             it != m_pImageDataPtrs->end() && !m_pStatus->Stopped(); ++it, ++current)
         {
             TImageDataPtr pImageData = *it;
+            if (!pImageData || !pImageData->data) continue;
             m_pCollectManager->Add(pImageData);
-            m_pStatus->SetProgress(current, total);
+            if (current % 1000 == 0)
+                m_pStatus->SetProgress(current, total);
         }
+        m_pStatus->SetProgress(total, total);
         AD_DEBUG("Search: Collection loop finished\n");
+
+        // Step log: collection done
+        {
+            wchar_t exePath[MAX_PATH];
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring logPath(exePath);
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"  Collection done: processed %zu images\n", current);
+                fclose(logFile);
+            }
+        }
 
         m_pCollectManager->Finish();
         AD_DEBUG("Search: Collection manager finished\n");
@@ -518,13 +686,37 @@ namespace ad
         if (useGpu)
         {
             AD_DEBUG("Search: Using GPU AllVsAll comparison\n");
+            // Log before GPU comparison
+            {
+                wchar_t exePath[MAX_PATH];
+                GetModuleFileNameW(NULL, exePath, MAX_PATH);
+                std::wstring logPath(exePath);
+                logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+                FILE* logFile = _wfopen(logPath.c_str(), L"a");
+                if (logFile) {
+                    fwprintf(logFile, L"  Before GPU: storage=%zu, ptrs=%zu\n", 
+                        m_pImageDataStorage->Storage().size(), m_pImageDataPtrs->size());
+                    fclose(logFile);
+                }
+            }
             bool gpuSuccess = ExecuteGpuAllVsAllComparison();
             m_skipComparisonDuringCollection = false;
             
+            // Log GPU result
+            {
+                wchar_t exePath[MAX_PATH];
+                GetModuleFileNameW(NULL, exePath, MAX_PATH);
+                std::wstring logPath(exePath);
+                logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+                FILE* logFile = _wfopen(logPath.c_str(), L"a");
+                if (logFile) {
+                    fwprintf(logFile, L"\nGPU Comparison Result: %s\n", gpuSuccess ? L"SUCCESS" : L"FAILED");
+                    fclose(logFile);
+                }
+            }
+
             if (!gpuSuccess) {
                 AD_DEBUG("Search: GPU comparison FAILED — no CPU fallback (too slow for large collections)\n");
-                // CPU fallback removed — O(N^2) CPU comparison is impractical for 10K+ images
-                // User should retry with smaller collection or check GPU memory availability
             }
             else {
                 AD_DEBUG("Search: GPU comparison completed successfully\n");

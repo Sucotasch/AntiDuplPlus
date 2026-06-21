@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -598,7 +598,18 @@ namespace AntiDupl.NET.Core
             }
             set
             {
-                SetPath(CoreDll.PathType.Search, value);
+                if (!SetPath(CoreDll.PathType.Search, value))
+                {
+                    try {
+                        string logPath = System.IO.Path.Combine(
+                            System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                            "path_debug.log");
+                        using (var sw = new System.IO.StreamWriter(logPath, true))
+                        {
+                            sw.WriteLine($"searchPath setter: SetPath FAILED for {value.Length} paths");
+                        }
+                    } catch { }
+                }
             }
         }
 
@@ -685,6 +696,17 @@ namespace AntiDupl.NET.Core
 
         private bool SetPath(CoreDll.PathType pathType, CorePathWithSubFolder[] path)
         {
+            // [C#3] Log BEFORE call
+            try {
+                string logPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                    "trace.log");
+                using (var sw = new System.IO.StreamWriter(logPath, true))
+                {
+                    sw.WriteLine($"[C#3] SetPath BEFORE: pathType={pathType}, count={path.Length}, handle={m_handle}");
+                }
+            } catch { }
+
             char[] buffer = new char[path.Length * (CoreDll.MAX_PATH_EX + 1)];
             for (int i = 0; i < path.Length; i++)
             {
@@ -692,10 +714,39 @@ namespace AntiDupl.NET.Core
                 buffer[(CoreDll.MAX_PATH_EX + 1) * i + CoreDll.MAX_PATH_EX] = path[i].enableSubFolder ? (char)1 : (char)0;
             }
             
-            return m_dll.adPathWithSubFolderSetW(m_handle, 
+            Error result = m_dll.adPathWithSubFolderSetW(m_handle, 
                 pathType, 
                 Marshal.UnsafeAddrOfPinnedArrayElement(buffer, 0),
-                new IntPtr(path.Length)) == Error.Ok;
+                new IntPtr(path.Length));
+            
+            // [C#3] Log AFTER call
+            try {
+                string logPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                    "trace.log");
+                using (var sw = new System.IO.StreamWriter(logPath, true))
+                {
+                    sw.WriteLine($"[C#3] SetPath AFTER: result={result} (value={(int)result})");
+                }
+            } catch { }
+
+            bool success = (result == Error.Ok);
+            if (!success)
+            {
+                // Log error to debug file
+                try {
+                    string logPath = System.IO.Path.Combine(
+                        System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                        "path_debug.log");
+                    using (var sw = new System.IO.StreamWriter(logPath, true))
+                    {
+                        sw.WriteLine($"SetPath FAILED: pathType={pathType}, count={path.Length}, error={result}");
+                        for (int i = 0; i < path.Length; i++)
+                            sw.WriteLine($"  [{i}] {path[i].path} (subfolder={path[i].enableSubFolder})");
+                    }
+                } catch { }
+            }
+            return success;
         }
 
 #endregion

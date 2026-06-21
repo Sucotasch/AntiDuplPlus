@@ -160,7 +160,6 @@ namespace AntiDupl.NET.WinForms
             m_search_startMenuItem = InitFactory.MenuItem.Create("StartMenu", null, StartSearchAction);
             m_search_refreshResultsMenuItem = InitFactory.MenuItem.Create("RefreshMenu", null, RefreshResultsAction);
             m_search_refreshImagesMenuItem = InitFactory.MenuItem.Create(null, null, RefreshImagesAction);
-            m_search_pathsMenuItem = InitFactory.MenuItem.Create("PathsMenu", null, PathsAction);
             m_search_optionsMenuItem = InitFactory.MenuItem.Create("OptionsMenu", null, OptionsAction);
             m_search_onePathMenuItem = InitFactory.MenuItem.Create(null, null, UseOnePathAction, m_options.onePath);
             m_search_useImageDataBaseMenuItem = InitFactory.MenuItem.Create(null, null, UseImageDataBaseAction, m_options.useImageDataBase);
@@ -172,7 +171,6 @@ namespace AntiDupl.NET.WinForms
             m_searchMenuItem.DropDownItems.Add(m_search_refreshResultsMenuItem);
             m_searchMenuItem.DropDownItems.Add(m_search_refreshImagesMenuItem);
             m_searchMenuItem.DropDownItems.Add(new ToolStripSeparator());
-            m_searchMenuItem.DropDownItems.Add(m_search_pathsMenuItem);
             m_searchMenuItem.DropDownItems.Add(m_search_optionsMenuItem);
             m_searchMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_searchMenuItem.DropDownItems.Add(m_search_onePathMenuItem);
@@ -241,7 +239,6 @@ namespace AntiDupl.NET.WinForms
             m_search_startMenuItem.Text = s.MainMenu_Search_StartMenuItem_Text;
             m_search_refreshResultsMenuItem.Text = s.MainMenu_Search_RefreshResultsMenuItem_Text;
             m_search_refreshImagesMenuItem.Text = s.MainMenu_Search_RefreshImagesMenuItem_Text;
-            m_search_pathsMenuItem.Text = s.MainMenu_Search_PathsMenuItem_Text;
             m_search_optionsMenuItem.Text = s.MainMenu_Search_OptionsMenuItem_Text;
             m_search_onePathMenuItem.Text = s.MainMenu_Search_OnePathMenuItem_Text;
             m_search_useImageDataBaseMenuItem.Text = s.MainMenu_Search_UseImageDataBaseMenuItem_Text;

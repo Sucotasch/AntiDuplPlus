@@ -32,17 +32,15 @@ namespace ad
 {
     // Helper to get the registry file path (portable: exe dir)
     static std::wstring GetRegistryFilePath(const std::wstring& userPath) {
-        if (userPath.empty()) {
-            wchar_t buffer[MAX_PATH];
-            GetModuleFileNameW(NULL, buffer, MAX_PATH);
-            std::wstring path(buffer);
-            size_t pos = path.find_last_of(L"\\/");
-            if (pos != std::wstring::npos) {
-                return path.substr(0, pos) + L"\\ad_database.xml";
-            }
-            return L"ad_database.xml";
+        // Always use exe directory for portable registry (same as C# DatabaseManagerForm)
+        wchar_t buffer[MAX_PATH];
+        GetModuleFileNameW(NULL, buffer, MAX_PATH);
+        std::wstring path(buffer);
+        size_t pos = path.find_last_of(L"\\/");
+        if (pos != std::wstring::npos) {
+            return path.substr(0, pos) + L"\\ad_database.xml";
         }
-        return userPath + L"\\ad_database.xml";
+        return L"ad_database.xml";
     }
 
     // Simple XML attribute extractor

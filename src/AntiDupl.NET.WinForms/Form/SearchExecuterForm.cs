@@ -26,6 +26,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 using System.Threading;
@@ -148,27 +149,29 @@ namespace AntiDupl.NET.WinForms
         {
             m_startDateTime = DateTime.Now;
 
-            // Add enabled database paths from ad_database.xml to search paths
+            // Database Manager is the single source of truth for search paths
             var dbPaths = Forms.DatabaseManagerForm.GetEnabledDatabasePaths();
-            if (dbPaths.Count > 0)
-            {
-                var merged = new List<CorePathWithSubFolder>(m_coreOptions.searchPath);
-                foreach (var dbPath in dbPaths)
+            m_coreOptions.searchPath = dbPaths.Select(p => 
+                new CorePathWithSubFolder(p, true)).ToArray();
+
+            // [C#1] Log search paths
+            try {
+                string logPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                    "trace.log");
+                using (var sw = new System.IO.StreamWriter(logPath, false))
                 {
-                    bool exists = false;
-                    foreach (var existing in merged)
-                    {
-                        if (string.Equals(existing.path, dbPath, StringComparison.OrdinalIgnoreCase))
-                        {
-                            exists = true;
-                            break;
-                        }
-                    }
-                    if (!exists)
-                        merged.Add(new CorePathWithSubFolder(dbPath, true));
+                    sw.WriteLine($"[C#1] SearchExecuter: searchPath.Length={m_coreOptions.searchPath.Length}");
+                    for (int i = 0; i < Math.Min(m_coreOptions.searchPath.Length, 3); i++)
+                        sw.WriteLine($"  [{i}] {m_coreOptions.searchPath[i].path}");
+                    if (m_coreOptions.searchPath.Length > 3)
+                        sw.WriteLine($"  ... and {m_coreOptions.searchPath.Length - 3} more");
                 }
-                m_coreOptions.searchPath = merged.ToArray();
-            }
+            } catch { }
+
+            // Set pool comparison mode from Database Manager
+            m_coreOptions.compareOptions.poolCompareMode = 
+                (AntiDupl.NET.Core.Enums.PoolCompareMode)Forms.DatabaseManagerForm.GetPoolCompareMode();
 
             m_coreOptions.Set(m_core, m_options.onePath);
             m_state = State.ClearResults;

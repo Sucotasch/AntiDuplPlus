@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -121,29 +121,56 @@ namespace AntiDupl.NET.WinForms
         /// <param name="onePath"></param>
         public void Set(CoreLib core, bool onePath)
         {
-            core.searchOptions = searchOptions.Clone();
-            core.compareOptions = compareOptions.Clone();
-            core.defectOptions = defectOptions.Clone();
-            core.advancedOptions = advancedOptions.Clone();
-            if (onePath)
+            // [C#2] Log Set() entry
+            try {
+                string logPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                    "trace.log");
+                using (var sw = new System.IO.StreamWriter(logPath, true))
+                {
+                    sw.WriteLine($"[C#2] CoreOptions.Set: onePath={onePath}, searchPath.Length={searchPath.Length}, coreType={core?.GetType().Name}");
+                }
+            } catch { }
+
+            try
             {
-                CorePathWithSubFolder[] tmpSearch = new CorePathWithSubFolder[1];
-                CorePathWithSubFolder[] tmpOther = new CorePathWithSubFolder[0];
-                if (searchPath.Length > 0 && Directory.Exists(searchPath[0].path))
-                    tmpSearch[0] = searchPath[0];
+                core.searchOptions = searchOptions.Clone();
+                core.compareOptions = compareOptions.Clone();
+                core.defectOptions = defectOptions.Clone();
+                core.advancedOptions = advancedOptions.Clone();
+                if (onePath)
+                {
+                    CorePathWithSubFolder[] tmpSearch = new CorePathWithSubFolder[1];
+                    CorePathWithSubFolder[] tmpOther = new CorePathWithSubFolder[0];
+                    if (searchPath.Length > 0 && Directory.Exists(searchPath[0].path))
+                        tmpSearch[0] = searchPath[0];
+                    else
+                        tmpSearch[0].path = Application.StartupPath;
+                    core.searchPath = tmpSearch;
+                    core.ignorePath = tmpOther;
+                    core.validPath = tmpOther;
+                    core.deletePath = tmpOther;
+                }
                 else
-                    tmpSearch[0].path = Application.StartupPath;
-                core.searchPath = tmpSearch;
-                core.ignorePath = tmpOther;
-                core.validPath = tmpOther;
-                core.deletePath = tmpOther;
+                {
+                    core.searchPath = searchPath;
+                    core.ignorePath = ignorePath;
+                    core.validPath = validPath;
+                    core.deletePath = deletePath;
+                }
             }
-            else
+            catch (Exception ex)
             {
-                core.searchPath = searchPath;
-                core.ignorePath = ignorePath;
-                core.validPath = validPath;
-                core.deletePath = deletePath;
+                try {
+                    string logPath = System.IO.Path.Combine(
+                        System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                        "path_debug.log");
+                    using (var sw = new System.IO.StreamWriter(logPath, true))
+                    {
+                        sw.WriteLine($"Set() EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+                        sw.WriteLine($"  StackTrace: {ex.StackTrace}");
+                    }
+                } catch { }
             }
         }
 

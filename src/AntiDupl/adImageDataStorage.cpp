@@ -162,37 +162,59 @@ namespace ad
 		if(!IsDirectoryExists(path))
 			return AD_ERROR_DIRECTORY_IS_NOT_EXIST;
 
-		TIndex index;
-		if( LoadIndex(index, CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION).c_str(), allLoad) || 
-			LoadIndex(index, CreatePath(path, TString(BACKUP_FILE_NAME) + FILE_EXTENSION).c_str(), allLoad))
-		{
-			size_t size = 0;
-			for(TIndex::iterator it = index.begin(); it != index.end(); ++it)
-				if(it->second.type == TData::Old)
-					size += it->second.size;
-
-			m_pStatus->Reset();
-			size_t i = 0;
-			for(TIndex::iterator it = index.begin(); it != index.end(); ++it)
-			{
-				if(m_pStatus->Stopped())
-				{
-					m_pStatus->Reset();
-					return AD_ERROR_UNKNOWN;
-				}
-
-				if(it->second.type == TData::Old)
-				{
-					if (!LoadData(it->second, path, it->second.key))
-						return AD_ERROR_UNKNOWN;
-					m_pStatus->SetProgress(i, size);
-					i += it->second.size;
-				}
-			}
-			m_pStatus->Reset();
-			return AD_OK;
+		// Detect format: check first 4 bytes of index.adi
+		TString indexPath = CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION);
+		uint32_t firstBytes = 0;
+		bool isDllNative = false;
+		
+		FILE* f = _wfopen(indexPath.c_str(), L"rb");
+		if (f) {
+			fread(&firstBytes, 4, 1, f);
+			fclose(f);
+			// DLL-native format starts with "adid" (0x64696461)
+			// Collector-native starts with ThumbSize (e.g., 0x00000020 = 32)
+			isDllNative = (firstBytes == 0x64696461);
 		}
-		return AD_ERROR_UNKNOWN;
+
+		if (isDllNative) {
+			// DLL-native format: use existing LoadIndex flow
+			TIndex index;
+			if( LoadIndex(index, indexPath.c_str(), allLoad) || 
+				LoadIndex(index, CreatePath(path, TString(BACKUP_FILE_NAME) + FILE_EXTENSION).c_str(), allLoad))
+			{
+				size_t size = 0;
+				for(TIndex::iterator it = index.begin(); it != index.end(); ++it)
+					if(it->second.type == TData::Old)
+						size += it->second.size;
+
+				m_pStatus->Reset();
+				size_t i = 0;
+				for(TIndex::iterator it = index.begin(); it != index.end(); ++it)
+				{
+					if(m_pStatus->Stopped())
+					{
+						m_pStatus->Reset();
+						return AD_ERROR_UNKNOWN;
+					}
+
+					if(it->second.type == TData::Old)
+					{
+						if (!LoadData(it->second, path, it->second.key))
+							return AD_ERROR_UNKNOWN;
+						m_pStatus->SetProgress(i, size);
+						i += it->second.size;
+					}
+				}
+				m_pStatus->Reset();
+				return AD_OK;
+			}
+			return AD_ERROR_UNKNOWN;
+		}
+		else
+		{
+			// Collector-native format (NvJpegCollector): ThumbSize + raw data
+			return LoadCollectorNative(path, firstBytes, allLoad);
+		}
 	}
 
 	adError TImageDataStorage::Save(const TChar *path)
@@ -455,6 +477,159 @@ namespace ad
 		return true;
 	}
 
+	// Load Collector-native format (NvJpegCollector): index.adi without "adid" header
+	// Format: thumbSize(u32) + groupCount(u64) + key(i16) + first(wstring) + last(wstring) + imgCount(u64)
+	adError TImageDataStorage::LoadCollectorNative(const TChar *path, uint32_t thumbSizeFromHeader, bool allLoad)
+	{
+		TString indexPath = CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION);
+		
+		FILE* f = _wfopen(indexPath.c_str(), L"rb");
+		if (!f) return AD_ERROR_UNKNOWN;
+
+		// Skip thumbSize (4 bytes already read)
+		fseek(f, 4, SEEK_SET);
+
+		// Read groupCount (u64)
+		uint64_t groupCount = 0;
+		if (fread(&groupCount, 8, 1, f) != 1) { fclose(f); return AD_ERROR_UNKNOWN; }
+
+		// For each group in index
+		for (uint64_t g = 0; g < groupCount; g++)
+		{
+			// Read key (i16)
+			int16_t key = 0;
+			if (fread(&key, 2, 1, f) != 1) { fclose(f); return AD_ERROR_UNKNOWN; }
+
+			// Read first path (wstring): length(u64) + wchar_t[length*2]
+			uint64_t firstLen = 0;
+			if (fread(&firstLen, 8, 1, f) != 1) { fclose(f); return AD_ERROR_UNKNOWN; }
+			std::wstring firstPath(firstLen, L'\0');
+			if (firstLen > 0 && fread(&firstPath[0], 2, firstLen, f) != firstLen) { fclose(f); return AD_ERROR_UNKNOWN; }
+
+			// Read last path (wstring)
+			uint64_t lastLen = 0;
+			if (fread(&lastLen, 8, 1, f) != 1) { fclose(f); return AD_ERROR_UNKNOWN; }
+			std::wstring lastPath(lastLen, L'\0');
+			if (lastLen > 0 && fread(&lastPath[0], 2, lastLen, f) != lastLen) { fclose(f); return AD_ERROR_UNKNOWN; }
+
+			// Read imgCount (u64)
+			uint64_t imgCount = 0;
+			if (fread(&imgCount, 8, 1, f) != 1) { fclose(f); return AD_ERROR_UNKNOWN; }
+
+			// Load the data file (0000.adi, etc.)
+			TData data;
+			data.key = key;
+			data.first = firstPath;
+			data.last = lastPath;
+			data.size = imgCount;
+			data.type = TData::Old;
+
+			if (!LoadCollectorData(path, data, key))
+			{
+				fclose(f);
+				return AD_ERROR_UNKNOWN;
+			}
+		}
+
+		fclose(f);
+		m_pStatus->Reset();
+		return AD_OK;
+	}
+
+	// Load Collector-native data file (0000.adi, etc.)
+	// Format: thumbSize(u32) + key(i16) + first(wstring) + last(wstring) + count(u64) + N records
+	bool TImageDataStorage::LoadCollectorData(const TChar *path, TData & data, short key)
+	{
+		TString dataFileName = CreatePath(path, GetDataFileName(key));
+		FILE* f = _wfopen(dataFileName.c_str(), L"rb");
+		if (!f) return false;
+
+		// Read thumbSize (u32)
+		uint32_t fileThumbSize = 0;
+		if (fread(&fileThumbSize, 4, 1, f) != 1) { fclose(f); return false; }
+
+		// Read key (i16)
+		short fileKey = 0;
+		if (fread(&fileKey, 2, 1, f) != 1) { fclose(f); return false; }
+
+		// Read first path (wstring): length(u64) + wchar_t[length*2]
+		uint64_t firstLen = 0;
+		if (fread(&firstLen, 8, 1, f) != 1) { fclose(f); return false; }
+		std::wstring firstPath(firstLen, L'\0');
+		if (firstLen > 0 && fread(&firstPath[0], 2, firstLen, f) != firstLen) { fclose(f); return false; }
+
+		// Read last path (wstring)
+		uint64_t lastLen = 0;
+		if (fread(&lastLen, 8, 1, f) != 1) { fclose(f); return false; }
+		std::wstring lastPath(lastLen, L'\0');
+		if (lastLen > 0 && fread(&lastPath[0], 2, lastLen, f) != lastLen) { fclose(f); return false; }
+
+		// Read count (u64)
+		uint64_t count = 0;
+		if (fread(&count, 8, 1, f) != 1) { fclose(f); return false; }
+
+		// Read N TImageData records
+		TImageData imageData(fileThumbSize);
+		for (uint64_t i = 0; i < count; i++)
+		{
+			// Read path (wstring)
+			uint64_t pathLen = 0;
+			if (fread(&pathLen, 8, 1, f) != 1) { fclose(f); return false; }
+			std::wstring imgPath(pathLen, L'\0');
+			if (pathLen > 0 && fread(&imgPath[0], 2, pathLen, f) != pathLen) { fclose(f); return false; }
+			
+			// Read metadata
+			uint64_t fileSize = 0; fread(&fileSize, 8, 1, f);
+			uint64_t fileTime = 0; fread(&fileTime, 8, 1, f);
+			uint32_t hash = 0; fread(&hash, 4, 1, f);
+			uint8_t type = 0; fread(&type, 1, 1, f);
+			uint32_t width = 0; fread(&width, 4, 1, f);
+			uint32_t height = 0; fread(&height, 4, 1, f);
+			float blockiness = 0; fread(&blockiness, 4, 1, f);
+			float blurring = 0; fread(&blurring, 4, 1, f);
+			uint8_t defect = 0; fread(&defect, 1, 1, f);
+			uint64_t crc32c = 0; fread(&crc32c, 8, 1, f);
+			uint8_t filled = 0; fread(&filled, 1, 1, f);
+
+			// Set image info
+			imageData.path = TPath(imgPath);
+			imageData.size = fileSize;
+			imageData.time = fileTime;
+			imageData.hash = hash;
+			imageData.type = (TImageType)type;
+			imageData.width = width;
+			imageData.height = height;
+			imageData.blockiness = blockiness;
+			imageData.blurring = blurring;
+			imageData.crc32c = crc32c;
+
+			// Read thumbnail data if filled
+			if (filled && fileThumbSize > 0)
+			{
+				uint64_t thumbSizeVal = 0;
+				fread(&thumbSizeVal, 8, 1, f);
+				size_t thumbBytes = (size_t)thumbSizeVal;
+				if (imageData.data && imageData.data->side == (int)fileThumbSize)
+				{
+					fread(imageData.data->main, 1, thumbBytes, f);
+					imageData.data->filled = true;
+				}
+				else
+				{
+					fseek(f, thumbBytes, SEEK_CUR);
+				}
+				// NvJpegCollector writes average(f32) + varianceSquare(f32) after thumb data
+				fseek(f, 8, SEEK_CUR);
+			}
+
+			if (Find(imageData) == m_storage.end())
+				Insert(new TImageData(imageData));
+		}
+
+	fclose(f);
+		return true;
+	}
+
 	//key - номер файла индекса 0001.adi - 1
 	bool TImageDataStorage::LoadData(TData & data, const TChar *path, short key)
 	{
@@ -477,12 +652,12 @@ namespace ad
 				if(Find(imageData) == m_storage.end())
 					Insert(new TImageData(imageData));
 			}
+			return true;
 		}
 		catch (TException e)
 		{
 			return e.Error == AD_OK;
 		}
-		return true;
 	}
 
 	void TImageDataStorage::SetSaveState(const bool needToSave)

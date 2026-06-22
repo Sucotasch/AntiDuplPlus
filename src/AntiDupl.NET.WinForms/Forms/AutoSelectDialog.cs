@@ -43,7 +43,7 @@ namespace AntiDupl.NET.WinForms
         private void InitializeComponent()
         {
             this.Text = "Auto-Select";
-            this.ClientSize = new Size(400, 440);
+            this.ClientSize = new Size(400, 470);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;

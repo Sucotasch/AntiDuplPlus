@@ -41,8 +41,8 @@ namespace AntiDupl.NET.WinForms
 
         private void InitializeComponent()
         {
-            this.Text = "Auto-Select for Deletion";
-            this.Size = new Size(420, 480);
+            this.Text = "Auto-Select";
+            this.Size = new Size(420, 560);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -51,37 +51,37 @@ namespace AntiDupl.NET.WinForms
             int y = 15;
 
             // Time group
-            AddGroupLabel("Time (select for deletion):", ref y);
-            m_timeOlder = AddRadio("Older file (earlier date)", ref y);
-            m_timeNewer = AddRadio("Newer file (later date)", ref y);
+            AddGroupLabel("Time:", ref y);
+            m_timeOlder = AddRadio("Select older file (earlier date)", ref y);
+            m_timeNewer = AddRadio("Select newer file (later date)", ref y);
             m_timeDonTCare = AddRadio("Don't care", ref y, true);
             y += 5;
 
             // Size group
             AddGroupLabel("File size:", ref y);
-            m_sizeSmaller = AddRadio("Smaller file (fewer bytes)", ref y);
-            m_sizeLarger = AddRadio("Larger file (more bytes)", ref y);
+            m_sizeSmaller = AddRadio("Select smaller file (fewer bytes)", ref y);
+            m_sizeLarger = AddRadio("Select larger file (more bytes)", ref y);
             m_sizeDonTCare = AddRadio("Don't care", ref y, true);
             y += 5;
 
             // Quality group
             AddGroupLabel("Quality:", ref y);
-            m_qualityWorse = AddRadio("Worse quality (more artifacts/blur)", ref y);
-            m_qualityBetter = AddRadio("Better quality", ref y);
+            m_qualityWorse = AddRadio("Select worse quality (more artifacts/blur)", ref y);
+            m_qualityBetter = AddRadio("Select better quality", ref y);
             m_qualityDonTCare = AddRadio("Don't care", ref y, true);
             y += 5;
 
             // Resolution group
             AddGroupLabel("Resolution:", ref y);
-            m_resLower = AddRadio("Lower resolution", ref y);
-            m_resHigher = AddRadio("Higher resolution", ref y);
+            m_resLower = AddRadio("Select lower resolution", ref y);
+            m_resHigher = AddRadio("Select higher resolution", ref y);
             m_resDonTCare = AddRadio("Don't care", ref y, true);
             y += 5;
 
             // Pool group
             AddGroupLabel("Pool assignment:", ref y);
-            m_poolPool1 = AddRadio("From Pool1 (keep Pool2)", ref y);
-            m_poolPool2 = AddRadio("From Pool2 (keep Pool1)", ref y);
+            m_poolPool1 = AddRadio("Select from Pool1 (keep Pool2)", ref y);
+            m_poolPool2 = AddRadio("Select from Pool2 (keep Pool1)", ref y);
             m_poolDonTCare = AddRadio("Don't care", ref y, true);
             y += 10;
 
@@ -95,7 +95,7 @@ namespace AntiDupl.NET.WinForms
 
             // Preview
             m_previewLabel = new Label();
-            m_previewLabel.Text = "Select criteria above to see preview";
+            m_previewLabel.Text = "Select criteria above, then choose action below";
             m_previewLabel.Location = new Point(15, y);
             m_previewLabel.Size = new Size(380, 20);
             m_previewLabel.ForeColor = Color.DarkBlue;
@@ -104,8 +104,8 @@ namespace AntiDupl.NET.WinForms
 
             // Buttons
             m_selectButton = new Button();
-            m_selectButton.Text = "Select for Deletion";
-            m_selectButton.Size = new Size(150, 30);
+            m_selectButton.Text = "Select";
+            m_selectButton.Size = new Size(120, 30);
             m_selectButton.Location = new Point(15, y);
             m_selectButton.Click += (s, e) => { ResultCriteria = BuildCriteria(); this.DialogResult = DialogResult.OK; this.Close(); };
             this.Controls.Add(m_selectButton);
@@ -113,7 +113,7 @@ namespace AntiDupl.NET.WinForms
             m_cancelButton = new Button();
             m_cancelButton.Text = "Cancel";
             m_cancelButton.Size = new Size(100, 30);
-            m_cancelButton.Location = new Point(175, y);
+            m_cancelButton.Location = new Point(145, y);
             m_cancelButton.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };
             this.Controls.Add(m_cancelButton);
 

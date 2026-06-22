@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -47,10 +47,8 @@ namespace AntiDupl.NET.WinForms
 
         private ToolStripButton m_profileOpenButton;
         private ToolStripButton m_profileSaveAsButton;
-
         private ToolStripButton m_startButton;
         private ToolStripButton m_refreshButton;
-        private ToolStripButton m_pathsButton;
         private ToolStripButton m_optionsButton;
         private ToolStripComboBox m_thresholdDifferenceComboBox;
         private ToolStripComboBox m_algorithmComparingComboBox;
@@ -94,7 +92,7 @@ namespace AntiDupl.NET.WinForms
 
             m_startButton = InitFactory.ToolButton.Create("StartButton", null, m_mainMenu.StartSearchAction);
             m_refreshButton = InitFactory.ToolButton.Create("RefreshButton", null, m_mainMenu.RefreshResultsAction);
-            m_pathsButton = InitFactory.ToolButton.Create("PathsButton", null, m_mainMenu.PathsAction);
+
             m_optionsButton = InitFactory.ToolButton.Create("OptionsButton", null, m_mainMenu.OptionsAction);
             
             m_thresholdDifferenceComboBox = new ToolStripComboBox();
@@ -150,7 +148,7 @@ namespace AntiDupl.NET.WinForms
 
             m_startButton.ToolTipText = s.MainMenu_Search_StartMenuItem_Text;
             m_refreshButton.ToolTipText = s.MainMenu_Search_RefreshResultsMenuItem_Text;
-            m_pathsButton.ToolTipText = s.MainMenu_Search_PathsMenuItem_Text;
+
             m_optionsButton.ToolTipText = s.MainMenu_Search_OptionsMenuItem_Text;
             m_thresholdDifferenceComboBox.ToolTipText = s.CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text;
             m_algorithmComparingComboBox.ToolTipText = s.CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text;
@@ -239,7 +237,6 @@ namespace AntiDupl.NET.WinForms
             Items.Add(new ToolStripSeparator());
             Items.Add(m_startButton);
             Items.Add(m_refreshButton);
-            Items.Add(m_pathsButton);
             Items.Add(m_optionsButton);
             Items.Add(m_thresholdDifferenceComboBox);
             Items.Add(m_algorithmComparingComboBox);

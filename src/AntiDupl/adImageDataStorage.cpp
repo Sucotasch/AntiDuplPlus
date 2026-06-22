@@ -503,12 +503,14 @@ namespace ad
 			// Read first path (wstring): length(u64) + wchar_t[length*2]
 			uint64_t firstLen = 0;
 			if (fread(&firstLen, 8, 1, f) != 1) { fclose(f); return AD_ERROR_UNKNOWN; }
+			if (firstLen > 10000) { fclose(f); return AD_ERROR_UNKNOWN; } // sanity check
 			std::wstring firstPath(firstLen, L'\0');
 			if (firstLen > 0 && fread(&firstPath[0], 2, firstLen, f) != firstLen) { fclose(f); return AD_ERROR_UNKNOWN; }
 
 			// Read last path (wstring)
 			uint64_t lastLen = 0;
 			if (fread(&lastLen, 8, 1, f) != 1) { fclose(f); return AD_ERROR_UNKNOWN; }
+			if (lastLen > 10000) { fclose(f); return AD_ERROR_UNKNOWN; } // sanity check
 			std::wstring lastPath(lastLen, L'\0');
 			if (lastLen > 0 && fread(&lastPath[0], 2, lastLen, f) != lastLen) { fclose(f); return AD_ERROR_UNKNOWN; }
 
@@ -555,12 +557,14 @@ namespace ad
 		// Read first path (wstring): length(u64) + wchar_t[length*2]
 		uint64_t firstLen = 0;
 		if (fread(&firstLen, 8, 1, f) != 1) { fclose(f); return false; }
+		if (firstLen > 10000) { fclose(f); return false; } // sanity check
 		std::wstring firstPath(firstLen, L'\0');
 		if (firstLen > 0 && fread(&firstPath[0], 2, firstLen, f) != firstLen) { fclose(f); return false; }
 
 		// Read last path (wstring)
 		uint64_t lastLen = 0;
 		if (fread(&lastLen, 8, 1, f) != 1) { fclose(f); return false; }
+		if (lastLen > 10000) { fclose(f); return false; } // sanity check
 		std::wstring lastPath(lastLen, L'\0');
 		if (lastLen > 0 && fread(&lastPath[0], 2, lastLen, f) != lastLen) { fclose(f); return false; }
 
@@ -575,6 +579,7 @@ namespace ad
 			// Read path (wstring)
 			uint64_t pathLen = 0;
 			if (fread(&pathLen, 8, 1, f) != 1) { fclose(f); return false; }
+			if (pathLen > 10000) { fclose(f); return false; } // sanity check
 			std::wstring imgPath(pathLen, L'\0');
 			if (pathLen > 0 && fread(&imgPath[0], 2, pathLen, f) != pathLen) { fclose(f); return false; }
 			

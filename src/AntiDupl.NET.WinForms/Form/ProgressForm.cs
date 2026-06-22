@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -264,11 +264,15 @@ namespace AntiDupl.NET.WinForms
                case Type.Undo:
                     {
                         m_updateResults = m_core.ApplyToResult(CoreDll.GlobalActionType.Undo);
+                        m_type = Type.ClearTemporary;
+                        m_core.Clear(CoreDll.FileType.Temporary);
                         break;
                     }
                case Type.Redo:
                     {
                         m_updateResults = m_core.ApplyToResult(CoreDll.GlobalActionType.Redo);
+                        m_type = Type.ClearTemporary;
+                        m_core.Clear(CoreDll.FileType.Temporary);
                         break;
                     }
                case Type.LoadResults:

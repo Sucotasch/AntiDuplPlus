@@ -55,6 +55,9 @@ namespace AntiDupl.NET.WinForms
 
         private ToolStripButton m_undoButton;
         private ToolStripButton m_redoButton;
+        private ToolStripDropDownButton m_autoSelectButton;
+        private ToolStripButton m_deleteSelectedButton;
+        private ToolStripButton m_moveSelectedButton;
 
         private ToolStripButton m_mistakeButton;
         private ToolStripButton m_performHintButton;
@@ -119,6 +122,34 @@ namespace AntiDupl.NET.WinForms
 
             m_undoButton = InitFactory.ToolButton.Create("UndoButton", null, m_mainMenu.UndoAction);
             m_redoButton = InitFactory.ToolButton.Create("RedoButton", null, m_mainMenu.RedoAction);
+
+            // Auto-Select dropdown button
+            m_autoSelectButton = new ToolStripDropDownButton("Auto-Select");
+            m_autoSelectButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            m_autoSelectButton.DropDownItems.Add("Older", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.Older));
+            m_autoSelectButton.DropDownItems.Add("Newer", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.Newer));
+            m_autoSelectButton.DropDownItems.Add("Smaller File", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.SmallerFile));
+            m_autoSelectButton.DropDownItems.Add("Larger File", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.LargerFile));
+            m_autoSelectButton.DropDownItems.Add("Lower Resolution", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.LowerResolution));
+            m_autoSelectButton.DropDownItems.Add("Higher Resolution", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.HigherResolution));
+            m_autoSelectButton.DropDownItems.Add("Worse Quality", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.WorseQuality));
+            m_autoSelectButton.DropDownItems.Add("Better Quality", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.BetterQuality));
+            m_autoSelectButton.DropDownItems.Add(new ToolStripSeparator());
+            m_autoSelectButton.DropDownItems.Add("From Pool1", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.FromPool1));
+            m_autoSelectButton.DropDownItems.Add("From Pool2", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.FromPool2));
+            m_autoSelectButton.DropDownItems.Add(new ToolStripSeparator());
+            m_autoSelectButton.DropDownItems.Add("Invert Selection", null, (s, e) => { AutoSelector.InvertSides(m_core); m_mainSplitContainer.UpdateResults(); });
+            m_autoSelectButton.DropDownItems.Add("Deselect All", null, (s, e) => { AutoSelector.ClearAll(m_core); m_mainSplitContainer.UpdateResults(); });
+            m_autoSelectButton.DropDownItems.Add(new ToolStripSeparator());
+            m_autoSelectButton.DropDownItems.Add("Advanced...", null, (s, e) => { var dlg = new AutoSelectDialog(); if (dlg.ShowDialog() == DialogResult.OK && dlg.ResultCriteria != null) { m_mainMenu.DoAutoSelect(dlg.ResultCriteria); } });
+
+            m_deleteSelectedButton = InitFactory.ToolButton.Create(null, null, m_mainMenu.DeleteSelectedAction);
+            m_deleteSelectedButton.Text = "Delete";
+            m_deleteSelectedButton.ToolTipText = "Delete selected images";
+
+            m_moveSelectedButton = InitFactory.ToolButton.Create(null, null, m_mainMenu.MoveSelectedAction);
+            m_moveSelectedButton.Text = "Move";
+            m_moveSelectedButton.ToolTipText = "Move selected images to folder";
 
             m_mistakeButton = InitFactory.ToolButton.Create("MistakesButton", CoreDll.LocalActionType.Mistake, MakeAction);
             m_performHintButton = InitFactory.ToolButton.Create("PerformHintButton", CoreDll.LocalActionType.PerformHint, MakeAction);
@@ -243,6 +274,10 @@ namespace AntiDupl.NET.WinForms
             Items.Add(new ToolStripSeparator());
             Items.Add(m_undoButton);
             Items.Add(m_redoButton);
+            Items.Add(new ToolStripSeparator());
+            Items.Add(m_autoSelectButton);
+            Items.Add(m_deleteSelectedButton);
+            Items.Add(m_moveSelectedButton);
             if (viewMode == ResultsOptions.ViewMode.VerticalPairTable || viewMode == ResultsOptions.ViewMode.HorizontalPairTable)
             {
                 Items.Add(new ToolStripSeparator());

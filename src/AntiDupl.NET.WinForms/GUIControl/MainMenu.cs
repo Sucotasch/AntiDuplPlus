@@ -54,6 +54,9 @@ namespace AntiDupl.NET.WinForms
         private ToolStripMenuItem m_edit_undoMenuItem;
         private ToolStripMenuItem m_edit_redoMenuItem;
         private ToolStripMenuItem m_edit_selectAllMenuItem;
+        private ToolStripMenuItem m_edit_autoSelectMenuItem;
+        private ToolStripMenuItem m_edit_deleteSelectedMenuItem;
+        private ToolStripMenuItem m_edit_moveSelectedMenuItem;
 
         private ToolStripMenuItem m_viewMenuItem;
         private ToolStripMenuItem m_view_toolMenuItem;
@@ -127,11 +130,37 @@ namespace AntiDupl.NET.WinForms
             m_edit_redoMenuItem = InitFactory.MenuItem.Create("RedoMenu", null, RedoAction);
             m_edit_selectAllMenuItem = InitFactory.MenuItem.Create(null, null, SelectAllAction);
 
+            // Auto-Select submenu
+            m_edit_autoSelectMenuItem = new ToolStripMenuItem("Auto-Select");
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Older", null, (s, e) => DoAutoSelect(AutoSelectCriteria.Older));
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Newer", null, (s, e) => DoAutoSelect(AutoSelectCriteria.Newer));
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Smaller File", null, (s, e) => DoAutoSelect(AutoSelectCriteria.SmallerFile));
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Larger File", null, (s, e) => DoAutoSelect(AutoSelectCriteria.LargerFile));
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Lower Resolution", null, (s, e) => DoAutoSelect(AutoSelectCriteria.LowerResolution));
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Higher Resolution", null, (s, e) => DoAutoSelect(AutoSelectCriteria.HigherResolution));
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Worse Quality", null, (s, e) => DoAutoSelect(AutoSelectCriteria.WorseQuality));
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Better Quality", null, (s, e) => DoAutoSelect(AutoSelectCriteria.BetterQuality));
+            m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            m_edit_autoSelectMenuItem.DropDownItems.Add("From Pool1", null, (s, e) => DoAutoSelect(AutoSelectCriteria.FromPool1));
+            m_edit_autoSelectMenuItem.DropDownItems.Add("From Pool2", null, (s, e) => DoAutoSelect(AutoSelectCriteria.FromPool2));
+            m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Invert Selection", null, (s, e) => { AutoSelector.InvertSides(m_core); m_mainSplitContainer.UpdateResults(); });
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Deselect All", null, (s, e) => { AutoSelector.ClearAll(m_core); m_mainSplitContainer.UpdateResults(); });
+            m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Advanced...", null, (s, e) => { var dlg = new AutoSelectDialog(); if (dlg.ShowDialog() == DialogResult.OK && dlg.ResultCriteria != null) { DoAutoSelect(dlg.ResultCriteria); } });
+
+            m_edit_deleteSelectedMenuItem = InitFactory.MenuItem.Create(null, null, DeleteSelectedAction);
+            m_edit_moveSelectedMenuItem = InitFactory.MenuItem.Create(null, null, MoveSelectedAction);
+
             m_editMenuItem = new ToolStripMenuItem();
             m_editMenuItem.DropDownItems.Add(m_edit_undoMenuItem);
             m_editMenuItem.DropDownItems.Add(m_edit_redoMenuItem);
             m_editMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_editMenuItem.DropDownItems.Add(m_edit_selectAllMenuItem);
+            m_editMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            m_editMenuItem.DropDownItems.Add(m_edit_autoSelectMenuItem);
+            m_editMenuItem.DropDownItems.Add(m_edit_deleteSelectedMenuItem);
+            m_editMenuItem.DropDownItems.Add(m_edit_moveSelectedMenuItem);
 
             m_view_toolMenuItem = InitFactory.MenuItem.Create(null, null, ViewItemCheckChangeAction, m_options.mainFormOptions.toolStripView);
             m_view_statusMenuItem = InitFactory.MenuItem.Create(null, null, ViewItemCheckChangeAction, m_options.mainFormOptions.statusStripView);
@@ -338,6 +367,38 @@ namespace AntiDupl.NET.WinForms
             m_mainSplitContainer.resultsListView.SetRowSelection(true);
             m_mainSplitContainer.resultsListView.Invalidate();
         }
+
+        public void DoAutoSelect(AutoSelectCriteria criteria)
+        {
+            int affected = AutoSelector.Apply(m_core, criteria);
+            MessageBox.Show($"Marked {affected} images for action.", "Auto-Select",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            m_mainSplitContainer.UpdateResults();
+        }
+
+        public void DeleteSelectedAction(object sender, EventArgs e)
+        {
+            int n = AutoSelector.Execute(m_core, true);
+            MessageBox.Show($"Deleted {n} images.", "Delete Selected",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            m_mainSplitContainer.UpdateResults();
+        }
+
+        public void MoveSelectedAction(object sender, EventArgs e)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "Select folder to move marked images";
+                dialog.ShowNewFolderButton = true;
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    int moved = AutoSelector.Execute(m_core, false, dialog.SelectedPath);
+                    MessageBox.Show($"Moved {moved} images to:\n{dialog.SelectedPath}", "Move Selected",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    m_mainSplitContainer.UpdateResults();
+                }
+            }
+        }
         
         public void ProfileSaveAsAction(object sender, EventArgs e)
         {
@@ -525,10 +586,14 @@ namespace AntiDupl.NET.WinForms
         private void UpdateResults()
         {
             bool hasResults = m_core.GetResultSize() > 0;
+            bool hasDuplPairs = m_core.CanApply(CoreDll.ActionEnableType.DuplPair);
 
             m_edit_undoMenuItem.Enabled = m_core.CanApply(CoreDll.ActionEnableType.Undo);
             m_edit_redoMenuItem.Enabled = m_core.CanApply(CoreDll.ActionEnableType.Redo);
             m_edit_selectAllMenuItem.Enabled = hasResults;
+            m_edit_autoSelectMenuItem.Enabled = hasDuplPairs;
+            m_edit_deleteSelectedMenuItem.Enabled = hasDuplPairs;
+            m_edit_moveSelectedMenuItem.Enabled = hasDuplPairs;
         }
     }
 }

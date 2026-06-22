@@ -175,39 +175,44 @@ namespace AntiDupl.NET.WinForms
 
         /// <summary>
         /// Determine which side of the pair to target based on criteria.
+        /// AND logic: ALL active criteria must agree on the same side.
+        /// If any active criterion says DontCare or conflicts → result is DontCare.
         /// </summary>
         public static AutoSelectSide DetermineSide(CoreResult r, AutoSelectCriteria criteria, Dictionary<string, int> poolMap)
         {
             AutoSelectSide result = AutoSelectSide.DontCare;
+            bool firstCriterion = true;
 
             // Time
             if (criteria.TimeSide != AutoSelectSide.DontCare)
             {
+                AutoSelectSide side = AutoSelectSide.DontCare;
                 if (r.first.time < r.second.time)
-                    result = AutoSelectSide.First;
+                    side = AutoSelectSide.First;
                 else if (r.second.time < r.first.time)
-                    result = AutoSelectSide.Second;
+                    side = AutoSelectSide.Second;
 
-                if (criteria.TimeSide == AutoSelectSide.Second && result != AutoSelectSide.DontCare)
-                    result = (result == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
+                if (criteria.TimeSide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
+                    side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
+
+                if (firstCriterion) { result = side; firstCriterion = false; }
+                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
             }
 
             // Size
             if (criteria.SizeSide != AutoSelectSide.DontCare)
             {
-                AutoSelectSide side;
+                AutoSelectSide side = AutoSelectSide.DontCare;
                 if (r.first.size < r.second.size)
                     side = AutoSelectSide.First;
                 else if (r.second.size < r.first.size)
                     side = AutoSelectSide.Second;
-                else
-                    side = AutoSelectSide.DontCare;
 
                 if (criteria.SizeSide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
                     side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
 
-                if (side != AutoSelectSide.DontCare)
-                    result = side;
+                if (firstCriterion) { result = side; firstCriterion = false; }
+                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
             }
 
             // Quality
@@ -216,19 +221,17 @@ namespace AntiDupl.NET.WinForms
                 double q1 = r.first.blockiness + r.first.blurring;
                 double q2 = r.second.blockiness + r.second.blurring;
 
-                AutoSelectSide side;
+                AutoSelectSide side = AutoSelectSide.DontCare;
                 if (q1 > q2)
                     side = AutoSelectSide.First;
                 else if (q2 > q1)
                     side = AutoSelectSide.Second;
-                else
-                    side = AutoSelectSide.DontCare;
 
                 if (criteria.QualitySide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
                     side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
 
-                if (side != AutoSelectSide.DontCare)
-                    result = side;
+                if (firstCriterion) { result = side; firstCriterion = false; }
+                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
             }
 
             // Resolution
@@ -237,19 +240,17 @@ namespace AntiDupl.NET.WinForms
                 long res1 = (long)r.first.width * r.first.height;
                 long res2 = (long)r.second.width * r.second.height;
 
-                AutoSelectSide side;
+                AutoSelectSide side = AutoSelectSide.DontCare;
                 if (res1 < res2)
                     side = AutoSelectSide.First;
                 else if (res2 < res1)
                     side = AutoSelectSide.Second;
-                else
-                    side = AutoSelectSide.DontCare;
 
                 if (criteria.ResolutionSide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
                     side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
 
-                if (side != AutoSelectSide.DontCare)
-                    result = side;
+                if (firstCriterion) { result = side; firstCriterion = false; }
+                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
             }
 
             // Pool
@@ -270,8 +271,8 @@ namespace AntiDupl.NET.WinForms
                     else if (pool2 == 2) side = AutoSelectSide.Second;
                 }
 
-                if (side != AutoSelectSide.DontCare)
-                    result = side;
+                if (firstCriterion) { result = side; firstCriterion = false; }
+                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
             }
 
             return result;

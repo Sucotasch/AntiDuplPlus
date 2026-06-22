@@ -153,18 +153,6 @@ namespace AntiDupl.NET.WinForms
                 if (dlg.ShowDialog() == DialogResult.OK && dlg.ResultCriteria != null)
                 {
                     DoAutoSelect(dlg.ResultCriteria);
-                    if (dlg.ExecuteDelete)
-                    {
-                        int n = AutoSelector.Execute(m_core, true);
-                        MessageBox.Show($"Deleted {n} images.", "Delete", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        m_mainSplitContainer.UpdateResults();
-                    }
-                    else if (!string.IsNullOrEmpty(dlg.MoveTargetFolder))
-                    {
-                        int moved = AutoSelector.Execute(m_core, false, dlg.MoveTargetFolder);
-                        MessageBox.Show($"Moved {moved} images to:\n{dlg.MoveTargetFolder}", "Move", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        m_mainSplitContainer.UpdateResults();
-                    }
                 }
             });
 

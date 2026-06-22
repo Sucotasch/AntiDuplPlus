@@ -141,7 +141,26 @@ namespace AntiDupl.NET.WinForms
             m_autoSelectButton.DropDownItems.Add("Invert Selection", null, (s, e) => { AutoSelector.InvertSides(m_core); m_mainSplitContainer.UpdateResults(); });
             m_autoSelectButton.DropDownItems.Add("Deselect All", null, (s, e) => { AutoSelector.ClearAll(m_core); m_mainSplitContainer.UpdateResults(); });
             m_autoSelectButton.DropDownItems.Add(new ToolStripSeparator());
-            m_autoSelectButton.DropDownItems.Add("Advanced...", null, (s, e) => { var dlg = new AutoSelectDialog(); if (dlg.ShowDialog() == DialogResult.OK && dlg.ResultCriteria != null) { m_mainMenu.DoAutoSelect(dlg.ResultCriteria); } });
+            m_autoSelectButton.DropDownItems.Add("Advanced...", null, (s, e) =>
+            {
+                var dlg = new AutoSelectDialog();
+                if (dlg.ShowDialog() == DialogResult.OK && dlg.ResultCriteria != null)
+                {
+                    m_mainMenu.DoAutoSelect(dlg.ResultCriteria);
+                    if (dlg.ExecuteDelete)
+                    {
+                        int n = AutoSelector.Execute(m_core, true);
+                        MessageBox.Show($"Deleted {n} images.", "Delete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        m_mainSplitContainer.UpdateResults();
+                    }
+                    else if (!string.IsNullOrEmpty(dlg.MoveTargetFolder))
+                    {
+                        int moved = AutoSelector.Execute(m_core, false, dlg.MoveTargetFolder);
+                        MessageBox.Show($"Moved {moved} images to:\n{dlg.MoveTargetFolder}", "Move", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        m_mainSplitContainer.UpdateResults();
+                    }
+                }
+            });
 
             m_deleteSelectedButton = InitFactory.ToolButton.Create(null, null, m_mainMenu.DeleteSelectedAction);
             m_deleteSelectedButton.Text = "Delete";

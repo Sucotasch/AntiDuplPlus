@@ -147,7 +147,26 @@ namespace AntiDupl.NET.WinForms
             m_edit_autoSelectMenuItem.DropDownItems.Add("Invert Selection", null, (s, e) => { AutoSelector.InvertSides(m_core); m_mainSplitContainer.UpdateResults(); });
             m_edit_autoSelectMenuItem.DropDownItems.Add("Deselect All", null, (s, e) => { AutoSelector.ClearAll(m_core); m_mainSplitContainer.UpdateResults(); });
             m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
-            m_edit_autoSelectMenuItem.DropDownItems.Add("Advanced...", null, (s, e) => { var dlg = new AutoSelectDialog(); if (dlg.ShowDialog() == DialogResult.OK && dlg.ResultCriteria != null) { DoAutoSelect(dlg.ResultCriteria); } });
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Advanced...", null, (s, e) =>
+            {
+                var dlg = new AutoSelectDialog();
+                if (dlg.ShowDialog() == DialogResult.OK && dlg.ResultCriteria != null)
+                {
+                    DoAutoSelect(dlg.ResultCriteria);
+                    if (dlg.ExecuteDelete)
+                    {
+                        int n = AutoSelector.Execute(m_core, true);
+                        MessageBox.Show($"Deleted {n} images.", "Delete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        m_mainSplitContainer.UpdateResults();
+                    }
+                    else if (!string.IsNullOrEmpty(dlg.MoveTargetFolder))
+                    {
+                        int moved = AutoSelector.Execute(m_core, false, dlg.MoveTargetFolder);
+                        MessageBox.Show($"Moved {moved} images to:\n{dlg.MoveTargetFolder}", "Move", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        m_mainSplitContainer.UpdateResults();
+                    }
+                }
+            });
 
             m_edit_deleteSelectedMenuItem = InitFactory.MenuItem.Create(null, null, DeleteSelectedAction);
             m_edit_moveSelectedMenuItem = InitFactory.MenuItem.Create(null, null, MoveSelectedAction);

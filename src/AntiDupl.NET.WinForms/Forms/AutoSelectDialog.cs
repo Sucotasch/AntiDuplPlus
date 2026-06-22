@@ -27,63 +27,64 @@ namespace AntiDupl.NET.WinForms
         private RadioButton m_poolDonTCare;
 
         private CheckBox m_includeDefects;
-        private Label m_previewLabel;
-        private Button m_selectButton;
-        private Button m_cancelButton;
 
         public AutoSelectCriteria ResultCriteria { get; private set; }
+        public bool ExecuteDelete { get; private set; }
+        public string MoveTargetFolder { get; private set; }
 
         public AutoSelectDialog()
         {
             InitializeComponent();
             ResultCriteria = null;
+            ExecuteDelete = false;
+            MoveTargetFolder = null;
         }
 
         private void InitializeComponent()
         {
             this.Text = "Auto-Select";
-            this.Size = new Size(420, 560);
+            this.ClientSize = new Size(400, 410);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
-            int y = 15;
+            int y = 10;
 
             // Time group
             AddGroupLabel("Time:", ref y);
             m_timeOlder = AddRadio("Select older file (earlier date)", ref y);
             m_timeNewer = AddRadio("Select newer file (later date)", ref y);
             m_timeDonTCare = AddRadio("Don't care", ref y, true);
-            y += 5;
+            y += 2;
 
             // Size group
             AddGroupLabel("File size:", ref y);
             m_sizeSmaller = AddRadio("Select smaller file (fewer bytes)", ref y);
             m_sizeLarger = AddRadio("Select larger file (more bytes)", ref y);
             m_sizeDonTCare = AddRadio("Don't care", ref y, true);
-            y += 5;
+            y += 2;
 
             // Quality group
             AddGroupLabel("Quality:", ref y);
-            m_qualityWorse = AddRadio("Select worse quality (more artifacts/blur)", ref y);
+            m_qualityWorse = AddRadio("Select worse quality (more blur/artifacts)", ref y);
             m_qualityBetter = AddRadio("Select better quality", ref y);
             m_qualityDonTCare = AddRadio("Don't care", ref y, true);
-            y += 5;
+            y += 2;
 
             // Resolution group
             AddGroupLabel("Resolution:", ref y);
             m_resLower = AddRadio("Select lower resolution", ref y);
             m_resHigher = AddRadio("Select higher resolution", ref y);
             m_resDonTCare = AddRadio("Don't care", ref y, true);
-            y += 5;
+            y += 2;
 
             // Pool group
             AddGroupLabel("Pool assignment:", ref y);
             m_poolPool1 = AddRadio("Select from Pool1 (keep Pool2)", ref y);
             m_poolPool2 = AddRadio("Select from Pool2 (keep Pool1)", ref y);
             m_poolDonTCare = AddRadio("Don't care", ref y, true);
-            y += 10;
+            y += 5;
 
             // Include defects
             m_includeDefects = new CheckBox();
@@ -91,34 +92,52 @@ namespace AntiDupl.NET.WinForms
             m_includeDefects.Location = new Point(15, y);
             m_includeDefects.AutoSize = true;
             this.Controls.Add(m_includeDefects);
-            y += 30;
+            y += 28;
 
-            // Preview
-            m_previewLabel = new Label();
-            m_previewLabel.Text = "Select criteria above, then choose action below";
-            m_previewLabel.Location = new Point(15, y);
-            m_previewLabel.Size = new Size(380, 20);
-            m_previewLabel.ForeColor = Color.DarkBlue;
-            this.Controls.Add(m_previewLabel);
-            y += 30;
+            // Separator
+            var sep = new Label();
+            sep.BorderStyle = BorderStyle.Fixed3D;
+            sep.Location = new Point(10, y);
+            sep.Size = new Size(380, 2);
+            this.Controls.Add(sep);
+            y += 8;
 
-            // Buttons
-            m_selectButton = new Button();
-            m_selectButton.Text = "Select";
-            m_selectButton.Size = new Size(120, 30);
-            m_selectButton.Location = new Point(15, y);
-            m_selectButton.Click += (s, e) => { ResultCriteria = BuildCriteria(); this.DialogResult = DialogResult.OK; this.Close(); };
-            this.Controls.Add(m_selectButton);
+            // Action buttons
+            var btnDelete = new Button();
+            btnDelete.Text = "Delete Selected";
+            btnDelete.Size = new Size(120, 30);
+            btnDelete.Location = new Point(15, y);
+            btnDelete.Click += (s, e) => { ResultCriteria = BuildCriteria(); ExecuteDelete = true; this.DialogResult = DialogResult.OK; this.Close(); };
+            this.Controls.Add(btnDelete);
 
-            m_cancelButton = new Button();
-            m_cancelButton.Text = "Cancel";
-            m_cancelButton.Size = new Size(100, 30);
-            m_cancelButton.Location = new Point(145, y);
-            m_cancelButton.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };
-            this.Controls.Add(m_cancelButton);
+            var btnMove = new Button();
+            btnMove.Text = "Move to Folder...";
+            btnMove.Size = new Size(130, 30);
+            btnMove.Location = new Point(145, y);
+            btnMove.Click += (s, e) =>
+            {
+                using (var dlg = new FolderBrowserDialog())
+                {
+                    dlg.Description = "Select folder to move selected images";
+                    dlg.ShowNewFolderButton = true;
+                    if (dlg.ShowDialog() == DialogResult.OK)
+                    {
+                        ResultCriteria = BuildCriteria();
+                        ExecuteDelete = false;
+                        MoveTargetFolder = dlg.SelectedPath;
+                        this.DialogResult = DialogResult.OK;
+                        this.Close();
+                    }
+                }
+            };
+            this.Controls.Add(btnMove);
 
-            this.AcceptButton = m_selectButton;
-            this.CancelButton = m_cancelButton;
+            var btnCancel = new Button();
+            btnCancel.Text = "Cancel";
+            btnCancel.Size = new Size(80, 30);
+            btnCancel.Location = new Point(285, y);
+            btnCancel.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };
+            this.Controls.Add(btnCancel);
         }
 
         private void AddGroupLabel(string text, ref int y)
@@ -129,7 +148,7 @@ namespace AntiDupl.NET.WinForms
             lbl.Location = new Point(15, y);
             lbl.AutoSize = true;
             this.Controls.Add(lbl);
-            y += 22;
+            y += 20;
         }
 
         private RadioButton AddRadio(string text, ref int y, bool isChecked = false)
@@ -140,7 +159,7 @@ namespace AntiDupl.NET.WinForms
             radio.AutoSize = true;
             radio.Checked = isChecked;
             this.Controls.Add(radio);
-            y += 22;
+            y += 20;
             return radio;
         }
 

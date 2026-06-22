@@ -43,13 +43,13 @@ namespace AntiDupl.NET.WinForms
         private void InitializeComponent()
         {
             this.Text = "Auto-Select";
-            this.ClientSize = new Size(400, 410);
+            this.ClientSize = new Size(400, 440);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
-            int y = 10;
+            int y = 8;
 
             // Time group
             AddGroupLabel("Time:", ref y);
@@ -148,7 +148,7 @@ namespace AntiDupl.NET.WinForms
             lbl.Location = new Point(15, y);
             lbl.AutoSize = true;
             this.Controls.Add(lbl);
-            y += 20;
+            y += 18;
         }
 
         private RadioButton AddRadio(string text, ref int y, bool isChecked = false)
@@ -159,7 +159,7 @@ namespace AntiDupl.NET.WinForms
             radio.AutoSize = true;
             radio.Checked = isChecked;
             this.Controls.Add(radio);
-            y += 20;
+            y += 18;
             return radio;
         }
 

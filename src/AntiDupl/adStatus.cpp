@@ -279,7 +279,6 @@ namespace ad
     {
         TCriticalSection::TLocker locker(&m_criticalSection);
 
-        m_path.clear();
         m_state = AD_STATE_WORK;
         m_current = current;
         m_total = total;

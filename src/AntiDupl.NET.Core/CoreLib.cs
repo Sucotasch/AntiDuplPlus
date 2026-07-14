@@ -69,14 +69,11 @@ namespace AntiDupl.NET.Core
 
         public void Release()
         {
-            if (m_dll != null && m_handle != IntPtr.Zero)
+            IntPtr handle = Interlocked.Exchange(ref m_handle, IntPtr.Zero);
+            if (handle != IntPtr.Zero)
             {
-                if (m_dll.adRelease(m_handle) == Error.AccessDenied)
-                {
-                    Stop();
-                    Thread.Sleep(10);
-                    m_dll.adRelease(m_handle);
-                }
+                m_dll.adStop(handle);
+                m_dll.adRelease(handle);
             }
         }
 

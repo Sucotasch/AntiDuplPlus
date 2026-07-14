@@ -46,6 +46,47 @@ static uint32_t SimpleCRC32(const std::wstring& s) {
     return crc ^ 0xFFFFFFFF;
 }
 
+// Blockiness: detecting 8x8 DCT block boundaries
+static double GetBlockinessSimple(const uint8_t* gray, int w, int h) {
+    if (w < 9 || h < 9) return 0.0;
+    uint64_t blockEdgeSum = 0;
+    int blockCount = 0;
+    for (int y = 8; y < h; y += 8) {
+        for (int x = 0; x < w; x++) {
+            int diff = abs((int)gray[y * w + x] - (int)gray[(y - 1) * w + x]);
+            blockEdgeSum += diff;
+            blockCount++;
+        }
+    }
+    for (int x = 8; x < w; x += 8) {
+        for (int y = 0; y < h; y++) {
+            int diff = abs((int)gray[y * w + x] - (int)gray[y * w + (x - 1)]);
+            blockEdgeSum += diff;
+            blockCount++;
+        }
+    }
+    return blockCount > 0 ? (double)blockEdgeSum / blockCount : 0.0;
+}
+
+// Blurring: edge strength via Sobel gradient magnitude
+static double GetBlurringSimple(const uint8_t* gray, int w, int h) {
+    if (w < 3 || h < 3) return 0.0;
+    uint64_t edgeSum = 0;
+    int count = 0;
+    for (int y = 1; y < h - 1; y++) {
+        for (int x = 1; x < w - 1; x++) {
+            int gx = -gray[(y-1)*w + (x-1)] + gray[(y-1)*w + (x+1)]
+                     -2*gray[y*w + (x-1)]     + 2*gray[y*w + (x+1)]
+                     -gray[(y+1)*w + (x-1)] + gray[(y+1)*w + (x+1)];
+            int gy = -gray[(y-1)*w + (x-1)] - 2*gray[(y-1)*w + x] - gray[(y-1)*w + (x+1)]
+                     +gray[(y+1)*w + (x-1)] + 2*gray[(y+1)*w + x] + gray[(y+1)*w + (x+1)];
+            edgeSum += abs(gx) + abs(gy);
+            count++;
+        }
+    }
+    return count > 0 ? (double)edgeSum / count : 0.0;
+}
+
 static std::wstring GenerateAdiFileName(const std::wstring& path, int thumbSize) {
     fs::path p(path);
     std::wstring folderName = p.filename().wstring();
@@ -321,7 +362,13 @@ static void ProcessDecoded(const std::vector<uint8_t>& rgb, int w, int h, size_t
     info.time = fileTime; info.hash = 0;
     info.type = GetImageType(imageFiles[origIdx].extension().wstring());
     info.width = w; info.height = h;
-    info.blockiness = 0; info.blurring = 0;
+    // Compute blockiness/blurring on full-resolution grayscale
+    {
+        std::vector<uint8_t> fullGray(w * h);
+        RgbToGray(rgb.data(), fullGray.data(), w, h);
+        info.blockiness = GetBlockinessSimple(fullGray.data(), w, h);
+        info.blurring = GetBlurringSimple(fullGray.data(), w, h);
+    }
     info.thumbnail = gray;
     info.crc32c = CalculateCRC32c(gray.data(), gray.size());
 
@@ -518,7 +565,13 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                         img.time = GetFileTime(fp); img.hash = 0;
                         img.type = GetImageType(fp.extension().wstring());
                         img.width = srcW; img.height = srcH;
-                        img.blockiness = 0; img.blurring = 0;
+                        // Compute blockiness/blurring on full-resolution grayscale
+                        {
+                            std::vector<uint8_t> fullGray(srcW * srcH);
+                            RgbToGray(rgb.data(), fullGray.data(), srcW, srcH);
+                            img.blockiness = GetBlockinessSimple(fullGray.data(), srcW, srcH);
+                            img.blurring = GetBlurringSimple(fullGray.data(), srcW, srcH);
+                        }
                         std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
                         std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
                         ResizeBilinear(rgb.data(), srcW, srcH, thumbRGB.data(), args.thumbSize, args.thumbSize);
@@ -548,7 +601,13 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                     img.time = GetFileTime(fp); img.hash = 0;
                     img.type = GetImageType(fp.extension().wstring());
                     img.width = w; img.height = h;
-                    img.blockiness = 0; img.blurring = 0;
+                    // Compute blockiness/blurring on full-resolution grayscale
+                    {
+                        std::vector<uint8_t> fullGray(w * h);
+                        RgbToGray(rgb.data(), fullGray.data(), w, h);
+                        img.blockiness = GetBlockinessSimple(fullGray.data(), w, h);
+                        img.blurring = GetBlurringSimple(fullGray.data(), w, h);
+                    }
                     std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
                     std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
                     ResizeBilinear(rgb.data(), w, h, thumbRGB.data(), args.thumbSize, args.thumbSize);
@@ -752,7 +811,13 @@ int wmain_impl(int argc, wchar_t* argv[]) {
             info.time = GetFileTime(imageFiles[idx]); info.hash = 0;
             info.type = GetImageType(imageFiles[idx].extension().wstring());
             info.width = w; info.height = h;
-            info.blockiness = 0; info.blurring = 0;
+            // Compute blockiness/blurring on full-resolution grayscale
+            {
+                std::vector<uint8_t> fullGray(w * h);
+                RgbToGray(rgb.data(), fullGray.data(), w, h);
+                info.blockiness = GetBlockinessSimple(fullGray.data(), w, h);
+                info.blurring = GetBlurringSimple(fullGray.data(), w, h);
+            }
             info.thumbnail = gray; info.crc32c = CalculateCRC32c(gray.data(), gray.size());
             images.push_back(info); processed++;
         }

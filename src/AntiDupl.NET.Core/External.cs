@@ -33,7 +33,7 @@ namespace AntiDupl.NET.Core
 {
     static public class External
     {
-        public const string Version = "2.3.12";
+        public const string Version = "2.4.0";
     }
 }
 

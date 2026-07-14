@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -63,6 +63,21 @@ namespace AntiDupl.NET.WinForms
         private Bitmap m_originalBitmap;
         private Rectangle[] m_rectanglesOfDifferences;
         private Pen penForDifferences = new Pen(new SolidBrush(Color.Red), 4);
+
+        private bool m_isTargeted = false;
+        public bool IsTargeted
+        {
+            get { return m_isTargeted; }
+            set
+            {
+                if (m_isTargeted != value)
+                {
+                    m_isTargeted = value;
+                    Invalidate();
+                }
+            }
+        }
+        private static readonly Pen penForTarget = new Pen(Color.Red, 3);
 
         private ImagePreviewPanel.Position m_position;
         public ImagePreviewPanel.Position Position
@@ -216,6 +231,13 @@ namespace AntiDupl.NET.WinForms
             if (m_bitmap != null)
             {
                 e.Graphics.DrawImage(m_bitmap, m_bitmapRect);
+                if (m_isTargeted)
+                {
+                    Rectangle borderRect = new Rectangle(
+                        m_bitmapRect.X - 1, m_bitmapRect.Y - 1,
+                        m_bitmapRect.Width + 2, m_bitmapRect.Height + 2);
+                    e.Graphics.DrawRectangle(penForTarget, borderRect);
+                }
             }
             if (m_options.resultsOptions.ShowNeighboursImages)
             {

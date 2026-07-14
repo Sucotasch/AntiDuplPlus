@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2015 Borisov Dmitry.
@@ -395,6 +395,11 @@ namespace AntiDupl.NET.WinForms
                 Controls.Add(m_pictureBoxPanel, 0, 0);
                 Controls.Add(infoLayout, 0, 1);
             }
+        }
+
+        public void SetTargeted(bool targeted)
+        {
+            m_pictureBoxPanel.IsTargeted = targeted;
         }
 
         public void RenameImage(object sender, EventArgs e)

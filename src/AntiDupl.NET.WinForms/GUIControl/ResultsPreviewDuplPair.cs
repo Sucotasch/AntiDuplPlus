@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -51,6 +51,7 @@ namespace AntiDupl.NET.WinForms
         private ToolStripButton m_openBothFoldersButton;
         private ToolStripButton m_openBothImagesButton;
         private ToolStripButton m_openExternDiffImagesButton;
+        private int? m_pendingTarget;
 
         private struct RectanglesWithSimilarity
         {
@@ -89,6 +90,20 @@ namespace AntiDupl.NET.WinForms
             m_openBothFoldersButton = InitFactory.ToolButton.Create("OpenBothFoldersButton.png", null, OnOpenBothFoldersButtonClicked);
             m_openBothImagesButton = InitFactory.ToolButton.Create("OpenBothImagesButton.png", null, OnOpenBothImagesButtonClicked);
             m_openExternDiffImagesButton = InitFactory.ToolButton.Create("OpenExternDiffImagesButton.png", null, OnOpenExternDiffImagesClicked);
+
+            // Wire hover events for target highlighting
+            m_deleteFirstButton.MouseEnter += (s, e) => SetPendingTarget(0);
+            m_renameFirstToSecondButton.MouseEnter += (s, e) => SetPendingTarget(0);
+            m_deleteSecondButton.MouseEnter += (s, e) => SetPendingTarget(1);
+            m_renameSecondToFirstButton.MouseEnter += (s, e) => SetPendingTarget(1);
+            m_deleteBothButton.MouseEnter += (s, e) => SetPendingTarget(null);
+            m_mistakeButton.MouseEnter += (s, e) => SetPendingTarget(null);
+            m_deleteFirstButton.MouseLeave += (s, e) => ClearPendingTarget();
+            m_deleteSecondButton.MouseLeave += (s, e) => ClearPendingTarget();
+            m_deleteBothButton.MouseLeave += (s, e) => ClearPendingTarget();
+            m_renameFirstToSecondButton.MouseLeave += (s, e) => ClearPendingTarget();
+            m_renameSecondToFirstButton.MouseLeave += (s, e) => ClearPendingTarget();
+            m_mistakeButton.MouseLeave += (s, e) => ClearPendingTarget();
 
             /* m_difrentNumericUpDown = new System.Windows.Forms.NumericUpDown();
             m_difrentNumericUpDown.Size = new System.Drawing.Size(62, 17);
@@ -191,9 +206,34 @@ namespace AntiDupl.NET.WinForms
 
         private void OnButtonClicked(object sender, System.EventArgs e)
         {
+            ClearPendingTarget();
             ToolStripButton item = (ToolStripButton)sender;
             CoreDll.LocalActionType action = (CoreDll.LocalActionType)item.Tag;
             m_resultsListView.MakeAction(action, CoreDll.TargetType.Current);
+        }
+
+        private void SetPendingTarget(int? targetIndex)
+        {
+            m_pendingTarget = targetIndex;
+            UpdateHighlight();
+        }
+
+        private void ClearPendingTarget()
+        {
+            if (m_pendingTarget.HasValue)
+            {
+                m_pendingTarget = null;
+                UpdateHighlight();
+            }
+        }
+
+        private void UpdateHighlight()
+        {
+            bool firstTargeted = m_pendingTarget == 0;
+            bool secondTargeted = m_pendingTarget == 1;
+            m_firstImagePreviewPanel.SetTargeted(firstTargeted);
+            m_secondImagePreviewPanel.SetTargeted(secondTargeted);
+            m_resultsListView.SetTargetedImageIndex(m_pendingTarget ?? -1);
         }
 
         private void OnImageDoubleClicked(object sender, System.EventArgs e)

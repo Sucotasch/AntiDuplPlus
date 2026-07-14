@@ -109,6 +109,7 @@ namespace AntiDupl.NET.WinForms
         private int m_firstDragSelectedRowIndex = -1;
         private int m_lastDragSelectedRowIndex = -1;
         private int m_lowestDragSelectedIndex = -1;
+        private int m_targetedImageIndex = -1;
         private int m_highestDragSelectedIndex = -1;
 
         ContextMenuStrip m_contextMenuStrip;
@@ -281,6 +282,67 @@ namespace AntiDupl.NET.WinForms
         {
             ProgressForm progressForm = new ProgressForm(ProgressForm.Type.RefreshResults, m_core, m_options, m_coreOptions, m_mainSplitContainer);
             progressForm.Execute();
+        }
+
+        private static readonly Color TargetHighlightColor = Color.FromArgb(255, 220, 220);
+
+        public void SetTargetedImageIndex(int index)
+        {
+            if (m_targetedImageIndex == index) return;
+            int oldIndex = m_targetedImageIndex;
+            m_targetedImageIndex = index;
+
+            // Clear old highlight on previously targeted rows
+            if (oldIndex >= 0)
+                ApplyTargetHighlight(oldIndex, false);
+
+            // Apply new highlight
+            if (index >= 0)
+                ApplyTargetHighlight(index, true);
+        }
+
+        private void ApplyTargetHighlight(int targetIndex, bool apply)
+        {
+            if (m_results == null) return;
+
+            bool isHorizontal = m_viewMode == ResultsOptions.ViewMode.HorizontalPairTable;
+
+            for (int i = 0; i < Rows.Count; i++)
+            {
+                DataGridViewCustomRow row = (DataGridViewCustomRow)Rows[i];
+                if (!row.selected) continue;
+
+                Color backColor = apply ? TargetHighlightColor : DefaultCellStyle.BackColor;
+
+                if (isHorizontal)
+                {
+                    // Horizontal mode: highlight First* or Second* columns
+                    int startCol = targetIndex == 0
+                        ? (int)ColumnsTypeHorizontal.FirstFileName
+                        : (int)ColumnsTypeHorizontal.SecondFileName;
+                    int endCol = targetIndex == 0
+                        ? (int)ColumnsTypeHorizontal.FirstFileTime
+                        : (int)ColumnsTypeHorizontal.SecondFileTime;
+
+                    for (int c = startCol; c <= endCol; c++)
+                    {
+                        if (c < row.Cells.Count)
+                            row.Cells[c].Style.BackColor = backColor;
+                    }
+                }
+                else
+                {
+                    // Vertical mode: highlight the entire data row
+                    for (int c = 0; c < row.Cells.Count; c++)
+                    {
+                        ColumnsTypeVertical col = (ColumnsTypeVertical)c;
+                        if (col >= ColumnsTypeVertical.FileName && col < ColumnsTypeVertical.Size)
+                            row.Cells[c].Style.BackColor = backColor;
+                    }
+                }
+
+                InvalidateRow(i);
+            }
         }
 
         /// <summary>
@@ -856,6 +918,10 @@ namespace AntiDupl.NET.WinForms
                     m_core.SetCurrent(-1);
                 }
                 m_currentRowIndex = index;
+
+                // Clear target highlight when navigating to a new row
+                if (m_targetedImageIndex >= 0)
+                    SetTargetedImageIndex(-1);
 
                 if (m_firstSelectedRowIndex >= Rows.Count)
                     m_firstSelectedRowIndex = m_currentRowIndex;

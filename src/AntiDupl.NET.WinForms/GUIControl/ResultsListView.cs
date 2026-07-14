@@ -288,10 +288,7 @@ namespace AntiDupl.NET.WinForms
         private int GetTargetIndexForCurrentRow()
         {
             if (m_currentRowIndex < 0 || m_currentRowIndex >= m_results.Length) return -1;
-            var side = AutoSelector.GetSide(m_results[m_currentRowIndex]);
-            if (side == AutoSelectSide.First) return 0;
-            if (side == AutoSelectSide.Second) return 1;
-            return -1;
+            return AutoSelector.GetTargetIndex(m_results[m_currentRowIndex]);
         }
 
         /// <summary>
@@ -430,12 +427,12 @@ namespace AntiDupl.NET.WinForms
                     // Update Target column from sideCache
                     if (Columns.Contains("Target") && i < m_results.Length)
                     {
-                        var side = AutoSelector.GetSide(m_results[i]);
-                        string display = (side == AutoSelectSide.DontCare) ? "" :
-                                         (side == AutoSelectSide.First) ? "1st" : "2nd";
+                        int targetIdx = AutoSelector.GetTargetIndex(m_results[i]);
+                        string display = (targetIdx < 0) ? "" :
+                                         (targetIdx == 0) ? "1st" : "2nd";
                         row.Cells["Target"].Value = display;
-                        row.Cells["Target"].Style.BackColor = 
-                            (side != AutoSelectSide.DontCare) ? Color.LightCoral : SystemColors.Window;
+                        row.Cells["Target"].Style.BackColor =
+                            (targetIdx >= 0) ? Color.LightCoral : SystemColors.Window;
                     }
                 }
                 int current = m_core.GetCurrent();
@@ -744,38 +741,32 @@ namespace AntiDupl.NET.WinForms
             if (rowIndex < 0 || rowIndex >= m_results.Length) return;
             if (m_results[rowIndex].type != CoreDll.ResultType.DuplImagePair) return;
 
-            var current = AutoSelector.GetSide(m_results[rowIndex]);
+            int currentIdx = AutoSelector.GetTargetIndex(m_results[rowIndex]);
             AutoSelectSide next;
-            if (current == AutoSelectSide.DontCare)
+            if (currentIdx < 0)
                 next = AutoSelectSide.First;
-            else if (current == AutoSelectSide.First)
+            else if (currentIdx == 0)
                 next = AutoSelectSide.Second;
             else
                 next = AutoSelectSide.DontCare;
 
             // Update sideCache
-            if (next == AutoSelectSide.DontCare)
-                AutoSelector.ClearSide(m_results[rowIndex]);
-            else
-                AutoSelector.SetSide(m_results[rowIndex], next);
+            AutoSelector.SetSide(m_results[rowIndex], next);
 
             // Update cell display
-            string display = (next == AutoSelectSide.DontCare) ? "" :
-                             (next == AutoSelectSide.First) ? "1st" : "2nd";
+            int newTargetIdx = AutoSelector.GetTargetIndex(m_results[rowIndex]);
+            string display = (newTargetIdx < 0) ? "" :
+                             (newTargetIdx == 0) ? "1st" : "2nd";
             Rows[rowIndex].Cells["Target"].Value = display;
 
             // Color the cell
-            if (next == AutoSelectSide.DontCare)
-                Rows[rowIndex].Cells["Target"].Style.BackColor = SystemColors.Window;
-            else
-                Rows[rowIndex].Cells["Target"].Style.BackColor = Color.LightCoral;
+            Rows[rowIndex].Cells["Target"].Style.BackColor =
+                (newTargetIdx >= 0) ? Color.LightCoral : SystemColors.Window;
 
             // Update preview if this is the current row
             if (rowIndex == m_currentRowIndex)
             {
-                int targetIdx = (next == AutoSelectSide.First) ? 0 :
-                                (next == AutoSelectSide.Second) ? 1 : -1;
-                OnCurrentTargetChanged?.Invoke(targetIdx);
+                OnCurrentTargetChanged?.Invoke(newTargetIdx);
             }
         }
 

@@ -12,10 +12,10 @@ namespace AntiDupl.NET.WinForms
     /// </summary>
     public static class AutoSelector
     {
-        // Side cache: normalized path pair → which side to act on
-        private static Dictionary<string, AutoSelectSide> s_sideCache = new Dictionary<string, AutoSelectSide>();
+        // Side cache: normalized path pair → targeted image path (or null for DontCare)
+        private static Dictionary<string, string> s_sideCache = new Dictionary<string, string>();
 
-        public static IReadOnlyDictionary<string, AutoSelectSide> SideCache => s_sideCache;
+        public static IReadOnlyDictionary<string, string> SideCache => s_sideCache;
 
         /// <summary>
         /// Generate a stable cache key from a result pair (order-independent).
@@ -30,8 +30,29 @@ namespace AntiDupl.NET.WinForms
         }
 
         /// <summary>
+        /// Get the targeted image path for a result, or null if not targeted.
+        /// </summary>
+        public static string GetTargetPath(CoreResult r)
+        {
+            string path;
+            s_sideCache.TryGetValue(GetKey(r), out path);
+            return path;
+        }
+
+        /// <summary>
+        /// Get which position (0=first, 1=second, -1=none) the targeted image is in.
+        /// </summary>
+        public static int GetTargetIndex(CoreResult r)
+        {
+            string targetPath = GetTargetPath(r);
+            if (targetPath == null) return -1;
+            if (string.Equals(targetPath, r.first?.path, StringComparison.OrdinalIgnoreCase)) return 0;
+            if (string.Equals(targetPath, r.second?.path, StringComparison.OrdinalIgnoreCase)) return 1;
+            return -1;
+        }
+
+        /// <summary>
         /// Apply auto-select criteria to all results.
-        /// Returns the number of results where a side was marked.
         /// </summary>
         public static int Apply(CoreLib core, AutoSelectCriteria criteria)
         {
@@ -48,13 +69,13 @@ namespace AntiDupl.NET.WinForms
             {
                 var r = results[i];
                 if (r.type != CoreDll.ResultType.DuplImagePair) continue;
-                if (!criteria.IncludeDefects && r.type == CoreDll.ResultType.DefectImage) continue;
 
                 AutoSelectSide side = DetermineSide(r, criteria, poolMap);
 
                 if (side != AutoSelectSide.DontCare)
                 {
-                    s_sideCache[GetKey(r)] = side;
+                    string targetPath = (side == AutoSelectSide.First) ? r.first.path : r.second.path;
+                    s_sideCache[GetKey(r)] = targetPath;
                     affected++;
                 }
             }
@@ -63,21 +84,14 @@ namespace AntiDupl.NET.WinForms
         }
 
         /// <summary>
-        /// Get the targeted side for a result.
-        /// </summary>
-        public static AutoSelectSide GetSide(CoreResult r)
-        {
-            AutoSelectSide side;
-            s_sideCache.TryGetValue(GetKey(r), out side);
-            return side;
-        }
-
-        /// <summary>
         /// Set the targeted side for a result (manual toggle).
         /// </summary>
         public static void SetSide(CoreResult r, AutoSelectSide side)
         {
-            s_sideCache[GetKey(r)] = side;
+            if (side == AutoSelectSide.DontCare)
+                s_sideCache.Remove(GetKey(r));
+            else
+                s_sideCache[GetKey(r)] = (side == AutoSelectSide.First) ? r.first.path : r.second.path;
         }
 
         /// <summary>
@@ -89,25 +103,28 @@ namespace AntiDupl.NET.WinForms
         }
 
         /// <summary>
-        /// Invert side cache: First ↔ Second.
+        /// Invert side cache: swap targeted image to the other one in each pair.
         /// </summary>
         public static int InvertSides(CoreLib core)
         {
             var results = core.GetResult(0, 1000000);
             if (results == null || results.Length == 0) return 0;
 
-            var newCache = new Dictionary<string, AutoSelectSide>();
+            var newCache = new Dictionary<string, string>();
             int inverted = 0;
 
             for (int i = 0; i < results.Length; i++)
             {
-                string key = GetKey(results[i]);
-                AutoSelectSide oldSide;
-                if (s_sideCache.TryGetValue(key, out oldSide))
+                var r = results[i];
+                string key = GetKey(r);
+                string oldPath;
+                if (s_sideCache.TryGetValue(key, out oldPath))
                 {
-                    newCache[key] = (oldSide == AutoSelectSide.First)
-                        ? AutoSelectSide.Second
-                        : AutoSelectSide.First;
+                    // Swap: if was targeting first, now target second, and vice versa
+                    string newPath = string.Equals(oldPath, r.first?.path, StringComparison.OrdinalIgnoreCase)
+                        ? r.second.path
+                        : r.first.path;
+                    newCache[key] = newPath;
                     inverted++;
                 }
             }
@@ -137,34 +154,30 @@ namespace AntiDupl.NET.WinForms
             if (results == null || results.Length == 0) return 0;
 
             int executed = 0;
-            // Process in reverse to maintain index stability
             for (int i = results.Length - 1; i >= 0; i--)
             {
-                string key = GetKey(results[i]);
-                AutoSelectSide side;
-                if (!s_sideCache.TryGetValue(key, out side)) continue;
-                if (results[i].type != CoreDll.ResultType.DuplImagePair) continue;
+                var r = results[i];
+                string key = GetKey(r);
+                string targetPath;
+                if (!s_sideCache.TryGetValue(key, out targetPath)) continue;
+                if (r.type != CoreDll.ResultType.DuplImagePair) continue;
 
                 core.SetCurrent(i);
 
                 if (delete)
                 {
-                    if (side == AutoSelectSide.First)
+                    // Determine which action based on which image is targeted
+                    if (string.Equals(targetPath, r.first?.path, StringComparison.OrdinalIgnoreCase))
                         core.ApplyToResult(CoreDll.LocalActionType.DeleteFirst, CoreDll.TargetType.Current);
                     else
                         core.ApplyToResult(CoreDll.LocalActionType.DeleteSecond, CoreDll.TargetType.Current);
                 }
                 else if (!string.IsNullOrEmpty(targetFolder))
                 {
-                    // Move to user-specified folder
-                    string sourcePath = (side == AutoSelectSide.First) 
-                        ? results[i].first.path 
-                        : results[i].second.path;
-                    
+                    string sourcePath = targetPath;
                     if (!string.IsNullOrEmpty(sourcePath) && System.IO.File.Exists(sourcePath))
                     {
                         string destPath = System.IO.Path.Combine(targetFolder, System.IO.Path.GetFileName(sourcePath));
-                        // Handle name conflicts
                         if (System.IO.File.Exists(destPath))
                         {
                             string name = System.IO.Path.GetFileNameWithoutExtension(sourcePath);

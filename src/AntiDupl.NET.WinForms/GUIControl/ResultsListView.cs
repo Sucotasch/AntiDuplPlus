@@ -111,7 +111,6 @@ namespace AntiDupl.NET.WinForms
         private int m_firstDragSelectedRowIndex = -1;
         private int m_lastDragSelectedRowIndex = -1;
         private int m_lowestDragSelectedIndex = -1;
-        private int m_targetedImageIndex = -1;
         private int m_highestDragSelectedIndex = -1;
 
         ContextMenuStrip m_contextMenuStrip;
@@ -286,8 +285,6 @@ namespace AntiDupl.NET.WinForms
             progressForm.Execute();
         }
 
-        private static readonly Color TargetHighlightColor = Color.FromArgb(255, 220, 220);
-
         private int GetTargetIndexForCurrentRow()
         {
             if (m_currentRowIndex < 0 || m_currentRowIndex >= m_results.Length) return -1;
@@ -295,82 +292,6 @@ namespace AntiDupl.NET.WinForms
             if (side == AutoSelectSide.First) return 0;
             if (side == AutoSelectSide.Second) return 1;
             return -1;
-        }
-
-        public void SetTargetedImageIndex(int index)
-        {
-            if (m_targetedImageIndex == index) return;
-            m_targetedImageIndex = index;
-            ApplyAllTargetHighlights();
-        }
-
-        private void ApplyAllTargetHighlights()
-        {
-            if (m_results == null) return;
-            bool isHorizontal = m_viewMode == ResultsOptions.ViewMode.HorizontalPairTable;
-
-            for (int i = 0; i < Rows.Count && i < m_results.Length; i++)
-            {
-                var side = AutoSelector.GetSide(i);
-                int targetIdx = (side == AutoSelectSide.First) ? 0 :
-                                (side == AutoSelectSide.Second) ? 1 : -1;
-
-                Color backColor = (targetIdx >= 0) ? TargetHighlightColor : DefaultCellStyle.BackColor;
-                ApplyHighlightToRow(i, targetIdx, backColor, isHorizontal);
-            }
-        }
-
-        private void ApplyHighlightToRow(int rowIndex, int targetIndex, Color backColor, bool isHorizontal)
-        {
-            if (rowIndex < 0 || rowIndex >= Rows.Count) return;
-            DataGridViewCustomRow row = (DataGridViewCustomRow)Rows[rowIndex];
-
-            if (isHorizontal)
-            {
-                int startCol = targetIndex == 0
-                    ? (int)ColumnsTypeHorizontal.FirstFileName
-                    : (int)ColumnsTypeHorizontal.SecondFileName;
-                int endCol = targetIndex == 0
-                    ? (int)ColumnsTypeHorizontal.FirstFileTime
-                    : (int)ColumnsTypeHorizontal.SecondFileTime;
-                if (targetIndex < 0) { startCol = 0; endCol = -1; } // no highlight
-
-                for (int c = startCol; c <= endCol; c++)
-                {
-                    if (c < row.Cells.Count)
-                        row.Cells[c].Style.BackColor = backColor;
-                }
-            }
-            else
-            {
-                if (targetIndex < 0)
-                {
-                    // Clear highlight on all data columns
-                    for (int c = 0; c < row.Cells.Count; c++)
-                    {
-                        ColumnsTypeVertical col = (ColumnsTypeVertical)c;
-                        if (col >= ColumnsTypeVertical.FileName && col < ColumnsTypeVertical.Size)
-                            row.Cells[c].Style.BackColor = backColor;
-                    }
-                }
-                else
-                {
-                    for (int c = 0; c < row.Cells.Count; c++)
-                    {
-                        ColumnsTypeVertical col = (ColumnsTypeVertical)c;
-                        if (col >= ColumnsTypeVertical.FileName && col < ColumnsTypeVertical.Size)
-                            row.Cells[c].Style.BackColor = backColor;
-                    }
-                }
-            }
-
-            InvalidateRow(rowIndex);
-        }
-
-        private void ApplyTargetHighlight(int targetIndex, bool apply)
-        {
-            // Legacy method — kept for compatibility, delegates to ApplyAllTargetHighlights
-            ApplyAllTargetHighlights();
         }
 
         /// <summary>
@@ -517,8 +438,6 @@ namespace AntiDupl.NET.WinForms
                             (side != AutoSelectSide.DontCare) ? Color.LightCoral : SystemColors.Window;
                     }
                 }
-                // Apply data cell highlights based on SideCache
-                ApplyAllTargetHighlights();
                 int current = m_core.GetCurrent();
                 if (current != -1)
                 {
@@ -851,9 +770,6 @@ namespace AntiDupl.NET.WinForms
             else
                 Rows[rowIndex].Cells["Target"].Style.BackColor = Color.LightCoral;
 
-            // Update data cell highlights
-            ApplyAllTargetHighlights();
-
             // Update preview if this is the current row
             if (rowIndex == m_currentRowIndex)
             {
@@ -963,9 +879,6 @@ namespace AntiDupl.NET.WinForms
                 // Fire target change event based on AutoSelector state
                 int targetIndex = GetTargetIndexForCurrentRow();
                 OnCurrentTargetChanged?.Invoke(targetIndex);
-
-                // Apply table cell highlight
-                ApplyTargetHighlight(targetIndex, true);
 
                 if (m_firstSelectedRowIndex >= Rows.Count)
                     m_firstSelectedRowIndex = m_currentRowIndex;

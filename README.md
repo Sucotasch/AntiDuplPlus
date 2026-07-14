@@ -16,6 +16,8 @@ GPU-ускоренный поисковик дубликатов/похожих 
 | Pool сравнение | N/A | **Pool1 vs Pool2** — кросс-пуловое сравнение |
 | Auto-Select | Базовый | **Расширенный** — время, размер, качество, разрешение, пулы (AND-логика) |
 | Удаление файлов | Только в корзину | **Корзина + перемещение** в выбранную папку |
+| Качество изображений | Базовый | **blockiness + blurring** — вычисляются при создании базы |
+| SSIM | Нет | **GPU SSIM** — полнофункциональный алгоритм |
 
 ## Требования
 
@@ -46,8 +48,9 @@ GPU-ускоренный поисковик дубликатов/похожих 
 1. Откройте **Tools → GPU Collector** (или нажмите кнопку на тулбаре)
 2. Выберите папку с изображениями
 3. NvJpegCollector декодирует изображения через GPU (JPEG) или CPU (PNG/BMP/TIFF/WebP/GIF)
-4. Создаётся база: `index.adi` + `0000.adi` в папке `databases/<имя>/`
-5. База автоматически регистрируется в `ad_database.xml`
+4. Вычисляет **blockiness** и **blurring** для каждого изображения
+5. Создаётся база: `index.adi` + `0000.adi` в папке `databases/<имя>/`
+6. База автоматически регистрируется в `ad_database.xml`
 
 ### Шаг 2: Управление базами
 
@@ -67,6 +70,7 @@ GPU-ускоренный поисковик дубликатов/похожих 
 2. Программа загружает включённые базы через DLL
 3. GPU сравнивает все изображения (AllVsAll)
 4. Результаты отображаются в таблице
+5. **Результаты сохраняются** и загружаются при следующем запуске
 
 ### Шаг 4: Обработка результатов
 
@@ -98,17 +102,18 @@ AntiDuplPlus/
 ├── src/
 │   ├── AntiDupl/                    # C++/CUDA ядро (AntiDupl.dll)
 │   │   ├── adEngine.cpp             # Главный движок поиска
-│   │   ├── adImageDataStorage.cpp   # Загрузка/сохранение баз (.adi)
-│   │   ├── adGPU.cu                 # CUDA ядра сравнения
+│   │   ├── adImageDataStorage.cpp   # Загрузка/сохранение баз (.adi, .adr)
+│   │   ├── adGPU.cu                 # CUDA ядра сравнения (Mean Square + SSIM)
 │   │   ├── adSearcher.cpp           # Загрузка баз + file scan
+│   │   ├── adImageInfo.cpp          # Actual() — проверка актуальности файлов
 │   │   └── adResultStorage.cpp      # Хранение результатов
 │   ├── NvJpegCollector/             # GPU-утилита создания баз
-│   │   └── main.cpp                 # nvJPEG декодирование + запись .adi
+│   │   └── main.cpp                 # nvJPEG декодирование + blockiness/blurring + запись .adi
 │   ├── AntiDupl.NET.Core/           # C# обёртка (P/Invoke)
 │   └── AntiDupl.NET.WinForms/       # GUI приложение
 │       ├── Forms/
 │       │   ├── MainForm.cs          # Главная форма
-│       │   ├── DatabaseManagerForm.cs  # Менеджер баз
+│       │   ├── DatabaseManagerForm.cs  # Менеджер баз (Pool1/Pool2)
 │       │   └── AutoSelectDialog.cs  # Расширенный автовыбор
 │       ├── GUIControl/
 │       │   ├── MainMenu.cs          # Меню + toolbar
@@ -121,17 +126,18 @@ AntiDuplPlus/
 └── Audit/                           # Отчёты аудита кода
 ```
 
-## Формат баз данных (.adi)
+## Формат баз данных
 
-### index.adi (DLL-native формат)
-Заголовок `"adid"` + reducedImageSize + записи с ключами.
+### Два формата .adi (не путать!)
+- **DLL-native**: заголовок `"adid"` + version. Записывается при сканировании файлов.
+- **Collector-native**: без заголовков, raw fwrite. Записывается NvJpegCollector.
 
-### 0000.adi (Collector-native формат)
+### Collector-native формат (0000.adi)
 ```
 thumbSize(u32) + key(i16) + first(wstring) + last(wstring) + count(u64)
 + N records:
   path(wstring) + size(u64) + time(u64) + hash(u32) + type(u8)
-  + width(u32) + height(u32) + blockiness(f32) + blurring(f32)
+  + width(u32) + height(u32) + blockiness(f64) + blurring(f64)
   + defect(u8) + crc32c(u64) + filled(u8)
   + thumb_size(u64) + thumb_data(bytes)
   + average(f32) + varianceSquare(f32)

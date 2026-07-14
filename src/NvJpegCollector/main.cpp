@@ -555,6 +555,11 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                     RgbToGray(thumbRGB.data(), gray.data(), args.thumbSize, args.thumbSize);
                     img.thumbnail = gray;
                     img.crc32c = CalculateCRC32c(gray.data(), gray.size());
+                    uint64_t sum = 0, sumSq = 0;
+                    for (int p = 0; p < args.thumbSize * args.thumbSize; p++) { sum += gray[p]; sumSq += (uint64_t)gray[p] * gray[p]; }
+                    img.average = (float)sum / (args.thumbSize * args.thumbSize);
+                    float avgSq = (float)sumSq / (args.thumbSize * args.thumbSize);
+                    img.varianceSquare = fabs(avgSq - (img.average * img.average));
                     images.push_back(img);
                     processed++;
                 }
@@ -626,10 +631,9 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                 {
                     std::wstring exeDir = GetExeDir();
                     std::wstring regPathW = exeDir + L"\\ad_database.xml";
-                    std::string regPathA(regPathW.begin(), regPathW.end());
                     std::wstring xmlContent;
                     {
-                        std::ifstream rFile(regPathA, std::ios::binary);
+                        std::ifstream rFile(regPathW, std::ios::binary);
                         if (rFile.is_open()) {
                             std::string content((std::istreambuf_iterator<char>(rFile)), std::istreambuf_iterator<char>());
                             if (!content.empty()) {
@@ -653,7 +657,7 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                         }
                         pos++;
                     }
-                    std::ofstream wFile(regPathA, std::ios::binary);
+                    std::ofstream wFile(regPathW, std::ios::binary);
                     if (wFile.is_open()) {
                         int len = WideCharToMultiByte(CP_UTF8, 0, xmlContent.c_str(), (int)xmlContent.size(), NULL, 0, NULL, NULL);
                         if (len > 0) {

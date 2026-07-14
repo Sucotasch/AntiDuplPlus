@@ -723,6 +723,8 @@ namespace AntiDupl.NET.WinForms.Forms
         /// </summary>
         public static int GetPoolCompareMode()
         {
+            if (s_poolCompareMode < 0)
+                s_poolCompareMode = LoadPoolMode();
             return s_poolCompareMode;
         }
 

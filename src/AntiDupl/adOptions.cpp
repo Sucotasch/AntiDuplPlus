@@ -150,6 +150,10 @@ namespace ad
             }
         }
 
+        // Cross-field: inverted size range means zero images pass the filter
+        if (compare.minimalImageSize > compare.maximalImageSize)
+            compare.minimalImageSize = compare.maximalImageSize;
+
     }
 
     adError TOptions::Import(adOptionsType optionsType, void * pOptions)

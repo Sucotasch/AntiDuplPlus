@@ -607,6 +607,7 @@ namespace ad
 			imageData.blockiness = blockiness;
 			imageData.blurring = blurring;
 			imageData.crc32c = crc32c;
+			imageData.defect = (TDefectType)defect;
 
 			// Read thumbnail data if filled
 			if (filled && fileThumbSize > 0)
@@ -624,7 +625,8 @@ namespace ad
 					fseek(f, thumbBytes, SEEK_CUR);
 				}
 				// NvJpegCollector writes average(f32) + varianceSquare(f32) after thumb data
-				fseek(f, 8, SEEK_CUR);
+				fread(&imageData.data->average, 4, 1, f);
+				fread(&imageData.data->varianceSquare, 4, 1, f);
 			}
 
 			if (Find(imageData) == m_storage.end())

@@ -154,21 +154,14 @@ namespace ad
             // In AllVsAll mode, ExecuteGpuAllVsAllComparison does its own mass upload
             if (!m_pEngine->SkipComparisonDuringCollection())
             {
-                // Ensure GPU buffer is initialized before first upload
-                static bool gpuBufferInitialized = false;
-                if (!gpuBufferInitialized)
+                // EnsureCapacity is idempotent: no-op if buffer already has enough capacity.
+                // Must be called per-session because TGpuManager is recreated with TEngine.
                 {
-                    AD_DEBUG("FillPixelData: Initializing GPU buffer\n");
-                    size_t estimatedCapacity = 10000; // Start with reasonable estimate
-                    size_t thumbSize = m_pOptions->advanced.reducedImageSize * m_pOptions->advanced.reducedImageSize;
-                    if (m_pEngine->GpuManager()->EnsureCapacity(estimatedCapacity, thumbSize))
+                    size_t thumbSize = m_pOptions->advanced.reducedImageSize *
+                                       m_pOptions->advanced.reducedImageSize;
+                    if (!m_pEngine->GpuManager()->EnsureCapacity(10000, thumbSize))
                     {
-                        gpuBufferInitialized = true;
-                        AD_DEBUG("FillPixelData: GPU buffer initialized\n");
-                    }
-                    else
-                    {
-                        AD_DEBUG("FillPixelData: GPU buffer initialization FAILED\n");
+                        AD_DEBUG("FillPixelData: GPU EnsureCapacity FAILED\n");
                     }
                 }
 

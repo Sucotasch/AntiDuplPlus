@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -123,7 +123,7 @@ namespace AntiDupl.NET.WPF.Command
                                     path = collectThreadStatus.path;
                                 }
                                 currentFirst += collectThreadStatus.current;
-                                currentFirst -= collectThreadStatus.total;
+                                currentSecond += collectThreadStatus.total;
                             }
                         }
                     }

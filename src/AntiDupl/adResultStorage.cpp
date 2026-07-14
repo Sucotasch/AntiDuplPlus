@@ -387,7 +387,7 @@ namespace ad
 			Clear();
 			error = e.Error;
 		}
-		m_pStatus->Reset();		
+		m_pStatus->Reset();
         return error;
     }
 

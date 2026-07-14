@@ -125,8 +125,6 @@ namespace ad
 		Load(imageInfo.size);
 		Load(imageInfo.time);
 		Load(imageInfo.hash);
-		if (imageInfo.hash != imageInfo.path.GetCrc32())
-			throw TException(AD_ERROR_INVALID_FILE_FORMAT);
 		Load(imageInfo.type);
 		Load(imageInfo.width);
 		Load(imageInfo.height);

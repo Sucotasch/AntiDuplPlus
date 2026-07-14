@@ -514,7 +514,13 @@ namespace ad
             GetModuleFileNameW(NULL, exePath, MAX_PATH);
             std::wstring logPath(exePath);
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
-            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            // Truncate once per Search() session, then all subsequent opens use L"a"
+            FILE* logFile = _wfopen(logPath.c_str(), L"w");
+            if (logFile) {
+                fwprintf(logFile, L"=== Search() session started ===\n");
+                fclose(logFile);
+            }
+            logFile = _wfopen(logPath.c_str(), L"a");
             if (logFile) {
                 fwprintf(logFile, L"\n=== Search() called ===\n");
                 fwprintf(logFile, L"  searchPaths.Size() = %zu\n", m_pOptions->searchPaths.Size());
@@ -607,8 +613,9 @@ namespace ad
             GetModuleFileNameW(NULL, exePath, MAX_PATH);
             std::wstring logPath(exePath);
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
-            FILE* logFile = _wfopen(logPath.c_str(), L"w");
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
             if (logFile) {
+                fwprintf(logFile, L"\n=== Search() GPU status ===\n");
                 fwprintf(logFile, L"GPU Debug:\n");
                 fwprintf(logFile, L"  GpuManager: %s\n", m_pGpuManager ? L"OK" : L"NULL");
                 fwprintf(logFile, L"  IsAvailable: %s\n", (m_pGpuManager && m_pGpuManager->IsAvailable()) ? L"YES" : L"NO");
@@ -716,7 +723,8 @@ namespace ad
             }
 
             if (!gpuSuccess) {
-                AD_DEBUG("Search: GPU comparison FAILED — no CPU fallback (too slow for large collections)\n");
+                AD_DEBUG("Search: GPU comparison FAILED\n");
+                m_pStatus->Search(L"ERROR: GPU comparison failed. Check gpu_debug.log.", 0, 0);
             }
             else {
                 AD_DEBUG("Search: GPU comparison completed successfully\n");

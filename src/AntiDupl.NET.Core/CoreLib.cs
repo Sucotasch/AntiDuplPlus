@@ -313,12 +313,12 @@ namespace AntiDupl.NET.Core
 
         public uint GetResultSize()
         {
-            try 
+            try
             {
                 UIntPtr[] startFromB = new UIntPtr[1];
                 startFromB[0] = new UIntPtr(uint.MaxValue);
                 GCHandle startFromH = GCHandle.Alloc(startFromB, GCHandleType.Pinned);
-                try 
+                try
                 {
                     IntPtr startFromP = startFromH.AddrOfPinnedObject();
                     IntPtr resultP = new IntPtr(1);

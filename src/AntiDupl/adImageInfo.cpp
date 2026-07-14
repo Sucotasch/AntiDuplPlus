@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2023 Yermalayeu Ihar,
@@ -127,7 +127,8 @@ namespace ad
     {
         if (update || _actual == AD_UNDEFINED)
         {
-            _actual = (*this == TImageInfo(path.Original())) ? 1 : 0;
+            TImageInfo current(path.Original());
+            _actual = (TPath::EqualByPath(path, current.path) && size == current.size && time == current.time) ? 1 : 0;
         }
         return _actual > 0;
     }

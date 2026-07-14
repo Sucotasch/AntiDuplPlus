@@ -12,10 +12,22 @@ namespace AntiDupl.NET.WinForms
     /// </summary>
     public static class AutoSelector
     {
-        // Side cache: result index → which side to act on
-        private static Dictionary<int, AutoSelectSide> s_sideCache = new Dictionary<int, AutoSelectSide>();
+        // Side cache: normalized path pair → which side to act on
+        private static Dictionary<string, AutoSelectSide> s_sideCache = new Dictionary<string, AutoSelectSide>();
 
-        public static IReadOnlyDictionary<int, AutoSelectSide> SideCache => s_sideCache;
+        public static IReadOnlyDictionary<string, AutoSelectSide> SideCache => s_sideCache;
+
+        /// <summary>
+        /// Generate a stable cache key from a result pair (order-independent).
+        /// </summary>
+        public static string GetKey(CoreResult r)
+        {
+            string p1 = r.first?.path ?? "";
+            string p2 = r.second?.path ?? "";
+            return string.Compare(p1, p2, StringComparison.OrdinalIgnoreCase) <= 0
+                ? p1 + "|" + p2
+                : p2 + "|" + p1;
+        }
 
         /// <summary>
         /// Apply auto-select criteria to all results.
@@ -42,7 +54,7 @@ namespace AntiDupl.NET.WinForms
 
                 if (side != AutoSelectSide.DontCare)
                 {
-                    s_sideCache[i] = side;
+                    s_sideCache[GetKey(r)] = side;
                     affected++;
                 }
             }
@@ -51,29 +63,29 @@ namespace AntiDupl.NET.WinForms
         }
 
         /// <summary>
-        /// Get the targeted side for a result index.
+        /// Get the targeted side for a result.
         /// </summary>
-        public static AutoSelectSide GetSide(int resultIndex)
+        public static AutoSelectSide GetSide(CoreResult r)
         {
             AutoSelectSide side;
-            s_sideCache.TryGetValue(resultIndex, out side);
+            s_sideCache.TryGetValue(GetKey(r), out side);
             return side;
         }
 
         /// <summary>
-        /// Set the targeted side for a result index (manual toggle).
+        /// Set the targeted side for a result (manual toggle).
         /// </summary>
-        public static void SetSide(int resultIndex, AutoSelectSide side)
+        public static void SetSide(CoreResult r, AutoSelectSide side)
         {
-            s_sideCache[resultIndex] = side;
+            s_sideCache[GetKey(r)] = side;
         }
 
         /// <summary>
-        /// Clear the targeted side for a result index.
+        /// Clear the targeted side for a result.
         /// </summary>
-        public static void ClearSide(int resultIndex)
+        public static void ClearSide(CoreResult r)
         {
-            s_sideCache.Remove(resultIndex);
+            s_sideCache.Remove(GetKey(r));
         }
 
         /// <summary>
@@ -84,16 +96,17 @@ namespace AntiDupl.NET.WinForms
             var results = core.GetResult(0, 1000000);
             if (results == null || results.Length == 0) return 0;
 
-            var newCache = new Dictionary<int, AutoSelectSide>();
+            var newCache = new Dictionary<string, AutoSelectSide>();
             int inverted = 0;
 
             for (int i = 0; i < results.Length; i++)
             {
+                string key = GetKey(results[i]);
                 AutoSelectSide oldSide;
-                if (s_sideCache.TryGetValue(i, out oldSide))
+                if (s_sideCache.TryGetValue(key, out oldSide))
                 {
-                    newCache[i] = (oldSide == AutoSelectSide.First) 
-                        ? AutoSelectSide.Second 
+                    newCache[key] = (oldSide == AutoSelectSide.First)
+                        ? AutoSelectSide.Second
                         : AutoSelectSide.First;
                     inverted++;
                 }
@@ -127,8 +140,9 @@ namespace AntiDupl.NET.WinForms
             // Process in reverse to maintain index stability
             for (int i = results.Length - 1; i >= 0; i--)
             {
+                string key = GetKey(results[i]);
                 AutoSelectSide side;
-                if (!s_sideCache.TryGetValue(i, out side)) continue;
+                if (!s_sideCache.TryGetValue(key, out side)) continue;
                 if (results[i].type != CoreDll.ResultType.DuplImagePair) continue;
 
                 core.SetCurrent(i);

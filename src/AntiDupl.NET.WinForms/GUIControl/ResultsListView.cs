@@ -288,7 +288,7 @@ namespace AntiDupl.NET.WinForms
         private int GetTargetIndexForCurrentRow()
         {
             if (m_currentRowIndex < 0 || m_currentRowIndex >= m_results.Length) return -1;
-            var side = AutoSelector.GetSide(m_currentRowIndex);
+            var side = AutoSelector.GetSide(m_results[m_currentRowIndex]);
             if (side == AutoSelectSide.First) return 0;
             if (side == AutoSelectSide.Second) return 1;
             return -1;
@@ -430,7 +430,7 @@ namespace AntiDupl.NET.WinForms
                     // Update Target column from sideCache
                     if (Columns.Contains("Target") && i < m_results.Length)
                     {
-                        var side = AutoSelector.GetSide(i);
+                        var side = AutoSelector.GetSide(m_results[i]);
                         string display = (side == AutoSelectSide.DontCare) ? "" :
                                          (side == AutoSelectSide.First) ? "1st" : "2nd";
                         row.Cells["Target"].Value = display;
@@ -744,7 +744,7 @@ namespace AntiDupl.NET.WinForms
             if (rowIndex < 0 || rowIndex >= m_results.Length) return;
             if (m_results[rowIndex].type != CoreDll.ResultType.DuplImagePair) return;
 
-            var current = AutoSelector.GetSide(rowIndex);
+            var current = AutoSelector.GetSide(m_results[rowIndex]);
             AutoSelectSide next;
             if (current == AutoSelectSide.DontCare)
                 next = AutoSelectSide.First;
@@ -755,9 +755,9 @@ namespace AntiDupl.NET.WinForms
 
             // Update sideCache
             if (next == AutoSelectSide.DontCare)
-                AutoSelector.ClearSide(rowIndex);
+                AutoSelector.ClearSide(m_results[rowIndex]);
             else
-                AutoSelector.SetSide(rowIndex, next);
+                AutoSelector.SetSide(m_results[rowIndex], next);
 
             // Update cell display
             string display = (next == AutoSelectSide.DontCare) ? "" :

@@ -161,8 +161,8 @@ namespace AntiDupl.NET.WinForms
                     autoSelectMenu.DropDownItems.Add("Larger File", null, (s, e) => DoAutoSelect(AutoSelectCriteria.LargerFile));
                     autoSelectMenu.DropDownItems.Add("Lower Resolution", null, (s, e) => DoAutoSelect(AutoSelectCriteria.LowerResolution));
                     autoSelectMenu.DropDownItems.Add("Higher Resolution", null, (s, e) => DoAutoSelect(AutoSelectCriteria.HigherResolution));
-                    autoSelectMenu.DropDownItems.Add("Worse Quality", null, (s, e) => DoAutoSelect(AutoSelectCriteria.WorseQuality));
-                    autoSelectMenu.DropDownItems.Add("Better Quality", null, (s, e) => DoAutoSelect(AutoSelectCriteria.BetterQuality));
+                    autoSelectMenu.DropDownItems.Add("More Compressed", null, (s, e) => DoAutoSelect(AutoSelectCriteria.WorseQuality));
+                    autoSelectMenu.DropDownItems.Add("Less Compressed", null, (s, e) => DoAutoSelect(AutoSelectCriteria.BetterQuality));
                     autoSelectMenu.DropDownItems.Add(new ToolStripSeparator());
                     autoSelectMenu.DropDownItems.Add("From Pool1", null, (s, e) => DoAutoSelect(AutoSelectCriteria.FromPool1));
                     autoSelectMenu.DropDownItems.Add("From Pool2", null, (s, e) => DoAutoSelect(AutoSelectCriteria.FromPool2));

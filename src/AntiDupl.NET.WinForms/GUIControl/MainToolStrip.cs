@@ -132,8 +132,8 @@ namespace AntiDupl.NET.WinForms
             m_autoSelectButton.DropDownItems.Add("Larger File", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.LargerFile));
             m_autoSelectButton.DropDownItems.Add("Lower Resolution", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.LowerResolution));
             m_autoSelectButton.DropDownItems.Add("Higher Resolution", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.HigherResolution));
-            m_autoSelectButton.DropDownItems.Add("Worse Quality", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.WorseQuality));
-            m_autoSelectButton.DropDownItems.Add("Better Quality", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.BetterQuality));
+            m_autoSelectButton.DropDownItems.Add("More Compressed", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.WorseQuality));
+            m_autoSelectButton.DropDownItems.Add("Less Compressed", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.BetterQuality));
             m_autoSelectButton.DropDownItems.Add(new ToolStripSeparator());
             m_autoSelectButton.DropDownItems.Add("From Pool1", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.FromPool1));
             m_autoSelectButton.DropDownItems.Add("From Pool2", null, (s, e) => m_mainMenu.DoAutoSelect(AutoSelectCriteria.FromPool2));

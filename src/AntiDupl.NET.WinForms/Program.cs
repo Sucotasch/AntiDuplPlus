@@ -80,11 +80,22 @@ namespace AntiDupl.NET.WinForms
             {
                 try
                 {
-                    using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                        @"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App");
-                    if (key == null) return false;
-                    foreach (var name in key.GetValueNames())
-                        if (name.StartsWith("8.")) return true;
+                    // Get dotnet install path from sharedhost registry (always present)
+                    using var hostKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                        @"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedhost");
+                    if (hostKey == null) return false;
+                    string dotnetPath = hostKey.GetValue("Path") as string;
+                    if (string.IsNullOrEmpty(dotnetPath)) return false;
+
+                    // Check for Microsoft.WindowsDesktop.App framework directory with version 8.*
+                    string frameworksPath = System.IO.Path.Combine(dotnetPath, "shared", "Microsoft.WindowsDesktop.App");
+                    if (!System.IO.Directory.Exists(frameworksPath)) return false;
+
+                    foreach (string dir in System.IO.Directory.GetDirectories(frameworksPath))
+                    {
+                        string dirName = System.IO.Path.GetFileName(dir);
+                        if (dirName.StartsWith("8.")) return true;
+                    }
                     return false;
                 }
                 catch { return false; }

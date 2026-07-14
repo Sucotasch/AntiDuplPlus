@@ -34,7 +34,7 @@ namespace AntiDupl.NET.WinForms
         static void Main(string[] args)
         {
 #if !PUBLISH
-            if (IsDotNet4Installed)
+            if (IsDotNet8Installed)
 #endif
             {
                 string customSavePath = null;
@@ -55,9 +55,9 @@ namespace AntiDupl.NET.WinForms
                 Application.Run(new MainForm());
             }
 #if !PUBLISH
-            else if (MessageBox.Show("You need Microsoft .NET Framework 4.8 in order to run this program. Do you want to download .Net Framework 4.8?", "Warning",
-                        MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
-                System.Diagnostics.Process.Start("https://dotnet.microsoft.com/en-us/download/dotnet-framework/net48");
+            else if (MessageBox.Show("You need .NET 8 Desktop Runtime to run this program. Download it?",
+                        "Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
+                System.Diagnostics.Process.Start("https://dotnet.microsoft.com/download/dotnet/8.0");
 #endif
         }
 
@@ -74,18 +74,20 @@ namespace AntiDupl.NET.WinForms
             return false;
         }
 
-        private static bool IsDotNet4Installed
+        private static bool IsDotNet8Installed
         {
             get
             {
                 try
                 {
-                    return (Convert.ToInt32(Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Client").GetValue("Install")) == 1);
-                }
-                catch
-                {
+                    using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                        @"SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App");
+                    if (key == null) return false;
+                    foreach (var name in key.GetValueNames())
+                        if (name.StartsWith("8.")) return true;
                     return false;
                 }
+                catch { return false; }
             }
         }
 

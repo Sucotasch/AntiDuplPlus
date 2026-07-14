@@ -28,6 +28,7 @@ namespace AntiDupl.NET.WPF.Command
         private IWindowService _windowService;
         DispatcherTimer _timer;
         ProgressDialogViewModel _progressDialogViewModel;
+        private readonly ManualResetEventSlim _searchStarted = new ManualResetEventSlim(false);
         public enum StateEnum
         {
             Start,
@@ -153,22 +154,25 @@ namespace AntiDupl.NET.WPF.Command
             _progressDialogViewModel.TokenSource.Token.Register(() => OnCancel());
 
             _state = StateEnum.Start;
+            _searchStarted.Reset();
 
             Thread thread = new Thread(new ThreadStart(RunProcess));
             thread.IsBackground = true; //make them a daemon - prevent thread callback issues
             thread.Name = "DllThread";
             thread.Start();
 
-            _timer.Start();
-
-            Thread.Sleep(200);
-
-            if (_state != StateEnum.Finish)
+            Task.Run(() =>
             {
-                // Announce that work is starting
-                //_mainViewModel.RaiseWorkStartedEvent();
-                _windowService.OpenProgressWindow(_progressDialogViewModel);
-            }
+                _searchStarted.Wait(500);
+                Application.Current.Dispatcher.Invoke(DispatcherPriority.Normal, new Action(() =>
+                {
+                    if (_state != StateEnum.Finish)
+                    {
+                        _timer.Start();
+                        _windowService.OpenProgressWindow(_progressDialogViewModel);
+                    }
+                }));
+            });
         }
 
         /// <summary>
@@ -179,6 +183,7 @@ namespace AntiDupl.NET.WPF.Command
             //var watch = System.Diagnostics.Stopwatch.StartNew();
 
             _progressDialogViewModel.State = "Search";
+            _searchStarted.Set();
 
             //_mainViewModel.Options.CopyToDll();
             _mainViewModel.Options = new CoreOptions(_core);

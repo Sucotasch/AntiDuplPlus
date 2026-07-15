@@ -157,7 +157,9 @@ namespace AntiDupl.NET.WinForms
             });
 
             m_edit_deleteSelectedMenuItem = InitFactory.MenuItem.Create(null, null, DeleteSelectedAction);
+            m_edit_deleteSelectedMenuItem.Text = "Delete Selected";
             m_edit_moveSelectedMenuItem = InitFactory.MenuItem.Create(null, null, MoveSelectedAction);
+            m_edit_moveSelectedMenuItem.Text = "Move Selected...";
 
             m_editMenuItem = new ToolStripMenuItem();
             m_editMenuItem.DropDownItems.Add(m_edit_undoMenuItem);

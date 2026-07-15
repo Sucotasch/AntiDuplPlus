@@ -58,7 +58,7 @@ namespace AntiDupl.NET.WinForms
             LoadImages,
             SaveImages,
         }
-        private Type m_type;
+        private volatile Type m_type;
         
         private CoreDll.LocalActionType m_action;
         private CoreDll.TargetType m_target;
@@ -74,7 +74,7 @@ namespace AntiDupl.NET.WinForms
             Stopped,
             Finish
         }
-        private State m_state = State.Start;
+        private volatile State m_state = State.Start;
 
         private CoreLib m_core;
         private Options m_options;
@@ -85,7 +85,7 @@ namespace AntiDupl.NET.WinForms
         /// <summary>
         /// Надо ли обновлять результаты.
         /// </summary>
-        private bool m_updateResults = true;
+        private volatile bool m_updateResults = true;
 
         private Button m_cancelButton;
         private ProgressPanel m_progressPanel;

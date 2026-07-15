@@ -52,7 +52,7 @@ namespace AntiDupl.NET.WinForms
             ClearTemporary,
             Finish
         }
-        State m_state = State.Start;
+        volatile State m_state = State.Start;
 
         private CoreLib m_core;
         private Options m_options;

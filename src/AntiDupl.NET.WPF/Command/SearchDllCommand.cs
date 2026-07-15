@@ -36,7 +36,7 @@ namespace AntiDupl.NET.WPF.Command
             Stopped,
             Finish
         }
-        StateEnum _state = StateEnum.Start;
+        volatile StateEnum _state = StateEnum.Start;
 
         public SearchDllCommand(MainViewModel mainViewModel, CoreLib core, IWindowService windowService)
         {

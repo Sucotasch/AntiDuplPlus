@@ -630,7 +630,10 @@ namespace ad
 			}
 
 			if (Find(imageData) == m_storage.end())
-				Insert(new TImageData(imageData));
+			{
+				if (IsFileExists(imageData.path.Original().c_str()))
+					Insert(new TImageData(imageData));
+			}
 		}
 
 	fclose(f);
@@ -657,7 +660,10 @@ namespace ad
 			{
 				inputFile.Load(imageData);
 				if(Find(imageData) == m_storage.end())
-					Insert(new TImageData(imageData));
+				{
+					if(IsFileExists(imageData.path.Original().c_str()))
+						Insert(new TImageData(imageData));
+				}
 			}
 			return true;
 		}

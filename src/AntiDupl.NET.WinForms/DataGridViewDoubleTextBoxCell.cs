@@ -115,63 +115,73 @@ namespace AntiDupl.NET.WinForms
             format.Trimming = StringTrimming.EllipsisCharacter;
             format.FormatFlags |= StringFormatFlags.NoWrap;
 
-            switch (cellStyle.Alignment)
+            try
             {
-                case DataGridViewContentAlignment.BottomCenter:
-                    format.Alignment = StringAlignment.Center;
-                    format.LineAlignment = StringAlignment.Far;
-                    break;
-                case DataGridViewContentAlignment.BottomLeft:
-                    format.Alignment = StringAlignment.Near;
-                    format.LineAlignment = StringAlignment.Far;
-                    break;
-                case DataGridViewContentAlignment.BottomRight:
-                    format.Alignment = StringAlignment.Far;
-                    format.LineAlignment = StringAlignment.Far;
-                    break;
-                case DataGridViewContentAlignment.MiddleCenter:
-                    format.Alignment = StringAlignment.Center;
-                    format.LineAlignment = StringAlignment.Center;
-                    break;
-                case DataGridViewContentAlignment.MiddleLeft:
-                    format.Alignment = StringAlignment.Near;
-                    format.LineAlignment = StringAlignment.Center;
-                    break;
-                case DataGridViewContentAlignment.MiddleRight:
-                    format.Alignment = StringAlignment.Far;
-                    format.LineAlignment = StringAlignment.Center;
-                    break;
-                case DataGridViewContentAlignment.NotSet:
-                    format.Alignment = StringAlignment.Center;
-                    format.LineAlignment = StringAlignment.Center;
-                    break;
-                case DataGridViewContentAlignment.TopCenter:
-                    format.Alignment = StringAlignment.Center;
-                    format.LineAlignment = StringAlignment.Near;
-                    break;
-                case DataGridViewContentAlignment.TopLeft:
-                    format.Alignment = StringAlignment.Near;
-                    format.LineAlignment = StringAlignment.Near;
-                    break;
-                case DataGridViewContentAlignment.TopRight:
-                    format.Alignment = StringAlignment.Far;
-                    format.LineAlignment = StringAlignment.Near;
-                    break;
+                switch (cellStyle.Alignment)
+                {
+                    case DataGridViewContentAlignment.BottomCenter:
+                        format.Alignment = StringAlignment.Center;
+                        format.LineAlignment = StringAlignment.Far;
+                        break;
+                    case DataGridViewContentAlignment.BottomLeft:
+                        format.Alignment = StringAlignment.Near;
+                        format.LineAlignment = StringAlignment.Far;
+                        break;
+                    case DataGridViewContentAlignment.BottomRight:
+                        format.Alignment = StringAlignment.Far;
+                        format.LineAlignment = StringAlignment.Far;
+                        break;
+                    case DataGridViewContentAlignment.MiddleCenter:
+                        format.Alignment = StringAlignment.Center;
+                        format.LineAlignment = StringAlignment.Center;
+                        break;
+                    case DataGridViewContentAlignment.MiddleLeft:
+                        format.Alignment = StringAlignment.Near;
+                        format.LineAlignment = StringAlignment.Center;
+                        break;
+                    case DataGridViewContentAlignment.MiddleRight:
+                        format.Alignment = StringAlignment.Far;
+                        format.LineAlignment = StringAlignment.Center;
+                        break;
+                    case DataGridViewContentAlignment.NotSet:
+                        format.Alignment = StringAlignment.Center;
+                        format.LineAlignment = StringAlignment.Center;
+                        break;
+                    case DataGridViewContentAlignment.TopCenter:
+                        format.Alignment = StringAlignment.Center;
+                        format.LineAlignment = StringAlignment.Near;
+                        break;
+                    case DataGridViewContentAlignment.TopLeft:
+                        format.Alignment = StringAlignment.Near;
+                        format.LineAlignment = StringAlignment.Near;
+                        break;
+                    case DataGridViewContentAlignment.TopRight:
+                        format.Alignment = StringAlignment.Far;
+                        format.LineAlignment = StringAlignment.Near;
+                        break;
+                }
+
+                Rectangle firstBounds = new Rectangle(
+                  cellBounds.Left + LEFT_INTEND, cellBounds.Top + TOP_INTEND,
+                  cellBounds.Width - LEFT_INTEND - RIGHT_INTEND, cellBounds.Height / 2 - TOP_INTEND);
+                using (var firstBrush = new SolidBrush(firstColor))
+                    graphics.DrawString(m_first.ToString(), cellStyle.Font, firstBrush,
+                      firstBounds, format);
+
+                Rectangle secondBounds = new Rectangle(
+                  cellBounds.Left + LEFT_INTEND, separatorX + SEPARATOR_WIDTH + TOP_INTEND,
+                  cellBounds.Width - LEFT_INTEND - RIGHT_INTEND, cellBounds.Height / 2 - TOP_INTEND);
+                using (var secondBrush = new SolidBrush(secondColor))
+                    graphics.DrawString(m_second.ToString(), cellStyle.Font, secondBrush,
+                      secondBounds, format);
+
+                graphics.DrawLine(separatorPen, cellBounds.Left, separatorX, cellBounds.Right - 2, separatorX);
             }
-
-            Rectangle firstBounds = new Rectangle(
-              cellBounds.Left + LEFT_INTEND, cellBounds.Top + TOP_INTEND,
-              cellBounds.Width - LEFT_INTEND - RIGHT_INTEND, cellBounds.Height / 2 - TOP_INTEND);
-            graphics.DrawString(m_first.ToString(), cellStyle.Font, new SolidBrush(firstColor),
-              firstBounds, format);
-
-            Rectangle secondBounds = new Rectangle(
-              cellBounds.Left + LEFT_INTEND, separatorX + SEPARATOR_WIDTH + TOP_INTEND,
-              cellBounds.Width - LEFT_INTEND - RIGHT_INTEND, cellBounds.Height / 2 - TOP_INTEND);
-            graphics.DrawString(m_second.ToString(), cellStyle.Font, new SolidBrush(secondColor),
-              secondBounds, format);
-
-            graphics.DrawLine(separatorPen, cellBounds.Left, separatorX, cellBounds.Right - 2, separatorX);
+            finally
+            {
+                separatorPen.Dispose();
+                format.Dispose();
+            }
 
             if (GetPreferredSize(graphics, cellStyle, rowIndex, new Size(0, 0)).Width > cellBounds.Width)
             {

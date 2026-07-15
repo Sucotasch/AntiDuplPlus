@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -87,10 +87,10 @@ namespace AntiDupl.NET.WinForms
         override protected void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            Brush secondBrush = new SolidBrush(SecondForeColor);
-            e.Graphics.FillRectangle(secondBrush, 1, 1, (Width - 2) * m_secondValue / (Maximum - Minimum), Height - 2);
-            Brush firstBrush = new SolidBrush(FirstForeColor);
-            e.Graphics.FillRectangle(firstBrush, 1, 1, (Width - 2) * m_firstValue / (Maximum - Minimum), Height - 2);
+            using (var secondBrush = new SolidBrush(SecondForeColor))
+                e.Graphics.FillRectangle(secondBrush, 1, 1, (Width - 2) * m_secondValue / (Maximum - Minimum), Height - 2);
+            using (var firstBrush = new SolidBrush(FirstForeColor))
+                e.Graphics.FillRectangle(firstBrush, 1, 1, (Width - 2) * m_firstValue / (Maximum - Minimum), Height - 2);
         }
     }
 }

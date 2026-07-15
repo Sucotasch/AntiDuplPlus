@@ -175,7 +175,7 @@ namespace AntiDupl.NET.Core
             get { return thresholdDifference; }
             set
             {
-                thresholdDifference = value;
+                thresholdDifference = Math.Clamp(value, 0, 50);
                 NotifyPropertyChanged("ThresholdDifference");
             }
         }
@@ -185,7 +185,7 @@ namespace AntiDupl.NET.Core
             get { return minimalImageSize; }
             set
             {
-                minimalImageSize = value;
+                minimalImageSize = Math.Max(0, value);
                 NotifyPropertyChanged("MinimalImageSize");
             }
         }
@@ -195,7 +195,7 @@ namespace AntiDupl.NET.Core
             get { return maximalImageSize; }
             set
             {
-                maximalImageSize = value;
+                maximalImageSize = Math.Max(0, value);
                 NotifyPropertyChanged("MaximalImageSize");
             }
         }

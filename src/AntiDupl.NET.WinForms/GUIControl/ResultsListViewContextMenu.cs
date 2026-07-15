@@ -23,6 +23,7 @@
 */
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using System.Windows.Forms;
 using System.Drawing;
@@ -228,6 +229,12 @@ namespace AntiDupl.NET.WinForms
                 dialog.ShowNewFolderButton = true;
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
+                    if (!IsSafeMoveTarget(dialog.SelectedPath))
+                    {
+                        MessageBox.Show("Selected folder is not writable or is a system folder.",
+                            "Invalid Destination", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
                     var result = AutoSelector.ExecuteBatch(m_core, false, dialog.SelectedPath);
                     string msg = $"Moved {result.Succeeded} images to:\n{dialog.SelectedPath}";
                     if (result.Failed > 0)
@@ -238,7 +245,20 @@ namespace AntiDupl.NET.WinForms
                 }
             }
         }
-        
+
+        private static bool IsSafeMoveTarget(string path)
+        {
+            try
+            {
+                var info = new DirectoryInfo(path);
+                if (info == null || !info.Exists) return false;
+                string systemRoot = Environment.GetFolderPath(Environment.SpecialFolder.System);
+                if (path.StartsWith(systemRoot, StringComparison.OrdinalIgnoreCase)) return false;
+                return true;
+            }
+            catch { return false; }
+        }
+
         public void SetViewMode(ResultsOptions.ViewMode viewMode)
         {
             if (viewMode == ResultsOptions.ViewMode.VerticalPairTable)

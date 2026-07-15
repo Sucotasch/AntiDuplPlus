@@ -244,6 +244,8 @@ namespace AntiDupl.NET.WinForms
                     side = AutoSelectSide.First;
                 else if (r.second.time < r.first.time)
                     side = AutoSelectSide.Second;
+                else
+                    side = AutoSelectSide.First; // tiebreak: prefer First
 
                 if (criteria.TimeSide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
                     side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
@@ -260,6 +262,8 @@ namespace AntiDupl.NET.WinForms
                     side = AutoSelectSide.First;
                 else if (r.second.size < r.first.size)
                     side = AutoSelectSide.Second;
+                else
+                    side = AutoSelectSide.First; // tiebreak: prefer First
 
                 if (criteria.SizeSide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
                     side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
@@ -298,6 +302,8 @@ namespace AntiDupl.NET.WinForms
                     side = AutoSelectSide.First;
                 else if (res2 < res1)
                     side = AutoSelectSide.Second;
+                else
+                    side = AutoSelectSide.First; // tiebreak: prefer First
 
                 if (criteria.ResolutionSide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
                     side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;

@@ -110,17 +110,18 @@ AntiDuplPlus/
 │   ├── NvJpegCollector/             # GPU-утилита создания баз
 │   │   └── main.cpp                 # nvJPEG декодирование + blockiness/blurring + запись .adi
 │   ├── AntiDupl.NET.Core/           # C# обёртка (P/Invoke)
-│   └── AntiDupl.NET.WinForms/       # GUI приложение
-│       ├── Forms/
-│       │   ├── MainForm.cs          # Главная форма
-│       │   ├── DatabaseManagerForm.cs  # Менеджер баз (Pool1/Pool2)
-│       │   └── AutoSelectDialog.cs  # Расширенный автовыбор
-│       ├── GUIControl/
-│       │   ├── MainMenu.cs          # Меню + toolbar
-│       │   ├── ResultsListView.cs   # Таблица результатов
-│       │   └── ResultsListViewContextMenu.cs  # КМБ
-│       ├── AutoSelector.cs          # Логика автовыбора
-│       └── Options.cs               # Настройки
+│   ├── AntiDupl.NET.WinForms/       # GUI приложение (основной)
+│   │   ├── Forms/
+│   │   │   ├── MainForm.cs          # Главная форма
+│   │   │   ├── DatabaseManagerForm.cs  # Менеджер баз (Pool1/Pool2)
+│   │   │   └── AutoSelectDialog.cs  # Расширенный автовыбор
+│   │   ├── GUIControl/
+│   │   │   ├── MainMenu.cs          # Меню + toolbar
+│   │   │   ├── ResultsListView.cs   # Таблица результатов
+│   │   │   └── ResultsListViewContextMenu.cs  # КМБ
+│   │   ├── AutoSelector.cs          # Логика автовыбора
+│   │   └── Options.cs               # Настройки
+│   └── AntiDupl.NET.WPF/            # GUI приложение (WPF, вторичное)
 ├── bin/Release/                     # Готовые к запуску файлы
 ├── release/                         # Релизные архивы
 └── Audit/                           # Отчёты аудита кода
@@ -129,8 +130,8 @@ AntiDuplPlus/
 ## Формат баз данных
 
 ### Два формата .adi (не путать!)
-- **DLL-native**: заголовок `"adid"` + version. Записывается при сканировании файлов.
-- **Collector-native**: без заголовков, raw fwrite. Записывается NvJpegCollector.
+- **DLL-native**: заголовок `"adid"` + version. Записывается `adImageDataStorage.cpp` (SaveData). Читается `adImageDataStorage.cpp` (LoadData).
+- **Collector-native**: без заголовков, raw fwrite. Записывается `NvJpegCollector/main.cpp`. Читается `adSearcher.cpp` (LoadDatabase).
 
 ### Collector-native формат (0000.adi)
 ```

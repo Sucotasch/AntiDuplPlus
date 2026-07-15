@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -153,7 +153,7 @@ namespace AntiDupl.NET.Core
             get { return resultCountMax; }
             set
             {
-                resultCountMax = value;
+                resultCountMax = Math.Max(1, value);
                 NotifyPropertyChanged("ResultCountMax");
             }
         }
@@ -163,7 +163,7 @@ namespace AntiDupl.NET.Core
             get { return ignoreFrameWidth; }
             set
             {
-                ignoreFrameWidth = value;
+                ignoreFrameWidth = Math.Clamp(value, 0, 12);
                 NotifyPropertyChanged("IgnoreFrameWidth");
             }
         }

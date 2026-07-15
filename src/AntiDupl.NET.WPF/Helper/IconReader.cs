@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -78,28 +78,33 @@ namespace AntiDupl.NET.WPF.Helper
         #endregion
 
         private static Dictionary<string, BitmapSource> _cache;
-        //private static Dictionary<string, Icon> _cache;
+
+        private static readonly string[] CommonImageExtensions = {
+            ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff",
+            ".webp", ".heic", ".heif", ".avif", ".jxl", ".psd", ".dds", ".tga", ".ico"
+        };
 
         public static BitmapSource GetIcon(string path, bool isDirectory)
         {
-            string key = null;
-
             if (_cache == null)
-                _cache = new Dictionary<string, BitmapSource>();
+                _cache = new Dictionary<string, BitmapSource>(StringComparer.OrdinalIgnoreCase);
 
+            string key;
             if (isDirectory)
                 key = "directory";
-            else if (!String.IsNullOrEmpty(path))
-                key = Path.GetExtension(path).ToLower();
-
-            if (!String.IsNullOrEmpty(key))
+            else
             {
-                if (!_cache.ContainsKey(key))
-                    _cache.Add(key, GetFileIcon(path));
-
-                return _cache[key];
+                string ext = Path.GetExtension(path);
+                if (string.IsNullOrEmpty(ext))
+                    return null;
+                key = Array.Exists(CommonImageExtensions, e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase))
+                    ? "image" : "file";
             }
-            return null;
+
+            if (!_cache.ContainsKey(key))
+                _cache.Add(key, GetFileIcon(isDirectory ? null : path));
+
+            return _cache[key];
         }
 
         private static BitmapSource GetFileIcon(string fileName)

@@ -38,7 +38,7 @@
   </PropertyGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="$(SolutionDir)\..\cmd\CopyData.cmd $(SolutionDir)\.. $(SolutionDir)\..\bin\$(ConfigurationName)" />
+    <Exec Command="$(MSBuildProjectDirectory)\..\..\cmd\CopyData.cmd &quot;$(MSBuildProjectDirectory)\..\..&quot; &quot;$(MSBuildProjectDirectory)\..\..\bin\$(ConfigurationName)&quot;" />
   </Target>
 
   <ItemGroup>

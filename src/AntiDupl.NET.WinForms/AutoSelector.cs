@@ -216,6 +216,10 @@ namespace AntiDupl.NET.WinForms
             }
 
             s_sideCache.Clear();
+
+            if (succeeded > 0)
+                core.Clear(CoreDll.FileType.Temporary);
+
             return new BatchResult { Succeeded = succeeded, Failed = failed, FailedPaths = failedPaths };
         }
 

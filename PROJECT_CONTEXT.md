@@ -2,7 +2,7 @@
 
 GPU-ускоренный поисковик дубликатов/похожих изображений. Fork [AntiDupl.NET](https://github.com/ermig1979/AntiDupl) с CUDA/nvJPEG ускорением.
 
-## Текущий статус (на 14.07.2026)
+## Текущий статус (на 15.07.2026)
 
 ### Рабочее
 - ✅ GPU поиск дубликатов (Mean Square + SSIM)
@@ -12,19 +12,33 @@ GPU-ускоренный поисковик дубликатов/похожих 
 - ✅ SSIM корректно работает (average/variance загружаются из Collector-native баз)
 - ✅ Pool settings загружаются при запуске (без открытия Database Manager)
 - ✅ Портативность — все данные рядом с .exe
+- ✅ Немедленное удаление в корзину (без отложенных temp файлов)
+- ✅ База автоматически обновляется после delete/move (CheckImageData + фильтрация при загрузке)
 
 ### Исправлено в последней сессии (аудит-фиксы)
-- ✅ **B04**: WPF progress — `currentFirst -= total` → `currentSecond += total`
-- ✅ **B03**: NvJpegCollector non-ASCII пути — `std::ifstream(wstring)` вместо `std::string(begin,end)`
-- ✅ **B09**: gpu_debug.log — session separator + `L"a"` вместо `L"w"`
-- ✅ **B02**: Убран `static gpuBufferInitialized` — EnsureCapacity вызывается каждый раз
-- ✅ **B07**: GPU failure — сообщение об ошибке в UI
-- ✅ **B11**: Валидация `minimalImageSize <= maximalImageSize` в `TOptions::Validate()`
-- ✅ **SSIM fix**: `LoadCollectorData` читает average/varianceSquare вместо `fseek(8)`
-- ✅ **Results fix**: `Actual()` не проверяет hash (NvJpegCollector записывает hash=0)
-- ✅ **Defect fix**: `LoadCollectorData` сохраняет `defect` в imageData
-- ✅ **Non-JPEG update**: NvJpegCollector вычисляет average/variance для non-JPEG в UPDATE режиме
-- ✅ **Pool settings**: Lazy load `poolCompareMode` при первом вызове `GetPoolCompareMode()`
+- ✅ **V01**: Thread dispose race в MainForm/StartFinishForm
+- ✅ **V02**: Null StatusGet в WPF SearchDllCommand
+- ✅ **V03**: WPF icon cache normalization (bounded 3-entry cache)
+- ✅ **V04**: Core csproj External.cmd case mismatch → $(ProjectDir)
+- ✅ **V05**: README — добавлен WPF frontend, уточнён формат .adi
+- ✅ **V07**: Managed options — Math.Clamp для ThresholdDifference, IgnoreFrameWidth
+- ✅ **FIND-1**: Tiebreaker для равных time/size/resolution (prefer First)
+- ✅ **FIND-3**: Move throws abort batch → try/catch + failed count
+- ✅ **FIND-4**: Delete counts attempts → ApplyToResult return value
+- ✅ **FIND-6**: Path validation для move (IsSafeMoveTarget)
+- ✅ **FIND-9**: Duplicate file в парах → HashSet dedup
+- ✅ **FIND-12**: BatchResult with Succeeded/Failed/FailedPaths
+- ✅ **A1-A4**: volatile для cross-thread state (4 формы)
+- ✅ **B1-B2**: GDI+ leaks в ComplexProgressBar, DataGridViewDoubleTextBoxCell
+- ✅ **B3-B5-B6**: FileStream/ImageAttributes/Font resource leaks
+- ✅ **B8**: Resources.cs using blocks
+- ✅ **C1-C3**: Build config $(SolutionDir) → $(MSBuildProjectDirectory)
+- ✅ **Immediate delete**: TRecycleBin::Delete → FileDelete (SHFileOperation + FOF_ALLOWUNDO)
+- ✅ **Database update**: adCheckImageData API + LoadData/LoadCollectorData IsFileExists check
+
+### Отложено (low priority, не влияют на работоспособность)
+- ⏳ **FIND-8**: Cancel не wired для batch flows — требует background thread + ProgressForm integration (~50 строк)
+- ⏳ **V06**: Нет GPU→CPU fallback при ошибке GPU — CPU path существует но не вызывается (~10 строк, нужна проверка совместимости)
 
 ---
 
@@ -110,6 +124,10 @@ NvJpegCollector записывает `hash=0` для всех изображен
 | Actual() — проверка файлов | `src/AntiDupl/adImageInfo.cpp` |
 | Загрузка Collector-native баз | `src/AntiDupl/adSearcher.cpp` |
 | Формат .adi/.adr | `src/AntiDupl/adFileStream.cpp` |
+| Удаление файлов (Recycle Bin) | `src/AntiDupl/adRecycleBin.cpp` |
+| Проверка файлов при загрузке | `src/AntiDupl/adImageDataStorage.cpp` |
+| Auto-Select логика | `src/AntiDupl.NET.WinForms/AutoSelector.cs` |
+| Batch операции | `src/AntiDupl.NET.WinForms/AutoSelector.cs` (ExecuteBatch) |
 | Pool настройки | `src/AntiDupl.NET.WinForms/Forms/DatabaseManagerForm.cs` |
 | P/Invoke | `src/AntiDupl.NET.Core/CoreDll.cs` |
 

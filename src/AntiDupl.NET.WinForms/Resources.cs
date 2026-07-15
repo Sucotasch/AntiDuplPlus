@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -200,10 +200,11 @@ namespace AntiDupl.NET.WinForms
                     try
                     {
                         XmlSerializer xmlSerializer = new XmlSerializer(typeof(AntiDupl.NET.WinForms.Strings));
-                        FileStream fileStream = new FileStream(path, FileMode.Open, FileAccess.Read);
-                        AntiDupl.NET.WinForms.Strings strings = (AntiDupl.NET.WinForms.Strings)xmlSerializer.Deserialize(fileStream);
-                        fileStream.Close();
-                        return strings;
+                        using (FileStream fileStream = new FileStream(path, FileMode.Open, FileAccess.Read))
+                        {
+                            AntiDupl.NET.WinForms.Strings strings = (AntiDupl.NET.WinForms.Strings)xmlSerializer.Deserialize(fileStream);
+                            return strings;
+                        }
                     }
                     catch
                     {
@@ -218,11 +219,11 @@ namespace AntiDupl.NET.WinForms
             {
                 try
                 {
-
-                    TextWriter writer = new StreamWriter(GetPath(Path, strings.Name, Extension));
-                    XmlSerializer xmlSerializer = new XmlSerializer(typeof(AntiDupl.NET.WinForms.Strings));
-                    xmlSerializer.Serialize(writer, strings);
-                    writer.Close();
+                    using (TextWriter writer = new StreamWriter(GetPath(Path, strings.Name, Extension)))
+                    {
+                        XmlSerializer xmlSerializer = new XmlSerializer(typeof(AntiDupl.NET.WinForms.Strings));
+                        xmlSerializer.Serialize(writer, strings);
+                    }
                 }
                 catch
                 {

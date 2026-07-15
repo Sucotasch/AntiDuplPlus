@@ -57,6 +57,7 @@ namespace AntiDupl.NET.WinForms
         private CoreLib m_core;
         private Options m_options;
         private System.Windows.Forms.Timer m_timer;
+        private Thread m_workerThread;
 
         private AboutProgramPanel m_aboutProgramPanel;
         private ProgressBar m_progressBar;
@@ -145,17 +146,25 @@ namespace AntiDupl.NET.WinForms
         {
             ShowInTaskbar = true;
             m_state = State.Start;
-            Thread searchThread = new Thread(CoreStartThreadTask);
-            searchThread.Start();
+            m_workerThread = new Thread(CoreStartThreadTask);
+            m_workerThread.IsBackground = true;
+            m_workerThread.Start();
             ShowDialog();
         }
 
         public void ExecuteFinish()
         {
             m_state = State.Start;
-            Thread searchThread = new Thread(CoreFinishThreadTask);
-            searchThread.Start();
+            m_workerThread = new Thread(CoreFinishThreadTask);
+            m_workerThread.IsBackground = true;
+            m_workerThread.Start();
             ShowDialog();
+        }
+
+        public void WaitForWorker(int timeoutMs)
+        {
+            if (m_workerThread != null && m_workerThread.IsAlive)
+                m_workerThread.Join(timeoutMs);
         }
 
         void TimerCallback(Object obj, EventArgs eventArgs)

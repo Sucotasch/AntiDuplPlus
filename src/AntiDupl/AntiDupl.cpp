@@ -291,6 +291,14 @@ DLLAPI adError adClear(adEngineHandle handle, adFileType fileType)
     return AD_OK;
 }
 
+DLLAPI adError adCheckImageData(adEngineHandle handle)
+{
+    CHECK_HANDLE CHECK_ACCESS LOCK
+
+    handle->ImageDataStorage()->Check();
+    return AD_OK;
+}
+
 DLLAPI adError adOptionsGet(adEngineHandle handle, adOptionsType optionsType, void* pOptions)
 {
     CHECK_HANDLE CHECK_ACCESS LOCK

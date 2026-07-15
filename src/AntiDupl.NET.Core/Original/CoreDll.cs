@@ -543,6 +543,11 @@ namespace AntiDupl.NET.Core.Original
         public adResultApplyTo_fn adResultApplyTo = null;
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        public delegate Error adCheckImageData_fn(IntPtr handle);
+        [DynamicModuleApi]
+        public adCheckImageData_fn adCheckImageData = null;
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
         public delegate Error adCanApply_fn(IntPtr handle, ActionEnableType actionEnableType, IntPtr pEnable);
         [DynamicModuleApi]
         public adCanApply_fn adCanApply = null;

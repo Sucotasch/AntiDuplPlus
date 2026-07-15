@@ -231,6 +231,7 @@ namespace AntiDupl.NET.WinForms
                         m_updateResults = m_core.ApplyToResult(m_action, m_target);
                         m_type = Type.ClearTemporary;
                         m_core.Clear(CoreDll.FileType.Temporary);
+                        m_core.CheckImageData();
                         break;
                     }
                 case Type.RenameCurrent:
@@ -238,6 +239,7 @@ namespace AntiDupl.NET.WinForms
                         m_updateResults = m_core.RenameCurrent(m_renameCurrentType, m_newFileName);
                         m_type = Type.ClearTemporary;
                         m_core.Clear(CoreDll.FileType.Temporary);
+                        m_core.CheckImageData();
                         break;
                     }
                 case Type.MoveCurrentGroup:
@@ -245,6 +247,7 @@ namespace AntiDupl.NET.WinForms
                         m_updateResults = m_core.MoveCurrentGroup(m_directoryForMove);
                         m_type = Type.ClearTemporary;
                         m_core.Clear(CoreDll.FileType.Temporary);
+                        m_core.CheckImageData();
                         break;
                     }
                 case Type.RenameCurrentGroupAs:
@@ -252,6 +255,7 @@ namespace AntiDupl.NET.WinForms
                         m_updateResults = m_core.RenameCurrentGroupAs(m_newFileName);
                         m_type = Type.ClearTemporary;
                         m_core.Clear(CoreDll.FileType.Temporary);
+                        m_core.CheckImageData();
                         break;
                     }
                 case Type.RefreshResults:
@@ -259,6 +263,7 @@ namespace AntiDupl.NET.WinForms
                         m_updateResults = m_core.ApplyToResult(CoreDll.GlobalActionType.Refresh);
                         m_type = Type.ClearTemporary;
                         m_core.Clear(CoreDll.FileType.Temporary);
+                        m_core.CheckImageData();
                         break;
                     }
                case Type.Undo:
@@ -266,6 +271,7 @@ namespace AntiDupl.NET.WinForms
                         m_updateResults = m_core.ApplyToResult(CoreDll.GlobalActionType.Undo);
                         m_type = Type.ClearTemporary;
                         m_core.Clear(CoreDll.FileType.Temporary);
+                        m_core.CheckImageData();
                         break;
                     }
                case Type.Redo:
@@ -273,6 +279,7 @@ namespace AntiDupl.NET.WinForms
                         m_updateResults = m_core.ApplyToResult(CoreDll.GlobalActionType.Redo);
                         m_type = Type.ClearTemporary;
                         m_core.Clear(CoreDll.FileType.Temporary);
+                        m_core.CheckImageData();
                         break;
                     }
                case Type.LoadResults:

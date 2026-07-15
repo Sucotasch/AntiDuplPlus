@@ -644,6 +644,7 @@ extern "C"
     DLLAPI adError adResultSort(adEngineHandle handle, adSortType sortType, adBool increasing);
     DLLAPI adError adResultApply(adEngineHandle handle, adGlobalActionType globalActionType);
     DLLAPI adError adResultApplyTo(adEngineHandle handle, adLocalActionType localActionType, adTargetType targetType);
+    DLLAPI adError adCheckImageData(adEngineHandle handle);
     DLLAPI adError adCanApply(adEngineHandle handle, adActionEnableType actionEnableType, adBoolPtr pEnable);
 
     DLLAPI adError adRenameCurrentA(adEngineHandle handle, adRenameCurrentType renameCurrentType, const adCharA* newFileName);

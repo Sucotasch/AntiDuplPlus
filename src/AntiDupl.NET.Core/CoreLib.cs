@@ -231,6 +231,11 @@ namespace AntiDupl.NET.Core
             return m_dll.adResultApplyTo(m_handle, localActionType, targetType) == Error.Ok;
         }
 
+        public void CheckImageData()
+        {
+            m_dll.adCheckImageData(m_handle);
+        }
+
         public bool CanApply(CoreDll.ActionEnableType actionEnableType)
         {
             try 

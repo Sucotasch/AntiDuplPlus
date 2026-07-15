@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using AntiDupl.NET.Core;
 using AntiDupl.NET.Core.Original;
@@ -16,6 +17,13 @@ namespace AntiDupl.NET.WinForms
         private static Dictionary<string, string> s_sideCache = new Dictionary<string, string>();
 
         public static IReadOnlyDictionary<string, string> SideCache => s_sideCache;
+
+        public class BatchResult
+        {
+            public int Succeeded { get; set; }
+            public int Failed { get; set; }
+            public List<string> FailedPaths { get; set; } = new List<string>();
+        }
 
         /// <summary>
         /// Generate a stable cache key from a result pair (order-independent).
@@ -148,12 +156,16 @@ namespace AntiDupl.NET.WinForms
         /// For delete: removes the targeted image.
         /// For move: moves the targeted image to the specified folder.
         /// </summary>
-        public static int Execute(CoreLib core, bool delete, string targetFolder = null)
+        public static BatchResult ExecuteBatch(CoreLib core, bool delete, string targetFolder = null)
         {
             var results = core.GetResult(0, 1000000);
-            if (results == null || results.Length == 0) return 0;
+            if (results == null || results.Length == 0)
+                return new BatchResult();
 
-            int executed = 0;
+            int succeeded = 0, failed = 0;
+            var failedPaths = new List<string>();
+            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             for (int i = results.Length - 1; i >= 0; i--)
             {
                 var r = results[i];
@@ -161,43 +173,50 @@ namespace AntiDupl.NET.WinForms
                 string targetPath;
                 if (!s_sideCache.TryGetValue(key, out targetPath)) continue;
                 if (r.type != CoreDll.ResultType.DuplImagePair) continue;
+                if (!processed.Add(targetPath)) continue;
 
                 core.SetCurrent(i);
+                bool ok = false;
 
                 if (delete)
                 {
-                    // Determine which action based on which image is targeted
                     if (string.Equals(targetPath, r.first?.path, StringComparison.OrdinalIgnoreCase))
-                        core.ApplyToResult(CoreDll.LocalActionType.DeleteFirst, CoreDll.TargetType.Current);
+                        ok = core.ApplyToResult(CoreDll.LocalActionType.DeleteFirst, CoreDll.TargetType.Current);
                     else
-                        core.ApplyToResult(CoreDll.LocalActionType.DeleteSecond, CoreDll.TargetType.Current);
+                        ok = core.ApplyToResult(CoreDll.LocalActionType.DeleteSecond, CoreDll.TargetType.Current);
                 }
                 else if (!string.IsNullOrEmpty(targetFolder))
                 {
                     string sourcePath = targetPath;
                     if (!string.IsNullOrEmpty(sourcePath) && System.IO.File.Exists(sourcePath))
                     {
-                        string destPath = System.IO.Path.Combine(targetFolder, System.IO.Path.GetFileName(sourcePath));
-                        if (System.IO.File.Exists(destPath))
+                        try
                         {
-                            string name = System.IO.Path.GetFileNameWithoutExtension(sourcePath);
-                            string ext = System.IO.Path.GetExtension(sourcePath);
-                            int counter = 1;
-                            while (System.IO.File.Exists(destPath))
+                            string destPath = System.IO.Path.Combine(targetFolder, System.IO.Path.GetFileName(sourcePath));
+                            if (System.IO.File.Exists(destPath))
                             {
-                                destPath = System.IO.Path.Combine(targetFolder, $"{name}_{counter}{ext}");
-                                counter++;
+                                string name = System.IO.Path.GetFileNameWithoutExtension(sourcePath);
+                                string ext = System.IO.Path.GetExtension(sourcePath);
+                                int counter = 1;
+                                while (System.IO.File.Exists(destPath))
+                                {
+                                    destPath = System.IO.Path.Combine(targetFolder, $"{name}_{counter}{ext}");
+                                    counter++;
+                                }
                             }
+                            System.IO.File.Move(sourcePath, destPath);
+                            ok = true;
                         }
-                        System.IO.File.Move(sourcePath, destPath);
+                        catch (IOException) { failedPaths.Add(sourcePath); }
+                        catch (UnauthorizedAccessException) { failedPaths.Add(sourcePath); }
                     }
                 }
 
-                executed++;
+                if (ok) succeeded++; else failed++;
             }
 
             s_sideCache.Clear();
-            return executed;
+            return new BatchResult { Succeeded = succeeded, Failed = failed, FailedPaths = failedPaths };
         }
 
         /// <summary>

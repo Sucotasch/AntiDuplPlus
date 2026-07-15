@@ -387,8 +387,11 @@ namespace AntiDupl.NET.WinForms
 
         public void DeleteSelectedAction(object sender, EventArgs e)
         {
-            int n = AutoSelector.Execute(m_core, true);
-            MessageBox.Show($"Deleted {n} images.", "Delete Selected",
+            var result = AutoSelector.ExecuteBatch(m_core, true);
+            string msg = $"Deleted {result.Succeeded} images.";
+            if (result.Failed > 0)
+                msg += $"\n{result.Failed} files could not be deleted.";
+            MessageBox.Show(msg, "Delete Selected",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             m_mainSplitContainer.UpdateResults();
         }
@@ -401,8 +404,11 @@ namespace AntiDupl.NET.WinForms
                 dialog.ShowNewFolderButton = true;
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
-                    int moved = AutoSelector.Execute(m_core, false, dialog.SelectedPath);
-                    MessageBox.Show($"Moved {moved} images to:\n{dialog.SelectedPath}", "Move Selected",
+                    var result = AutoSelector.ExecuteBatch(m_core, false, dialog.SelectedPath);
+                    string msg = $"Moved {result.Succeeded} images to:\n{dialog.SelectedPath}";
+                    if (result.Failed > 0)
+                        msg += $"\n{result.Failed} files could not be moved.";
+                    MessageBox.Show(msg, "Move Selected",
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
                     m_mainSplitContainer.UpdateResults();
                 }

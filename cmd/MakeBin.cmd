@@ -32,14 +32,41 @@ rmdir %TMP_DIR% /q /s
 
 if not exist %TMP_DIR% mkdir %TMP_DIR%
 
-xcopy %RELEASE_DIR%\data\* %TMP_DIR%\data\* /y /i /s
-xcopy %RELEASE_DIR%\AntiDupl*.exe %TMP_DIR%\* /y /i
-xcopy %RELEASE_DIR%\AntiDupl*.dll %TMP_DIR%\* /y /i
+REM === Core application files ===
+xcopy %RELEASE_DIR%\AntiDupl.NET.WinForms.exe %TMP_DIR%\* /y /i
+xcopy %RELEASE_DIR%\AntiDupl.NET.WinForms.dll %TMP_DIR%\* /y /i
 xcopy %RELEASE_DIR%\AntiDupl.NET.WinForms.runtimeconfig.json %TMP_DIR%\* /y /i
+xcopy %RELEASE_DIR%\AntiDupl.NET.Core.dll %TMP_DIR%\* /y /i
+xcopy %RELEASE_DIR%\AntiDupl.dll %TMP_DIR%\* /y /i
 
-erase %TMP_DIR%\data\resources\strings\English.xml /q /s /f
-erase %TMP_DIR%\data\resources\strings\Russian.xml /q /s /f
-erase %TMP_DIR%\AntiDupl.NET.WPF.* /q /s /f
+REM === CUDA / nvJPEG runtime ===
+xcopy %RELEASE_DIR%\nvjpeg64_12.dll %TMP_DIR%\* /y /i
+if exist %RELEASE_DIR%\cudart64_12.dll xcopy %RELEASE_DIR%\cudart64_12.dll %TMP_DIR%\* /y /i
+
+REM === GPU collector utility ===
+xcopy %RELEASE_DIR%\NvJpegCollector.exe %TMP_DIR%\* /y /i
+
+REM === .NET runtime dependencies ===
+xcopy %RELEASE_DIR%\System.*.dll %TMP_DIR%\* /y /i
+xcopy %RELEASE_DIR%\Microsoft.*.dll %TMP_DIR%\* /y /i
+
+REM === Data folder (resources, strings, images) ===
+xcopy %RELEASE_DIR%\data\* %TMP_DIR%\data\* /y /i /s
+
+REM === Config files ===
+if exist %RELEASE_DIR%\ad_database.xml xcopy %RELEASE_DIR%\ad_database.xml %TMP_DIR%\* /y /i
+if exist %RELEASE_DIR%\configuration.xml xcopy %RELEASE_DIR%\configuration.xml %TMP_DIR%\* /y /i
+if exist %RELEASE_DIR%\locations.xml xcopy %RELEASE_DIR%\locations.xml %TMP_DIR%\* /y /i
+
+REM === Remove unnecessary files ===
+erase %TMP_DIR%\data\resources\strings\English.xml /q /s /f 2>nul
+erase %TMP_DIR%\data\resources\strings\Russian.xml /q /s /f 2>nul
+erase %TMP_DIR%\AntiDupl.NET.WPF.* /q /s /f 2>nul
+erase %TMP_DIR%\*.pdb /q /s /f 2>nul
+
+echo.
+echo Release directory: %TMP_DIR%
+echo.
 
 if exist %RAR_EXE% (
 %RAR_EXE% a -ep1 -s -m5 -r -sfx %OUT_DIR%\AntiDupl.NET-%VERSION%.exe %TMP_DIR%

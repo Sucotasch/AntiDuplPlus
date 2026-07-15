@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -95,26 +95,14 @@ namespace AntiDupl.NET.WinForms
 
         public Bitmap ToGrayScale(System.Drawing.Bitmap b)
         {
-            //create a blank bitmap the same size as original
             Bitmap newBitmap = new Bitmap(b.Width, b.Height);
-
-            //get a graphics object from the new image
             using (Graphics g = Graphics.FromImage(newBitmap))
+            using (var attributes = new ImageAttributes())
             {
-
-                //create some image attributes
-                ImageAttributes attributes = new ImageAttributes();
-
-                //set the color matrix attribute
                 attributes.SetColorMatrix(colorMatrix);
-
-                //draw the original image on the new image
-                //using the grayscale color matrix
                 g.DrawImage(b, new Rectangle(0, 0, b.Width, b.Height),
                    0, 0, b.Width, b.Height, GraphicsUnit.Pixel, attributes);
-
             }
-
             return newBitmap;
         }
 

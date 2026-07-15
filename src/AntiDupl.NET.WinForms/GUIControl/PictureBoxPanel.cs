@@ -183,11 +183,12 @@ namespace AntiDupl.NET.WinForms
             {
                 try
                 {
-                    FileStream fileStream = new FileStream(fileInfo.FullName, FileMode.Open, FileAccess.Read);
-                    byte[] buffer = new byte[fileStream.Length];
-                    fileStream.Read(buffer, 0, buffer.Length);
-                    fileStream.Close();
-                    memoryStream = new MemoryStream(buffer);
+                    using (var fileStream = new FileStream(fileInfo.FullName, FileMode.Open, FileAccess.Read))
+                    {
+                        byte[] buffer = new byte[fileStream.Length];
+                        fileStream.Read(buffer, 0, buffer.Length);
+                        memoryStream = new MemoryStream(buffer);
+                    }
                     return true;
                 }
                 catch

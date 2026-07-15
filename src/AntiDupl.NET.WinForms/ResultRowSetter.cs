@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -95,6 +95,9 @@ namespace AntiDupl.NET.WinForms
         private string m_mirrorTurn_90_IconToolTipText;
         private string m_mirrorTurn_180_IconToolTipText;
         private string m_mirrorTurn_270_IconToolTipText;
+
+        private static Font s_boldFont;
+        private static Font s_regularFont;
 
         public ResultRowSetter(AntiDupl.NET.WinForms.Options options, DataGridView dataGridView)
         {
@@ -324,7 +327,9 @@ namespace AntiDupl.NET.WinForms
             cells[(int)ResultsListView.ColumnsTypeHorizontal.Difference] = new DataGridViewTextBoxCell();
             cells[(int)ResultsListView.ColumnsTypeHorizontal.Difference].Value = result.difference.ToString("F2");
             cells[(int)ResultsListView.ColumnsTypeHorizontal.Difference].Style.Font =
-                new Font(DataGridView.DefaultFont, result.difference == 0 ? FontStyle.Bold : FontStyle.Regular);
+                (result.difference == 0
+                    ? (s_boldFont ?? (s_boldFont = new Font(DataGridView.DefaultFont, FontStyle.Bold)))
+                    : (s_regularFont ?? (s_regularFont = new Font(DataGridView.DefaultFont, FontStyle.Regular))));
             cells[(int)ResultsListView.ColumnsTypeHorizontal.Difference].Style.ForeColor =
                 result.difference == 0 ? Color.LightGreen : DataGridView.DefaultForeColor;
             cells[(int)ResultsListView.ColumnsTypeHorizontal.Difference].Style.Alignment = DataGridViewContentAlignment.MiddleRight;

@@ -138,3 +138,24 @@ NvJpegCollector записывает `hash=0` для всех изображен
 - CUDA: 12.8
 - RAM: 64GB
 - NVJPEG_BACKEND_DEFAULT (software decoder on GPU)
+
+---
+
+## Процесс создания релиза
+
+### Пошаговая инструкция
+
+1. Обновить version в src/version.txt
+2. Собрать C++ проект: msbuild src\AntiDupl\AntiDupl.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VcpkgManifestInstall=false
+3. Скопировать AntiDupl.dll: Copy-Item src\bin\Release\AntiDupl.dll bin\Release\AntiDupl.dll -Force
+4. Собрать C#: dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release
+5. Self-contained publish: dotnet publish src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release -r win-x64 --self-contained true -o out/publish
+6. Добавить native deps: скопировать AntiDupl.dll, nvjpeg64_12.dll, cudart64_12.dll, NvJpegCollector.exe, data/ в out/publish
+7. Zip: cd out/publish && 7za a -tzip ..\bin\AntiDupl.NET-{VER}.zip *
+8. GitHub: git tag + gh release create --repo Sucotasch/AntiDuplPlus
+
+### Критические замечания
+- dotnet publish НЕ копирует native P/Invoke DLL (AntiDupl.dll) - копировать вручную
+- MakeBin.cmd устарел - не включает CUDA зависимости
+- zip должен содержать файлы в корне, не в поддиректории out/publish
+- gh release create требует --repo Sucotasch/AntiDuplPlus

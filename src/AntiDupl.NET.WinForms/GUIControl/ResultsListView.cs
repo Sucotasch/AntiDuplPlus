@@ -273,10 +273,60 @@ namespace AntiDupl.NET.WinForms
 
         public void MakeAction(CoreDll.LocalActionType action, CoreDll.TargetType target)
         {
+            // Check for long paths before delete operations
+            if (IsDeleteAction(action) && HasLongPaths(action, target))
+            {
+                var result = MessageBox.Show(
+                    "Some files have paths longer than 260 characters.\n" +
+                    "These files cannot be moved to Recycle Bin and will be permanently deleted.\n\n" +
+                    "Continue?",
+                    "Long Path Warning",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+                if (result != DialogResult.Yes) return;
+            }
+
             m_makeAction = true;
             ProgressForm progressForm = new ProgressForm(action, target, m_core, m_options, m_coreOptions, m_mainSplitContainer);
             progressForm.Execute();
             m_makeAction = false;
+        }
+
+        private static bool IsDeleteAction(CoreDll.LocalActionType action)
+        {
+            return action == CoreDll.LocalActionType.DeleteDefect
+                || action == CoreDll.LocalActionType.DeleteFirst
+                || action == CoreDll.LocalActionType.DeleteSecond
+                || action == CoreDll.LocalActionType.DeleteBoth;
+        }
+
+        private bool HasLongPaths(CoreDll.LocalActionType action, CoreDll.TargetType target)
+        {
+            const int MAX_PATH = 260;
+
+            if (target == CoreDll.TargetType.Current)
+            {
+                if (m_currentRowIndex >= 0 && m_currentRowIndex < m_results.Length)
+                {
+                    var r = m_results[m_currentRowIndex];
+                    if (IsDeleteAction(action))
+                    {
+                        if (action != CoreDll.LocalActionType.DeleteSecond && r.first?.path?.Length > MAX_PATH) return true;
+                        if (action != CoreDll.LocalActionType.DeleteFirst && r.second?.path?.Length > MAX_PATH) return true;
+                    }
+                }
+                return false;
+            }
+
+            // TargetType.Selected — check all selected rows
+            for (int i = 0; i < Rows.Count && i < m_results.Length; i++)
+            {
+                if (!((DataGridViewCustomRow)Rows[i]).selected) continue;
+                var r = m_results[i];
+                if (action != CoreDll.LocalActionType.DeleteSecond && r.first?.path?.Length > MAX_PATH) return true;
+                if (action != CoreDll.LocalActionType.DeleteFirst && r.second?.path?.Length > MAX_PATH) return true;
+            }
+            return false;
         }
 
         public void RefreshResults()

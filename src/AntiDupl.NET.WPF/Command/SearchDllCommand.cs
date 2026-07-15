@@ -132,11 +132,11 @@ namespace AntiDupl.NET.WPF.Command
                     {
                         path = mainThreadStatus.path;
                     }
+                    _progressDialogViewModel.ProgressMax = (uint)(mainThreadStatus.total);
+                    _progressDialogViewModel.Progress = (uint)(currentFirst);
+                    _progressDialogViewModel.CurrentSecond = (uint)currentSecond;
+                    _progressDialogViewModel.ProgressMessage = path;
                 }
-                _progressDialogViewModel.ProgressMax = (uint)(mainThreadStatus.total);
-                _progressDialogViewModel.Progress = (uint)(currentFirst);
-                _progressDialogViewModel.CurrentSecond = (uint)currentSecond;
-                _progressDialogViewModel.ProgressMessage = path;
             }
         }
 

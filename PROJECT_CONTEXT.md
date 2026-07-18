@@ -41,18 +41,20 @@ GPU-ускоренный поисковик дубликатов/похожих 
 - ✅ **BUG-02 [P1]**: DLL-native magic `"adid"` вместо `"adii"`. Исправлено `0x69696461u` в `Load()` (`adImageDataStorage.cpp`)
 - ✅ **BUG-03 [P1]**: Unbounded fread thumbnail bytes. Добавлена проверка `thumbBytes == side*side` в `LoadCollectorData` (`adImageDataStorage.cpp`)
 - ✅ **BUG-04 [P1]**: GPU игнорировал CPU фильтры (type/size/folder/searchPath). Добавлены фильтры в `MatchCallback` (`adEngine.cpp`)
+- ✅ **BUG-05 [P1]**: Batch move не обновлял result list. Добавлен новый native API `MarkRemovedFirst/Second` (enum 14/15) + `MarkRemoved()` функция (`adUndoRedoEngine.cpp`, `AutoSelector.cs`)
+- ✅ **BUG-06 [P1]**: Shutdown dispose race 2s timeout. Увеличен до 10s (`MainForm.cs`)
 - ✅ **BUG-07 [P2]**: validCount < 2 → false (фейковая ошибка GPU). Теперь возвращает `true` (`adEngine.cpp`)
 - ✅ **BUG-09 [P2]**: d_poolMask VRAM leak при ошибках MS ядра. Добавлен cleanup в error paths (`adGPU.cu`)
-- ✅ **BUG-06 [P1]**: Shutdown dispose race 2s timeout. Увеличен до 10s (`MainForm.cs`)
 - ✅ **BUG-11 [P3]**: Skip flag устанавливался после CollectManager.Start(). Перемещён до Start() (`adEngine.cpp`)
 
-### Отложено (не критично, требует дополнительного анализа)
-- ⏳ **BUG-05 [P1]**: Batch move не обновляет результаты (устаревшие пути в UI). Безопасно через `processed` HashSet, но нужен native API для полного фикса.
-- ⏳ **BUG-08 [P2]**: Match buffer truncation — нет UI warning при переполнении. Требует архитектурного изменения для暴露 `bufferFullCount`.
-- ⏳ **BUG-10 [P2]**: Нет GPU→CPU fallback. Требует переделки фазы collection для feed CPU compare manager.
-- ⏳ **BUG-12 [P3]**: DB load блокирует FS scan. Требует проверки `SearchImages()` behavior с DB paths.
-- ⏳ **FIND-8**: Cancel не wired для batch flows.
-- ⏳ **V06**: Нет GPU→CPU fallback (тот же что BUG-10).
+### Отложено / закрыто
+- ⏭ **BUG-08 [P2]**: Match buffer truncation — пропущен (>5M пар, редкий случай)
+- ⏭ **BUG-10 [P2]**: GPU→CPU fallback — пропущен (не нужен, пользователь может использовать оригинальную версию)
+- ❌ **BUG-12 [P3]**: DB load блокирует FS scan — закрыт как "not a bug" (текущее поведение корректно для рабочего процесса с DB)
+- ⏳ **FIND-8**: Cancel не wired для batch flows
+
+### Планы на будущее
+- 🔮 **Сравнение без DB**: добавить возможность сравнения папок без предварительного создания DB (или авто-создание DB в фоне)
 
 ---
 
@@ -145,6 +147,16 @@ NvJpegCollector записывает `hash=0` для всех изображен
 | Batch операции | `src/AntiDupl.NET.WinForms/AutoSelector.cs` (ExecuteBatch) |
 | Pool настройки | `src/AntiDupl.NET.WinForms/Forms/DatabaseManagerForm.cs` |
 | P/Invoke | `src/AntiDupl.NET.Core/CoreDll.cs` |
+
+---
+
+## Заметки по коду (проверено 18.07.2026)
+
+### GetKey() в AutoSelector.cs — безопасно
+Ключ генерируется как `path1 + "|" + path2` (отсортированы алфавитно). Каждая пара путей уникальна, ключ уникален. Проблем нет.
+
+### AD_LOCAL_ACTION_SIZE — безопасно
+Используется только в `adResultStorage.cpp:160` для проверки границ. Enum автоматически инкрементируется (SIZE = 16 после добавления 14, 15). Нет hardcoded размеров массивов. Все switch statement обрабатывают новые case.
 
 ---
 

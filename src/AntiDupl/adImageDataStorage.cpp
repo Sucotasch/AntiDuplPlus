@@ -171,9 +171,9 @@ namespace ad
 		if (f) {
 			fread(&firstBytes, 4, 1, f);
 			fclose(f);
-			// DLL-native format starts with "adid" (0x64696461)
+			// DLL-native format starts with "adii" (0x69696461)
 			// Collector-native starts with ThumbSize (e.g., 0x00000020 = 32)
-			isDllNative = (firstBytes == 0x64696461);
+			isDllNative = (firstBytes == 0x69696461u);
 		}
 
 		if (isDllNative) {
@@ -615,14 +615,15 @@ namespace ad
 				uint64_t thumbSizeVal = 0;
 				fread(&thumbSizeVal, 8, 1, f);
 				size_t thumbBytes = (size_t)thumbSizeVal;
-				if (imageData.data && imageData.data->side == (int)fileThumbSize)
+				size_t expected = (size_t)fileThumbSize * (size_t)fileThumbSize;
+				if (thumbBytes != expected || !imageData.data || imageData.data->side != (int)fileThumbSize)
 				{
-					fread(imageData.data->main, 1, thumbBytes, f);
-					imageData.data->filled = true;
+					fseek(f, thumbBytes, SEEK_CUR);
 				}
 				else
 				{
-					fseek(f, thumbBytes, SEEK_CUR);
+					fread(imageData.data->main, 1, thumbBytes, f);
+					imageData.data->filled = true;
 				}
 				// NvJpegCollector writes average(f32) + varianceSquare(f32) after thumb data
 				fread(&imageData.data->average, 4, 1, f);

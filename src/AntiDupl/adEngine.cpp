@@ -265,6 +265,18 @@ namespace ad
                 continue;
             }
 
+            // Apply CPU-equivalent metadata filters (pixel threshold already checked by GPU)
+            TOptions* opts = ctx->engine->Options();
+            if (opts->compare.typeControl == TRUE && pImage1->type != pImage2->type)
+                continue;
+            if (opts->compare.sizeControl == TRUE &&
+                (pImage1->height != pImage2->height || pImage1->width != pImage2->width))
+                continue;
+            if (opts->compare.compareInsideOneFolder == FALSE && TPath::EqualByDirectory(pImage1->path, pImage2->path))
+                continue;
+            if (opts->compare.compareInsideOneSearchPath == FALSE && pImage1->index == pImage2->index)
+                continue;
+
             ctx->engine->Result()->AddDuplImagePair(pImage1, pImage2, matches[i].difference, AD_TRANSFORM_TURN_0);
             ctx->totalProcessed++;
             
@@ -333,7 +345,8 @@ namespace ad
 
         for (TImageDataStorage::TStorage::const_iterator it = storage.begin(); it != storage.end(); ++it) {
             TImageDataPtr pImageData = it->second;
-            if (pImageData->data && pImageData->data->filled && pImageData->data->main != nullptr) {
+            if (pImageData->data && pImageData->data->filled && pImageData->data->main != nullptr
+                && (size_t)pImageData->data->side == reducedImageSize) {
                 allThumbnails.resize(validThumbBytes + thumbSize);
                 memcpy(&allThumbnails[validThumbBytes], pImageData->data->main, thumbSize);
                 validThumbBytes += thumbSize;
@@ -371,8 +384,8 @@ namespace ad
         }
 
         if (validCount < 2) {
-            AD_DEBUG("ExecuteGpuAllVsAllComparison: Not enough valid images\n");
-            return false;
+            AD_DEBUG("ExecuteGpuAllVsAllComparison: Not enough valid images for comparison, returning success\n");
+            return true;
         }
 
         // Streaming processing context
@@ -596,16 +609,20 @@ namespace ad
             m_pSearcher->SearchImages();
         }
 
-        // 2. Start collection threads
-        AD_DEBUG("Search: Starting collection manager\n");
-        m_pCollectManager->Start();
-        m_pCollectManager->SetPriority(THREAD_PRIORITY_BELOW_NORMAL);
-
-        // 3. GPU AllVsAll comparison (если включено и доступно)
+        // 2. Determine GPU mode and set collection flag BEFORE starting collect threads
         bool useGpu = (m_pGpuManager && m_pGpuManager->IsAvailable() &&
                        (m_pOptions->compare.algorithmComparing == AD_COMPARING_SQUARED_SUM ||
                         m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM) &&
                        m_pOptions->advanced.ignoreFrameWidth == 0);
+
+        if (useGpu)
+        {
+            m_skipComparisonDuringCollection = true;
+        }
+        else
+        {
+            m_skipComparisonDuringCollection = false;
+        }
 
         // Log GPU status
         {
@@ -627,13 +644,13 @@ namespace ad
             }
         }
 
-        if (useGpu)
+        // 3. Start collection threads
+        AD_DEBUG("Search: Starting collection manager\n");
+        m_pCollectManager->Start();
+        m_pCollectManager->SetPriority(THREAD_PRIORITY_BELOW_NORMAL);
+
+        if (!useGpu)
         {
-            m_skipComparisonDuringCollection = true;  // Отключаем старое сравнение ДО цикла
-        }
-        else
-        {
-            m_skipComparisonDuringCollection = false;
             // 4. CPU comparison (старый подход) - нужно запустить CompareManager ДО сбора данных
             AD_DEBUG("Search: Starting CPU comparison\n");
 

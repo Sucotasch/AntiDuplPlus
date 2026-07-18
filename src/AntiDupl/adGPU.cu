@@ -671,6 +671,7 @@ namespace ad
             AD_DEBUG_FMT("GpuCompareAllVsAll: Kernel launch failed: %s\n", cudaGetErrorString(err));
             cudaFree(d_thumbnails);
             cudaFree(d_crcArray);
+            if (d_poolMask) cudaFree(d_poolMask);
             cudaFree(d_results);
             cudaFree(d_matchCount);
             return false;
@@ -683,6 +684,7 @@ namespace ad
             AD_DEBUG_FMT("GpuCompareAllVsAll: Sync failed: %s\n", cudaGetErrorString(err));
             cudaFree(d_thumbnails);
             cudaFree(d_crcArray);
+            if (d_poolMask) cudaFree(d_poolMask);
             cudaFree(d_results);
             cudaFree(d_matchCount);
             return false;

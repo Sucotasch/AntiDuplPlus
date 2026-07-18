@@ -2,7 +2,7 @@
 
 GPU-ускоренный поисковик дубликатов/похожих изображений. Fork [AntiDupl.NET](https://github.com/ermig1979/AntiDupl) с CUDA/nvJPEG ускорением.
 
-## Текущий статус (на 15.07.2026)
+## Текущий статус (на 18.07.2026)
 
 ### Рабочее
 - ✅ GPU поиск дубликатов (Mean Square + SSIM)
@@ -15,7 +15,7 @@ GPU-ускоренный поисковик дубликатов/похожих 
 - ✅ Немедленное удаление в корзину (без отложенных temp файлов)
 - ✅ База автоматически обновляется после delete/move (CheckImageData + фильтрация при загрузке)
 
-### Исправлено в последней сессии (аудит-фиксы)
+### Исправлено в предыдущих сессиях (аудит-фиксы)
 - ✅ **V01**: Thread dispose race в MainForm/StartFinishForm
 - ✅ **V02**: Null StatusGet в WPF SearchDllCommand
 - ✅ **V03**: WPF icon cache normalization (bounded 3-entry cache)
@@ -36,9 +36,23 @@ GPU-ускоренный поисковик дубликатов/похожих 
 - ✅ **Immediate delete**: TRecycleBin::Delete → FileDelete (SHFileOperation + FOF_ALLOWUNDO)
 - ✅ **Database update**: adCheckImageData API + LoadData/LoadCollectorData IsFileExists check
 
-### Отложено (low priority, не влияют на работоспособность)
-- ⏳ **FIND-8**: Cancel не wired для batch flows — требует background thread + ProgressForm integration (~50 строк)
-- ⏳ **V06**: Нет GPU→CPU fallback при ошибке GPU — CPU path существует но не вызывается (~10 строк, нужна проверка совместимости)
+### Исправлено 18.07.2026 (аудит FULL_AUDIT_2026-07-17)
+- ✅ **BUG-01 [P0]**: Thumb size mismatch → heap OOB. Добавлена проверка `data->side == reducedImageSize` в GPU pack loop (`adEngine.cpp`)
+- ✅ **BUG-02 [P1]**: DLL-native magic `"adid"` вместо `"adii"`. Исправлено `0x69696461u` в `Load()` (`adImageDataStorage.cpp`)
+- ✅ **BUG-03 [P1]**: Unbounded fread thumbnail bytes. Добавлена проверка `thumbBytes == side*side` в `LoadCollectorData` (`adImageDataStorage.cpp`)
+- ✅ **BUG-04 [P1]**: GPU игнорировал CPU фильтры (type/size/folder/searchPath). Добавлены фильтры в `MatchCallback` (`adEngine.cpp`)
+- ✅ **BUG-07 [P2]**: validCount < 2 → false (фейковая ошибка GPU). Теперь возвращает `true` (`adEngine.cpp`)
+- ✅ **BUG-09 [P2]**: d_poolMask VRAM leak при ошибках MS ядра. Добавлен cleanup в error paths (`adGPU.cu`)
+- ✅ **BUG-06 [P1]**: Shutdown dispose race 2s timeout. Увеличен до 10s (`MainForm.cs`)
+- ✅ **BUG-11 [P3]**: Skip flag устанавливался после CollectManager.Start(). Перемещён до Start() (`adEngine.cpp`)
+
+### Отложено (не критично, требует дополнительного анализа)
+- ⏳ **BUG-05 [P1]**: Batch move не обновляет результаты (устаревшие пути в UI). Безопасно через `processed` HashSet, но нужен native API для полного фикса.
+- ⏳ **BUG-08 [P2]**: Match buffer truncation — нет UI warning при переполнении. Требует архитектурного изменения для暴露 `bufferFullCount`.
+- ⏳ **BUG-10 [P2]**: Нет GPU→CPU fallback. Требует переделки фазы collection для feed CPU compare manager.
+- ⏳ **BUG-12 [P3]**: DB load блокирует FS scan. Требует проверки `SearchImages()` behavior с DB paths.
+- ⏳ **FIND-8**: Cancel не wired для batch flows.
+- ⏳ **V06**: Нет GPU→CPU fallback (тот же что BUG-10).
 
 ---
 
@@ -63,9 +77,10 @@ dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj /p:SolutionD
 - Весь вывод в `bin/<Configuration>/` (общий для C# и C++ проектов)
 
 ### Особенности сборки
-- **`adExternal.h`** (C++) и **`External.cs`** (C#) **генерируются автоматически** из `src/version.txt`preh-build скриптами. Не редактировать вручную.
+- **`adExternal.h`** (C++) и **`External.cs`** (C#) **генерируются автоматически** из `src/version.txt` pre-build скриптами. Не редактировать вручную.
 - **Post-build**: `cmd/CopyData.cmd` копирует `data/resources/` в папку вывода.
 - **vcpkg зависимости** устанавливаются в `src/vcpkg_installed/x64-windows-static/`. Первая сборка может быть долгой.
+- **C# build output** идёт в `src/AntiDupl.NET.WinForms/bin/Release/`, не в общий `bin/Release/`. Копировать вручную.
 
 ### vcpkg: проблема с simd
 Пакет `simd` устанавливает заголовки в `vcpkg_installed/x64-windows-static/include/`, но MSBuild ищет в `vcpkg_installed/x64-windows-static/x64-windows-static/include/`. **Workaround**: скопировать заголовки и .lib файлы вручную:
@@ -100,8 +115,8 @@ NvJpegCollector.exe (C++/CUDA) — утилита создания баз
 ```
 
 ### Два формата .adi
-- **DLL-native**: `"adid"` заголовок + version. Записывается при сканировании файлов (CPU).
-- **Collector-native**: Без заголовков, raw fwrite. Записывается NvJpegCollector.
+- **DLL-native**: `"adii"` заголовок (magic = `0x69696461`). Записывается при сканировании файлов (CPU).
+- **Collector-native**: Без заголовков, raw fwrite. Первый u32 = ThumbSize. Записывается NvJpegCollector.
 - **Не путать**: `LoadData()` читает DLL-native, `LoadDatabase()` читает Collector-native.
 
 ### Формат .adr (результаты)
@@ -149,10 +164,11 @@ NvJpegCollector записывает `hash=0` для всех изображен
 2. Собрать C++ проект: msbuild src\AntiDupl\AntiDupl.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VcpkgManifestInstall=false
 3. Скопировать AntiDupl.dll: Copy-Item src\bin\Release\AntiDupl.dll bin\Release\AntiDupl.dll -Force
 4. Собрать C#: dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release
-5. Self-contained publish: dotnet publish src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release -r win-x64 --self-contained true -o out/publish
-6. Добавить native deps: скопировать AntiDupl.dll, nvjpeg64_12.dll, cudart64_12.dll, NvJpegCollector.exe, data/ в out/publish
-7. Zip: cd out/publish && 7za a -tzip ..\bin\AntiDupl.NET-{VER}.zip *
-8. GitHub: git tag + gh release create --repo Sucotasch/AntiDuplPlus
+5. Скопировать C# output: Copy-Item src\AntiDupl.NET.WinForms\bin\Release\AntiDupl.NET.WinForms.exe bin\Release\ -Force
+6. Self-contained publish: dotnet publish src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release -r win-x64 --self-contained true -o out/publish
+7. Добавить native deps: скопировать AntiDupl.dll, nvjpeg64_12.dll, cudart64_12.dll, NvJpegCollector.exe, data/ в out/publish
+8. Zip: cd out/publish && 7za a -tzip ..\bin\AntiDupl.NET-{VER}.zip *
+9. GitHub: git tag + gh release create --repo Sucotasch/AntiDuplPlus
 
 ### Критические замечания
 - dotnet publish НЕ копирует native P/Invoke DLL (AntiDupl.dll) - копировать вручную

@@ -108,7 +108,7 @@ namespace AntiDupl.NET.WinForms
 
             StartFinishForm startFinishForm = new StartFinishForm(m_core, m_options);
             startFinishForm.ExecuteFinish();
-            startFinishForm.WaitForWorker(2000);
+            startFinishForm.WaitForWorker(10000);
             m_core.Dispose();
         }
 

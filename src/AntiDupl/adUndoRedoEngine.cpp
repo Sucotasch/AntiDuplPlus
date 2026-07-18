@@ -552,6 +552,10 @@ namespace ad
                 m_pMistakeStorage->Add(pResult->first, pResult->second);
                 m_pCurrent->change->mistakenResults.push_back(pResult);
                 return true;
+            case AD_LOCAL_ACTION_MARK_REMOVED_FIRST:
+                return MarkRemoved(pResult->first);
+            case AD_LOCAL_ACTION_MARK_REMOVED_SECOND:
+                return MarkRemoved(pResult->second);
             }
         }
         return false;
@@ -572,6 +576,17 @@ namespace ad
             return true;
         }
         return false;
+    }
+
+	//private Помечает изображение как удалённое без удаления файла (для batch move)
+    bool TUndoRedoEngine::MarkRemoved(TImageInfo *pImageInfo)
+    {
+        if(pImageInfo->removed)
+            return true;
+        pImageInfo->removed = true;
+        m_pCurrent->change->deletedImages.push_back(pImageInfo);
+        TDatabaseRegistry::UpdateCount(pImageInfo->path.Original(), -1, m_pOptions->userPath);
+        return true;
     }
 
 	//public

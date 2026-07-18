@@ -1,4 +1,4 @@
-/*
+﻿/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -241,6 +241,8 @@ extern "C"
         AD_LOCAL_ACTION_MOVE_AND_RENAME_SECOND_TO_FIRST = 11,
         AD_LOCAL_ACTION_PERFORM_HINT = 12,
         AD_LOCAL_ACTION_MISTAKE = 13,
+        AD_LOCAL_ACTION_MARK_REMOVED_FIRST = 14,
+        AD_LOCAL_ACTION_MARK_REMOVED_SECOND = 15,
         AD_LOCAL_ACTION_SIZE
     };
 

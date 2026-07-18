@@ -205,7 +205,10 @@ namespace AntiDupl.NET.WinForms
                                 }
                             }
                             System.IO.File.Move(sourcePath, destPath);
-                            ok = true;
+                            if (string.Equals(targetPath, r.first?.path, StringComparison.OrdinalIgnoreCase))
+                                ok = core.ApplyToResult(CoreDll.LocalActionType.MarkRemovedFirst, CoreDll.TargetType.Current);
+                            else
+                                ok = core.ApplyToResult(CoreDll.LocalActionType.MarkRemovedSecond, CoreDll.TargetType.Current);
                         }
                         catch (IOException) { failedPaths.Add(sourcePath); }
                         catch (UnauthorizedAccessException) { failedPaths.Add(sourcePath); }

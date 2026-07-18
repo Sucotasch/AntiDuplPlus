@@ -147,6 +147,8 @@ namespace AntiDupl.NET.Core.Original
             MoveAndRenameSecondToFirst = 11,
             PerformHint = 12,
             Mistake = 13,
+            MarkRemovedFirst = 14,
+            MarkRemovedSecond = 15,
         }
 
         public enum ActionEnableType : int

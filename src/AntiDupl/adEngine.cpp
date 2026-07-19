@@ -276,6 +276,12 @@ namespace ad
                 continue;
             if (opts->compare.compareInsideOneSearchPath == FALSE && pImage1->index == pImage2->index)
                 continue;
+            if (opts->compare.ratioControl == TRUE)
+            {
+                if (Simd::Square(pImage1->ratio - pImage2->ratio) >
+                    Simd::Square(RATIO_THRESHOLD_DIFFERENCE))
+                    continue;
+            }
 
             ctx->engine->Result()->AddDuplImagePair(pImage1, pImage2, matches[i].difference, AD_TRANSFORM_TURN_0);
             ctx->totalProcessed++;
@@ -347,6 +353,12 @@ namespace ad
             TImageDataPtr pImageData = it->second;
             if (pImageData->data && pImageData->data->filled && pImageData->data->main != nullptr
                 && (size_t)pImageData->data->side == reducedImageSize) {
+                const auto& cmp = m_pOptions->compare;
+                if (pImageData->width < (TUInt32)cmp.minimalImageSize ||
+                    pImageData->width > (TUInt32)cmp.maximalImageSize ||
+                    pImageData->height < (TUInt32)cmp.minimalImageSize ||
+                    pImageData->height > (TUInt32)cmp.maximalImageSize)
+                    continue;
                 allThumbnails.resize(validThumbBytes + thumbSize);
                 memcpy(&allThumbnails[validThumbBytes], pImageData->data->main, thumbSize);
                 validThumbBytes += thumbSize;
@@ -613,7 +625,8 @@ namespace ad
         bool useGpu = (m_pGpuManager && m_pGpuManager->IsAvailable() &&
                        (m_pOptions->compare.algorithmComparing == AD_COMPARING_SQUARED_SUM ||
                         m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM) &&
-                       m_pOptions->advanced.ignoreFrameWidth == 0);
+                       m_pOptions->advanced.ignoreFrameWidth == 0 &&
+                       m_pOptions->compare.transformedImage == FALSE);
 
         if (useGpu)
         {

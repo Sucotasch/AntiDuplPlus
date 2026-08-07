@@ -62,7 +62,10 @@ namespace AntiDupl.NET.WinForms
                     g.DrawImage(bitmapSource, 0, 0, section, GraphicsUnit.Pixel);
                 }
 
-                this._grayScaleData = GetBmpBytes(ToGrayScale(sectionBmp));
+                using (Bitmap grayScale = ToGrayScale(sectionBmp))
+                {
+                    this._grayScaleData = GetBmpBytes(grayScale);
+                }
             }
         }
 

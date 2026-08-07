@@ -32,8 +32,9 @@
         InvalidActionEnableType = 27,
         InvalidParameterCombination = 28,
         InvalidRenameCurrentType = 29,
-        InvalidInfoType = 30,
+        InvalidVersionType = 30,
         InvalidGroupId = 31,
         InvalidSelectionType = 32,
+        DirectoryIsNotExist = 33,
     }
 }

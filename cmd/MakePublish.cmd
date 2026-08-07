@@ -13,8 +13,8 @@ exit 0
 set VERSION=
 for /f "delims=" %%i in ('type %VERSION_FILE%') do set VERSION=%%i
 
-set OUT_DIR=%ROOT_DIR%\out\publish
-set TMP_DIR=%ROOT_DIR%\out\publish\AntiDupl.NET-%VERSION%
+set OUT_DIR=%ROOT_DIR%\out\Publish
+set TMP_DIR=%ROOT_DIR%\out\Publish\AntiDupl.NET-%VERSION%
 
 if not exist %OUT_DIR% mkdir %OUT_DIR%
 
@@ -26,7 +26,7 @@ rmdir %TMP_DIR% /q /s
 
 if not exist %TMP_DIR% mkdir %TMP_DIR%
 
-set PUBLISH_DIR=%ROOT_DIR%\out\publish\AntiDupl.NET
+set PUBLISH_DIR=%ROOT_DIR%\out\Publish\AntiDupl.NET
 
 robocopy "%ROOT_DIR%\data\resources" "%PUBLISH_DIR%\data\resources" /MIR
 if %ERRORLEVEL% GEQ 8 exit 0
@@ -42,9 +42,9 @@ xcopy %PUBLISH_DIR% %TMP_DIR% /y /i /s
 
 if exist %RAR_EXE% (
 %RAR_EXE% a -ep1 -s -m5 -r -sfx %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe %TMP_DIR%
-certutil -hashfile %OUT_DIR%\AntiDupl.NET-%VERSION%.exe SHA256 > %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe.hash.txt
+certutil -hashfile %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe SHA256 > %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe.hash.txt
 %RAR_EXE% a -afzip -ep1 -r %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.zip %TMP_DIR%
-certutil -hashfile %OUT_DIR%\AntiDupl.NET-%VERSION%.zip SHA256 > %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.zip.hash.txt
+certutil -hashfile %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.zip SHA256 > %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.zip.hash.txt
 ) else (
 .\7-zip\7za_2201.exe a -sfx7z.sfx %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe %TMP_DIR%
 certutil -hashfile %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe SHA256 > %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe.hash.txt

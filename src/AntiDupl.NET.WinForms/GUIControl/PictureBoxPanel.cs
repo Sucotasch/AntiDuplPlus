@@ -579,7 +579,13 @@ namespace AntiDupl.NET.WinForms
                     MemoryStream memoryStream = null;
                     if (LoadFileToMemoryStream(ref memoryStream, m_fileName))
                     {
-                        return new Bitmap(memoryStream);
+                        // Bitmap(Stream) keeps a lazy reference to the stream, so dispose the
+                        // stream (and temp bitmap) after cloning an independent copy.
+                        using (memoryStream)
+                        using (Bitmap bmp = new Bitmap(memoryStream))
+                        {
+                            return (Bitmap)bmp.Clone();
+                        }
                     }
                 }
             }

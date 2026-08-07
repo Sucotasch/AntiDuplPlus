@@ -492,6 +492,7 @@ namespace ad
 		// Read groupCount (u64)
 		uint64_t groupCount = 0;
 		if (fread(&groupCount, 8, 1, f) != 1) { fclose(f); return AD_ERROR_UNKNOWN; }
+		if (groupCount > 1000000) { fclose(f); return AD_ERROR_UNKNOWN; } // sanity check
 
 		// For each group in index
 		for (uint64_t g = 0; g < groupCount; g++)
@@ -517,6 +518,7 @@ namespace ad
 			// Read imgCount (u64)
 			uint64_t imgCount = 0;
 			if (fread(&imgCount, 8, 1, f) != 1) { fclose(f); return AD_ERROR_UNKNOWN; }
+			if (imgCount > 100000000) { fclose(f); return AD_ERROR_UNKNOWN; } // sanity check
 
 			// Load the data file (0000.adi, etc.)
 			TData data;
@@ -571,6 +573,7 @@ namespace ad
 		// Read count (u64)
 		uint64_t count = 0;
 		if (fread(&count, 8, 1, f) != 1) { fclose(f); return false; }
+		if (count > 100000000) { fclose(f); return false; } // sanity check
 
 		// Read N TImageData records
 		TImageData imageData(fileThumbSize);

@@ -156,10 +156,11 @@ namespace ad
             {
                 // EnsureCapacity is idempotent: no-op if buffer already has enough capacity.
                 // Must be called per-session because TGpuManager is recreated with TEngine.
+                // Size by globalIdx+1 (not a fixed 10000) so >10k images upload correctly.
                 {
                     size_t thumbSize = m_pOptions->advanced.reducedImageSize *
                                        m_pOptions->advanced.reducedImageSize;
-                    if (!m_pEngine->GpuManager()->EnsureCapacity(10000, thumbSize))
+                    if (!m_pEngine->GpuManager()->EnsureCapacity(pImageData->globalIdx + 1, thumbSize))
                     {
                         AD_DEBUG("FillPixelData: GPU EnsureCapacity FAILED\n");
                     }

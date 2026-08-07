@@ -24,6 +24,7 @@
 #include <tchar.h>
 #include <windows.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 
 #include <io.h>
 
@@ -32,6 +33,45 @@
 
 namespace ad
 {
+#ifdef UNICODE
+    // Long paths cannot go through SHFileOperation; use IFileOperation (handles \\?\ + Recycle Bin).
+    static bool FileDeleteToRecycleBin(const TChar *fileName)
+    {
+        std::wstring path(fileName);
+        if (path.size() >= MAX_PATH && path.compare(0, 4, L"\\\\?\\") != 0)
+        {
+            if (path.compare(0, 2, L"\\\\") == 0) // UNC -> \\?\UNC\...
+                path = L"\\\\?\\UNC\\" + path.substr(2);
+            else
+                path = L"\\\\?\\" + path;
+        }
+
+        HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+        if (FAILED(hr) && hr != RPC_E_CHANGED_MODE)
+            return false;
+        bool needUninit = (hr == S_OK);
+
+        bool result = false;
+        IShellItem *pItem = NULL;
+        if (SUCCEEDED(SHCreateItemFromParsingName(path.c_str(), NULL, IID_PPV_ARGS(&pItem))))
+        {
+            IFileOperation *pFileOp = NULL;
+            if (SUCCEEDED(CoCreateInstance(CLSID_FileOperation, NULL, CLSCTX_ALL, IID_PPV_ARGS(&pFileOp))))
+            {
+                pFileOp->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI);
+                if (SUCCEEDED(pFileOp->DeleteItem(pItem, NULL)))
+                    result = SUCCEEDED(pFileOp->PerformOperations());
+                pFileOp->Release();
+            }
+            pItem->Release();
+        }
+
+        if (needUninit)
+            CoUninitialize();
+        return result;
+    }
+#endif//UNICODE
+
     bool FileDelete(const TChar *fileName, bool toRecycle)
     {
         TChar buffer[MAX_PATH + 1];
@@ -43,6 +83,8 @@ namespace ad
         if (length >= MAX_PATH)
         {
 #ifdef UNICODE
+            if (toRecycle)
+                return FileDeleteToRecycleBin(fileName);
             return ::DeleteFile(fileName) != FALSE;
 #else
             return false;

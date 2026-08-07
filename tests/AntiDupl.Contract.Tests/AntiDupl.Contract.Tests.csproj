@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    AntiDupl.Contract.Tests — dependency-free contract regression tests for the
+    managed interop layer (src/AntiDupl.NET.Core).
+
+    Why this exists:
+      * The native &lt;-&gt; managed boundary is binary-compatible by hard invariant
+        (AGENTS.md #3). The enums and [StructLayout] structs in CoreDll.cs must
+        stay in lock-step with the C++ declarations in src/AntiDupl/AntiDupl.h.
+      * There is no test infrastructure in the solution and no network access to
+        pull xunit/NUnit, so this is a plain console runner (same pattern as the
+        root test_ssim.cs / benchmark_ssim.cs utilities).
+
+    Run:
+        dotnet build  tests\AntiDupl.Contract.Tests\AntiDupl.Contract.Tests.csproj
+        dotnet run    (with project argument) tests\AntiDupl.Contract.Tests\AntiDupl.Contract.Tests.csproj
+
+    Exit code is 0 (all green) or 1 (contract drift detected).
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AntiDupl.NET.Core\AntiDupl.NET.Core.csproj" />
+  </ItemGroup>
+
+</Project>

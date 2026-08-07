@@ -27,16 +27,21 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
-      
+      uses: actions/checkout@v4
+
     - name: Read version.txt
       id: version
-      uses: juliangruber/read-file-action@v1
-      with:
-        path: ./src/version.txt
-      
+      shell: pwsh
+      run: echo "content=$(Get-Content src/version.txt)" >> $env:GITHUB_OUTPUT
+
     - name: Setup MSBuild.exe
-      uses: microsoft/setup-msbuild@v1.0.2
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Install CUDA 12.8
+      uses: JimVer/cuda-toolkit-action@v0.2
+      with:
+        cuda: '12.8.0'
+        method: 'network'
       
     - name: Restore NuGet packages
       working-directory: ${{env.GITHUB_WORKSPACE}}
@@ -58,15 +63,22 @@ jobs:
     - if: matrix.configuration == 'Release' || matrix.configuration == 'Debug'
       name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=$env:Configuration $env:Solution_Name
+      run: msbuild /m /p:Configuration=$env:Configuration /p:Platform=x64 $env:Solution_Name
       env: 
         Configuration: ${{ matrix.configuration }}
 
     - if: matrix.configuration == 'Publish'
-      name: Build
+      name: Build native (Publish)
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m $env:Solution_Name /p:Configuration=$env:Configuration -restore -t:Publish -p:PublishProfile="AntiDuplPublishSingleFile"
-      env: 
+      run: msbuild /m src\AntiDupl\AntiDupl.vcxproj /p:Configuration=$env:Configuration /p:Platform=x64 /p:VcpkgManifestInstall=false
+      env:
+        Configuration: ${{ matrix.configuration }}
+
+    - if: matrix.configuration == 'Publish'
+      name: Publish WinForms (SingleFile)
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: dotnet publish src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Publish -p:PublishProfile=AntiDuplPublishSingleFile -p:SolutionDir="src\\"
+      env:
         Configuration: ${{ matrix.configuration }}
         
     - if: matrix.configuration == 'Release'
@@ -85,7 +97,7 @@ jobs:
       
     - if: matrix.configuration == 'Release'
       name: Upload build
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: "AntiDupl.NET-${{ steps.version.outputs.content }} build"
         path: |
@@ -93,10 +105,10 @@ jobs:
               ${{ github.workspace }}\out\bin\AntiDupl.NET-${{ steps.version.outputs.content }}.exe.hash.txt
               ${{ github.workspace }}\out\bin\AntiDupl.NET-${{ steps.version.outputs.content }}.zip
               ${{ github.workspace }}\out\bin\AntiDupl.NET-${{ steps.version.outputs.content }}.zip.hash.txt
-      
+
     - if: matrix.configuration == 'Publish'
       name: Upload build SingleFilePortable
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: "AntiDupl.NET-${{ steps.version.outputs.content }} build SingleFilePortable"
         path: |
@@ -115,21 +127,20 @@ jobs:
       - uses: msys2/setup-msys2@v2
       
       - name: Checkout
-        uses: actions/checkout@v3
-        
+        uses: actions/checkout@v4
+
       - name: Read version.txt
         id: version
-        uses: juliangruber/read-file-action@v1
-        with:
-          path: ./src/version.txt
-        
+        shell: pwsh
+        run: echo "content=$(Get-Content src/version.txt)" >> $env:GITHUB_OUTPUT
+
       - name: Load all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "AntiDupl.NET-${{ steps.version.outputs.content }} build"
-          
+
       - name: Load all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: "AntiDupl.NET-${{ steps.version.outputs.content }} build SingleFilePortable"
           
@@ -156,7 +167,7 @@ jobs:
           done <<<"$analysis,"
         
       - name: GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: "AntiDupl.NET v${{ steps.version.outputs.content }}"
           body_path: body.txt

@@ -382,7 +382,9 @@ DLLAPI adError adPathSetW(adEngineHandle handle, adPathType pathType, adPathPtrW
 // pathType - тип пути, pPaths - указатель на переменную пути, pathSize - количество путей
 DLLAPI adError adPathWithSubFolderSetW(adEngineHandle handle, adPathType pathType, adPathWSFPtr pPaths, adSize pathSize)
 {
-	// [C#4] Log entry with handle address
+	CHECK_HANDLE CHECK_ACCESS LOCK
+
+	// [C#4] Log entry with handle address (after CHECK_HANDLE — handle must be valid)
 	{
 		wchar_t exePath[MAX_PATH];
 		GetModuleFileNameW(NULL, exePath, MAX_PATH);
@@ -395,8 +397,6 @@ DLLAPI adError adPathWithSubFolderSetW(adEngineHandle handle, adPathType pathTyp
 			fclose(logFile);
 		}
 	}
-
-	CHECK_HANDLE CHECK_ACCESS LOCK
 
 	ad::TOptions *pOptions = handle->Options();
 	switch(pathType)

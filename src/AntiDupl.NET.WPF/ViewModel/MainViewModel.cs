@@ -186,18 +186,6 @@ namespace AntiDupl.NET.WPF.ViewModel
             }
         }
 
-        ICommand _calculateHistogramPeaksCommand;
-        public ICommand CalculateHistogramPeaksCommand
-        {
-            get
-            {
-                //var resultEnum = (IEnumerable<DuplPairViewModel>)_resultList;
-                return _calculateHistogramPeaksCommand ?? (_calculateHistogramPeaksCommand
-                    = new CalculateHistogramPeaksCommand(this, _core, _windowService, _resultList));
-                //return new CalculateHistogramPeaksCommand(this, _core, _windowService, _resultList);
-            }
-        }
-
         ICommand _openPathCommand;
         public ICommand OpenPathCommand
         {

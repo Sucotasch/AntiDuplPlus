@@ -168,8 +168,6 @@
                 <MenuItem Header="Tuning">
                     <MenuItem Header="{DynamicResource toolBar_setSaati}"
                               Command="{Binding SetPrioritiesCommand}" />
-                    <MenuItem Header="Calculate histogram peaks for DCT coefficient"
-                              Command="{Binding CalculateHistogramPeaksCommand}" />
                 </MenuItem>
             </Menu>
             

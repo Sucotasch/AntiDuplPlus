@@ -26,8 +26,6 @@ namespace AntiDupl.NET.WinForms
         private RadioButton m_poolPool2;
         private RadioButton m_poolDonTCare;
 
-        private CheckBox m_includeDefects;
-
         public AutoSelectCriteria ResultCriteria { get; private set; }
 
         public AutoSelectDialog()
@@ -102,26 +100,25 @@ namespace AntiDupl.NET.WinForms
             this.Controls.Add(grpPool);
             y += 80;
 
-            // Include defects
-            m_includeDefects = new CheckBox();
-            m_includeDefects.Text = "Include defect images";
-            m_includeDefects.Location = new Point(15, y);
-            m_includeDefects.AutoSize = true;
-            this.Controls.Add(m_includeDefects);
-            y += 28;
+            // Buttons — Mark, Select Worst preset, Cancel
+            var btnKeepBest = new Button();
+            btnKeepBest.Text = "Select Worst";
+            btnKeepBest.Size = new Size(120, 30);
+            btnKeepBest.Location = new Point(15, y);
+            btnKeepBest.Click += (s, e) => { ResultCriteria = AutoSelectCriteria.KeepBest; this.DialogResult = DialogResult.OK; this.Close(); };
+            this.Controls.Add(btnKeepBest);
 
-            // Buttons — only Mark + Cancel
             var btnMark = new Button();
             btnMark.Text = "Mark";
             btnMark.Size = new Size(120, 30);
-            btnMark.Location = new Point(75, y);
+            btnMark.Location = new Point(150, y);
             btnMark.Click += (s, e) => { ResultCriteria = BuildCriteria(); this.DialogResult = DialogResult.OK; this.Close(); };
             this.Controls.Add(btnMark);
 
             var btnCancel = new Button();
             btnCancel.Text = "Cancel";
             btnCancel.Size = new Size(100, 30);
-            btnCancel.Location = new Point(210, y);
+            btnCancel.Location = new Point(285, y);
             btnCancel.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };
             this.Controls.Add(btnCancel);
 
@@ -158,8 +155,6 @@ namespace AntiDupl.NET.WinForms
 
             if (m_poolPool1.Checked) c.PoolSide = AutoSelectSide.First;
             else if (m_poolPool2.Checked) c.PoolSide = AutoSelectSide.Second;
-
-            c.IncludeDefects = m_includeDefects.Checked;
 
             return c;
         }

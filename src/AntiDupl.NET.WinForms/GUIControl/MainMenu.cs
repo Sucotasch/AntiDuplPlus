@@ -141,6 +141,9 @@ namespace AntiDupl.NET.WinForms
             m_edit_autoSelectMenuItem.DropDownItems.Add("More Compressed", null, (s, e) => DoAutoSelect(AutoSelectCriteria.WorseQuality));
             m_edit_autoSelectMenuItem.DropDownItems.Add("Less Compressed", null, (s, e) => DoAutoSelect(AutoSelectCriteria.BetterQuality));
             m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Select Worst", null, (s, e) => DoAutoSelect(AutoSelectCriteria.KeepBest));
+            m_edit_autoSelectMenuItem.DropDownItems.Add("Select Best", null, (s, e) => DoAutoSelect(AutoSelectCriteria.KeepWorst));
+            m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_edit_autoSelectMenuItem.DropDownItems.Add("From Pool1", null, (s, e) => DoAutoSelect(AutoSelectCriteria.FromPool1));
             m_edit_autoSelectMenuItem.DropDownItems.Add("From Pool2", null, (s, e) => DoAutoSelect(AutoSelectCriteria.FromPool2));
             m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());

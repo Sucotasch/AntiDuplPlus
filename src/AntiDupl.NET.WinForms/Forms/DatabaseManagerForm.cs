@@ -39,11 +39,17 @@ namespace AntiDupl.NET.WinForms.Forms
         private ComboBox m_cmbPoolMode;
         private Label m_lblInfo;
 
+        // Layout
+        private SplitContainer m_splitMain;
+        private SplitContainer m_splitPools;
+
         private const string RegistryFileName = "ad_database.xml";
         private const string PoolModeRegKey = @"Software\AntiDupl.NET\DatabaseManager";
         private List<DbEntry> m_allEntries = new List<DbEntry>();
         private bool m_dirty = false;
         private static int s_poolCompareMode = -1;
+        private static int s_splitMainDistance = -1;
+        private static int s_splitPoolsDistance = -1;
 
         public DatabaseManagerForm()
         {
@@ -55,12 +61,53 @@ namespace AntiDupl.NET.WinForms.Forms
             this.FormClosing += (s, e) => { if (m_dirty) SaveDatabases(); };
         }
 
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            RestoreWindowState();
+            BeginInvoke(new Action(ApplySplitterDistances));
+        }
+
+        private void ApplySplitterDistances()
+        {
+            m_splitMain.Panel1MinSize = 360;
+            m_splitMain.Panel2MinSize = 420;
+            int mainMax = m_splitMain.Width - m_splitMain.Panel2MinSize - m_splitMain.SplitterWidth;
+            if (mainMax >= m_splitMain.Panel1MinSize)
+            {
+                int splitMain = s_splitMainDistance;
+                if (splitMain < m_splitMain.Panel1MinSize || splitMain > mainMax)
+                    splitMain = m_splitMain.Width * 40 / 100;
+                m_splitMain.SplitterDistance = Math.Min(Math.Max(splitMain, m_splitMain.Panel1MinSize), mainMax);
+            }
+
+            m_splitPools.Panel1MinSize = 120;
+            m_splitPools.Panel2MinSize = 120;
+            int poolsMax = m_splitPools.Height - m_splitPools.Panel2MinSize - m_splitPools.SplitterWidth;
+            if (poolsMax >= m_splitPools.Panel1MinSize)
+            {
+                int splitPools = s_splitPoolsDistance;
+                if (splitPools < m_splitPools.Panel1MinSize || splitPools > poolsMax)
+                    splitPools = m_splitPools.Height / 2;
+                m_splitPools.SplitterDistance = Math.Min(Math.Max(splitPools, m_splitPools.Panel1MinSize), poolsMax);
+            }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            base.OnFormClosed(e);
+            SaveWindowState();
+        }
+
         private void InitializeComponent()
         {
             this.Text = "Database Manager";
-            this.Size = new Size(1100, 550);
             this.MinimumSize = new Size(900, 450);
             this.StartPosition = FormStartPosition.CenterParent;
+            Rectangle wa = Screen.PrimaryScreen.WorkingArea;
+            this.Size = new Size(
+                Math.Max(this.MinimumSize.Width, Math.Min(wa.Width, wa.Width * 75 / 100)),
+                Math.Max(this.MinimumSize.Height, Math.Min(wa.Height, wa.Height * 80 / 100)));
 
             // Top panel: Info + Pool Mode
             Panel topPanel = new Panel();
@@ -109,7 +156,7 @@ namespace AntiDupl.NET.WinForms.Forms
             btnPanel.Dock = DockStyle.Bottom;
             btnPanel.Height = 45;
 
-            m_btnOpenFolder = CreateButton("Open Folder", 10, BtnOpenFolder_Click);
+            m_btnOpenFolder = CreateButton("Attach Database...", 10, BtnAttachDatabase_Click);
             m_btnRefresh = CreateButton("Refresh", 140, (s, e) => LoadDatabases());
             m_btnUpdateAll = CreateButton("Update All", 270, (s, e) => UpdateAllDatabases());
             m_btnClose = CreateButton("Close", 400, (s, e) => this.Close());
@@ -120,10 +167,9 @@ namespace AntiDupl.NET.WinForms.Forms
             btnPanel.Controls.Add(m_btnClose);
 
             // Center: 3-panel split
-            SplitContainer splitMain = new SplitContainer();
-            splitMain.Dock = DockStyle.Fill;
-            splitMain.Orientation = Orientation.Vertical;
-            splitMain.SplitterDistance = 400;
+            m_splitMain = new SplitContainer();
+            m_splitMain.Dock = DockStyle.Fill;
+            m_splitMain.Orientation = Orientation.Vertical;
 
             // Left: Registry
             Panel registryPanel = CreatePanel("Registry (All)", Color.White);
@@ -141,10 +187,9 @@ namespace AntiDupl.NET.WinForms.Forms
             registryPanel.Controls.Add(registryBtnPanel);
 
             // Right: Pool1 + Pool2
-            SplitContainer splitPools = new SplitContainer();
-            splitPools.Dock = DockStyle.Fill;
-            splitPools.Orientation = Orientation.Horizontal;
-            splitPools.SplitterDistance = 200;
+            m_splitPools = new SplitContainer();
+            m_splitPools.Dock = DockStyle.Fill;
+            m_splitPools.Orientation = Orientation.Horizontal;
 
             // Pool1
             Panel pool1Panel = CreatePanel("Pool1 (Reference)", Color.FromArgb(230, 245, 255));
@@ -172,13 +217,13 @@ namespace AntiDupl.NET.WinForms.Forms
             pool2BtnPanel.Controls.Add(m_btnRemovePool2);
             pool2Panel.Controls.Add(pool2BtnPanel);
 
-            splitPools.Panel1.Controls.Add(pool1Panel);
-            splitPools.Panel2.Controls.Add(pool2Panel);
+            m_splitPools.Panel1.Controls.Add(pool1Panel);
+            m_splitPools.Panel2.Controls.Add(pool2Panel);
 
-            splitMain.Panel1.Controls.Add(registryPanel);
-            splitMain.Panel2.Controls.Add(splitPools);
+            m_splitMain.Panel1.Controls.Add(registryPanel);
+            m_splitMain.Panel2.Controls.Add(m_splitPools);
 
-            this.Controls.Add(splitMain);
+            this.Controls.Add(m_splitMain);
             this.Controls.Add(topPanel);
             this.Controls.Add(btnPanel);
         }
@@ -227,6 +272,7 @@ namespace AntiDupl.NET.WinForms.Forms
             colEnabled.DataPropertyName = "Enabled";
             colEnabled.HeaderText = "On";
             colEnabled.Width = 35;
+            colEnabled.MinimumWidth = 35;
             colEnabled.ReadOnly = false;
             grid.Columns.Add(colEnabled);
 
@@ -235,6 +281,7 @@ namespace AntiDupl.NET.WinForms.Forms
             colName.DataPropertyName = "Name";
             colName.HeaderText = "Name";
             colName.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+            colName.MinimumWidth = 150;
             grid.Columns.Add(colName);
 
             var colCount = new DataGridViewTextBoxColumn();
@@ -242,6 +289,7 @@ namespace AntiDupl.NET.WinForms.Forms
             colCount.DataPropertyName = "ImageCount";
             colCount.HeaderText = "Images";
             colCount.Width = 60;
+            colCount.MinimumWidth = 60;
             grid.Columns.Add(colCount);
 
             var colStatus = new DataGridViewTextBoxColumn();
@@ -249,6 +297,7 @@ namespace AntiDupl.NET.WinForms.Forms
             colStatus.DataPropertyName = "Status";
             colStatus.HeaderText = "Status";
             colStatus.Width = 55;
+            colStatus.MinimumWidth = 55;
             grid.Columns.Add(colStatus);
 
             var colUpdate = new DataGridViewButtonColumn();
@@ -257,6 +306,7 @@ namespace AntiDupl.NET.WinForms.Forms
             colUpdate.Text = "Update";
             colUpdate.UseColumnTextForButtonValue = true;
             colUpdate.Width = 65;
+            colUpdate.MinimumWidth = 65;
             colUpdate.FlatStyle = FlatStyle.Flat;
             grid.Columns.Add(colUpdate);
 
@@ -266,6 +316,7 @@ namespace AntiDupl.NET.WinForms.Forms
             colDelete.Text = "Delete";
             colDelete.UseColumnTextForButtonValue = true;
             colDelete.Width = 65;
+            colDelete.MinimumWidth = 65;
             colDelete.FlatStyle = FlatStyle.Flat;
             grid.Columns.Add(colDelete);
 
@@ -575,19 +626,121 @@ namespace AntiDupl.NET.WinForms.Forms
             File.WriteAllText(filePath, content);
         }
 
-        private void BtnOpenFolder_Click(object sender, EventArgs e)
+        private void BtnAttachDatabase_Click(object sender, EventArgs e)
         {
-            if (m_registryGrid.SelectedRows.Count == 0) return;
-            var row = m_registryGrid.SelectedRows[0];
-            string folder = row.Cells["Folder"].Value as string;
-            if (!string.IsNullOrEmpty(folder) && Directory.Exists(folder))
+            using (var dialog = new FolderBrowserDialog())
             {
-                System.Diagnostics.Process.Start("explorer.exe", folder);
+                dialog.Description = "Select a database folder containing index.adi and 0000.adi";
+                dialog.ShowNewFolderButton = false;
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                string folder = dialog.SelectedPath;
+                if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+                {
+                    MessageBox.Show("Selected folder does not exist.", "Attach Database", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                string indexPath = Path.Combine(folder, "index.adi");
+                if (!File.Exists(indexPath))
+                {
+                    MessageBox.Show("Selected folder does not contain index.adi.\n\n" +
+                        "A valid database folder has index.adi and 0000.adi created by NvJpegCollector.",
+                        "Attach Database", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                string lower = folder.TrimEnd('\\', '/').ToLowerInvariant();
+                foreach (var entry in m_allEntries)
+                {
+                    if (!string.IsNullOrEmpty(entry.Folder) &&
+                        entry.Folder.TrimEnd('\\', '/').ToLowerInvariant() == lower)
+                    {
+                        MessageBox.Show($"Database \"{entry.Name}\" is already attached.", "Attach Database",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                }
+
+                int thumbSize;
+                int imageCount;
+                ParseAdiInfo(indexPath, out thumbSize, out imageCount);
+
+                var db = new DbEntry
+                {
+                    Enabled = true,
+                    Name = Path.GetFileName(folder.TrimEnd('\\', '/')),
+                    Path = folder,
+                    Folder = folder,
+                    ImageCount = imageCount,
+                    ThumbSize = thumbSize,
+                    Status = "Ready",
+                    Pool = 0
+                };
+
+                m_allEntries.Add(db);
+                SaveDatabases();
+                RefreshAllGrids();
+                MessageBox.Show($"Database \"{db.Name}\" attached.\n\n{imageCount} images, thumb {thumbSize}x{thumbSize}.",
+                    "Attach Database", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            else
+        }
+
+        /// <summary>
+        /// Parses thumb size and image count from index.adi (both DLL-native "adii" and
+        /// collector-native formats). On any parse failure defaults are returned.
+        /// Collector-native layout: thumbSize(u32) + groupCount(u64) + per group:
+        ///   key(i16) + firstLen(u64) + first(wchar) + lastLen(u64) + last(wchar) + imgCount(u64)
+        /// </summary>
+        private static void ParseAdiInfo(string indexPath, out int thumbSize, out int imageCount)
+        {
+            thumbSize = 32;
+            imageCount = 0;
+            try
             {
-                MessageBox.Show("Database folder not found: " + (folder ?? "(empty)"), "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                using (var fs = new FileStream(indexPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var reader = new BinaryReader(fs))
+                {
+                    if (fs.Length < 12) return;
+
+                    uint firstBytes = reader.ReadUInt32();
+                    bool dllNative = (firstBytes == 0x69696461u); // "adii"
+                    if (dllNative)
+                    {
+                        // DLL-native index layout is more complex; only count records by scanning
+                        // the 0000.adi sibling file is unreliable here, so leave defaults.
+                        return;
+                    }
+
+                    thumbSize = (int)firstBytes;
+                    if (thumbSize <= 0 || thumbSize > 1024) thumbSize = 32;
+
+                    ulong groupCount = reader.ReadUInt64();
+                    if (groupCount > 1000000) return;
+
+                    long total = 0;
+                    for (ulong g = 0; g < groupCount; g++)
+                    {
+                        reader.ReadInt16();           // key
+                        ulong firstLen = reader.ReadUInt64();
+                        if (firstLen > 10000) return;
+                        fs.Seek((long)firstLen * 2, SeekOrigin.Current);
+                        ulong lastLen = reader.ReadUInt64();
+                        if (lastLen > 10000) return;
+                        fs.Seek((long)lastLen * 2, SeekOrigin.Current);
+                        ulong imgCount = reader.ReadUInt64();
+                        if (imgCount > 100000000) return;
+                        total += (long)imgCount;
+                    }
+
+                    if (total >= 0 && total <= int.MaxValue)
+                        imageCount = (int)total;
+                }
+            }
+            catch
+            {
+                thumbSize = 32;
+                imageCount = 0;
             }
         }
 
@@ -756,6 +909,64 @@ namespace AntiDupl.NET.WinForms.Forms
             }
             catch { }
             return 0;
+        }
+
+        // --- Window state persistence ---
+
+        private const string BoundsRegKey = "MainFormBounds";
+        private const string SplitMainRegKey = "SplitMainDistance";
+        private const string SplitPoolsRegKey = "SplitPoolsDistance";
+
+        private void SaveWindowState()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(PoolModeRegKey))
+                {
+                    if (WindowState != FormWindowState.Minimized)
+                    {
+                        key.SetValue(BoundsRegKey,
+                            string.Format("{0},{1},{2},{3}", Location.X, Location.Y, Size.Width, Size.Height),
+                            Microsoft.Win32.RegistryValueKind.String);
+                    }
+                    key.SetValue(SplitMainRegKey, m_splitMain.SplitterDistance, Microsoft.Win32.RegistryValueKind.DWord);
+                    key.SetValue(SplitPoolsRegKey, m_splitPools.SplitterDistance, Microsoft.Win32.RegistryValueKind.DWord);
+                }
+            }
+            catch { }
+        }
+
+        private void RestoreWindowState()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(PoolModeRegKey))
+                {
+                    if (key == null) return;
+
+                    var bounds = key.GetValue(BoundsRegKey) as string;
+                    if (!string.IsNullOrEmpty(bounds))
+                    {
+                        string[] parts = bounds.Split(',');
+                        if (parts.Length == 4 &&
+                            int.TryParse(parts[0], out int x) && int.TryParse(parts[1], out int y) &&
+                            int.TryParse(parts[2], out int w) && int.TryParse(parts[3], out int h))
+                        {
+                            Rectangle wa = Screen.PrimaryScreen.WorkingArea;
+                            w = Math.Max(MinimumSize.Width, Math.Min(w, wa.Width));
+                            h = Math.Max(MinimumSize.Height, Math.Min(h, wa.Height));
+                            x = Math.Max(wa.Left, Math.Min(x, wa.Right - w));
+                            y = Math.Max(wa.Top, Math.Min(y, wa.Bottom - h));
+                            Location = new Point(x, y);
+                            Size = new Size(w, h);
+                        }
+                    }
+
+                    if (key.GetValue(SplitMainRegKey) is int sm) s_splitMainDistance = sm;
+                    if (key.GetValue(SplitPoolsRegKey) is int sp) s_splitPoolsDistance = sp;
+                }
+            }
+            catch { }
         }
 
         // --- Win32 Recycle Bin ---

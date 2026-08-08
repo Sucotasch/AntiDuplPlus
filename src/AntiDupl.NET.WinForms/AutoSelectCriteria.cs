@@ -16,8 +16,6 @@ namespace AntiDupl.NET.WinForms
         public AutoSelectSide ResolutionSide = AutoSelectSide.DontCare; // Lower/Higher
         public AutoSelectSide PoolSide = AutoSelectSide.DontCare;      // Pool1/Pool2
 
-        public bool IncludeDefects = false;
-
         // Predefined criteria for quick selection
         public static AutoSelectCriteria Older => new AutoSelectCriteria { TimeSide = AutoSelectSide.First };
         public static AutoSelectCriteria Newer => new AutoSelectCriteria { TimeSide = AutoSelectSide.Second };
@@ -29,6 +27,23 @@ namespace AntiDupl.NET.WinForms
         public static AutoSelectCriteria BetterQuality => new AutoSelectCriteria { QualitySide = AutoSelectSide.Second };
         public static AutoSelectCriteria FromPool1 => new AutoSelectCriteria { PoolSide = AutoSelectSide.First };
         public static AutoSelectCriteria FromPool2 => new AutoSelectCriteria { PoolSide = AutoSelectSide.Second };
+
+        // Quality cascade preset: keep the best image (delete the worst).
+        // Priority: Resolution → File size → Quality. Ties fall through to the next.
+        public static AutoSelectCriteria KeepBest => new AutoSelectCriteria
+        {
+            ResolutionSide = AutoSelectSide.First,
+            SizeSide = AutoSelectSide.First,
+            QualitySide = AutoSelectSide.First,
+        };
+
+        // Inverse of KeepBest: keep the worst image (delete the best).
+        public static AutoSelectCriteria KeepWorst => new AutoSelectCriteria
+        {
+            ResolutionSide = AutoSelectSide.Second,
+            SizeSide = AutoSelectSide.Second,
+            QualitySide = AutoSelectSide.Second,
+        };
 
         public bool HasCriteria =>
             TimeSide != AutoSelectSide.DontCare ||

@@ -92,6 +92,8 @@ namespace AntiDupl.NET.WinForms
             columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.Transform], 0, 5);
             m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.Hint] = InitFactory.CheckBox.Create(OnOptionChanged);
             columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.Hint], 0, 6);
+            m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.Target] = InitFactory.CheckBox.Create(OnOptionChanged);
+            columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.Target], 0, 7);
             m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.FirstFileName] = InitFactory.CheckBox.Create(OnOptionChanged);
             columnsTableLayoutPanel.Controls.Add(m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.FirstFileName], 1, 0);
             m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.FirstFileDirectory] = InitFactory.CheckBox.Create(OnOptionChanged);
@@ -156,6 +158,7 @@ namespace AntiDupl.NET.WinForms
             m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.Defect].Text = s.ResultsListView_Defect_Column_Text;
             m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.Transform].Text = s.ResultsListView_Transform_Column_Text;
             m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.Hint].Text = s.ResultsListView_Hint_Column_Text;
+            m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.Target].Text = "Target";
             m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.FirstFileName].Text = s.ResultsListView_FirstFileName_Column_Text;
             m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.FirstFileDirectory].Text = s.ResultsListView_FirstFileDirectory_Column_Text;
             m_checkBoxes[(int)ResultsListView.ColumnsTypeHorizontal.FirstImageSize].Text = s.ResultsListView_FirstImageSize_Column_Text;

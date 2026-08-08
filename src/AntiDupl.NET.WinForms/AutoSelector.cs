@@ -231,113 +231,130 @@ namespace AntiDupl.NET.WinForms
 
         /// <summary>
         /// Determine which side of the pair to target based on criteria.
-        /// AND logic: ALL active criteria must agree on the same side.
-        /// If any active criterion says DontCare or conflicts → result is DontCare.
+        /// Quality criteria (Resolution, Size, Quality) form a priority cascade:
+        /// the first criterion that decides (is not a tie) wins; ties fall through.
+        /// When every active quality criterion ties, the pair is treated as "don't care"
+        /// and the first image is selected so that the user is never left choosing manually.
+        /// Time and Pool are standalone modes, not part of the quality cascade:
+        ///   - Time: older/newer; a tie selects the first image.
+        ///   - Pool: selects the image from the requested pool; if neither matches,
+        ///     nothing is selected (DontCare).
         /// </summary>
         public static AutoSelectSide DetermineSide(CoreResult r, AutoSelectCriteria criteria, Dictionary<string, int> poolMap)
         {
-            AutoSelectSide result = AutoSelectSide.DontCare;
-            bool firstCriterion = true;
+            bool hasQualityCriterion =
+                criteria.ResolutionSide != AutoSelectSide.DontCare ||
+                criteria.SizeSide != AutoSelectSide.DontCare ||
+                criteria.QualitySide != AutoSelectSide.DontCare;
 
-            // Time
+            if (hasQualityCriterion)
+            {
+                // Quality cascade: Resolution → Size → Quality.
+                AutoSelectSide side;
+
+                if (criteria.ResolutionSide != AutoSelectSide.DontCare)
+                {
+                    side = LowerResolutionSide(r);
+                    if (side != AutoSelectSide.DontCare)
+                        return (criteria.ResolutionSide == AutoSelectSide.First) ? side : Opposite(side);
+                }
+
+                if (criteria.SizeSide != AutoSelectSide.DontCare)
+                {
+                    side = SmallerSizeSide(r);
+                    if (side != AutoSelectSide.DontCare)
+                        return (criteria.SizeSide == AutoSelectSide.First) ? side : Opposite(side);
+                }
+
+                if (criteria.QualitySide != AutoSelectSide.DontCare)
+                {
+                    side = WorseQualitySide(r);
+                    if (side != AutoSelectSide.DontCare)
+                        return (criteria.QualitySide == AutoSelectSide.First) ? side : Opposite(side);
+                }
+
+                // All active quality criteria tied → "don't care" → select first.
+                return AutoSelectSide.First;
+            }
+
+            // Standalone modes: Time and Pool (not part of the quality cascade).
             if (criteria.TimeSide != AutoSelectSide.DontCare)
             {
-                AutoSelectSide side = AutoSelectSide.DontCare;
-                if (r.first.time < r.second.time)
-                    side = AutoSelectSide.First;
-                else if (r.second.time < r.first.time)
-                    side = AutoSelectSide.Second;
-                else
-                    side = AutoSelectSide.First; // tiebreak: prefer First
-
-                if (criteria.TimeSide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
-                    side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
-
-                if (firstCriterion) { result = side; firstCriterion = false; }
-                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
+                AutoSelectSide side = OlderSide(r);
+                if (side != AutoSelectSide.DontCare)
+                    return (criteria.TimeSide == AutoSelectSide.First) ? side : Opposite(side);
             }
 
-            // Size
-            if (criteria.SizeSide != AutoSelectSide.DontCare)
-            {
-                AutoSelectSide side = AutoSelectSide.DontCare;
-                if (r.first.size < r.second.size)
-                    side = AutoSelectSide.First;
-                else if (r.second.size < r.first.size)
-                    side = AutoSelectSide.Second;
-                else
-                    side = AutoSelectSide.First; // tiebreak: prefer First
-
-                if (criteria.SizeSide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
-                    side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
-
-                if (firstCriterion) { result = side; firstCriterion = false; }
-                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
-            }
-
-            // Quality
-            if (criteria.QualitySide != AutoSelectSide.DontCare)
-            {
-                double q1 = r.first.blockiness + r.first.blurring;
-                double q2 = r.second.blockiness + r.second.blurring;
-
-                AutoSelectSide side = AutoSelectSide.DontCare;
-                if (q1 > q2)
-                    side = AutoSelectSide.First;
-                else if (q2 > q1)
-                    side = AutoSelectSide.Second;
-
-                if (criteria.QualitySide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
-                    side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
-
-                if (firstCriterion) { result = side; firstCriterion = false; }
-                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
-            }
-
-            // Resolution
-            if (criteria.ResolutionSide != AutoSelectSide.DontCare)
-            {
-                long res1 = (long)r.first.width * r.first.height;
-                long res2 = (long)r.second.width * r.second.height;
-
-                AutoSelectSide side = AutoSelectSide.DontCare;
-                if (res1 < res2)
-                    side = AutoSelectSide.First;
-                else if (res2 < res1)
-                    side = AutoSelectSide.Second;
-                else
-                    side = AutoSelectSide.First; // tiebreak: prefer First
-
-                if (criteria.ResolutionSide == AutoSelectSide.Second && side != AutoSelectSide.DontCare)
-                    side = (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
-
-                if (firstCriterion) { result = side; firstCriterion = false; }
-                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
-            }
-
-            // Pool
             if (criteria.PoolSide != AutoSelectSide.DontCare)
             {
-                int pool1 = GetPool(r.first, poolMap);
-                int pool2 = GetPool(r.second, poolMap);
-
-                AutoSelectSide side = AutoSelectSide.DontCare;
-                if (criteria.PoolSide == AutoSelectSide.First)
-                {
-                    if (pool1 == 1) side = AutoSelectSide.First;
-                    else if (pool2 == 1) side = AutoSelectSide.Second;
-                }
-                else if (criteria.PoolSide == AutoSelectSide.Second)
-                {
-                    if (pool1 == 2) side = AutoSelectSide.First;
-                    else if (pool2 == 2) side = AutoSelectSide.Second;
-                }
-
-                if (firstCriterion) { result = side; firstCriterion = false; }
-                else if (side != AutoSelectSide.DontCare && result != side) return AutoSelectSide.DontCare;
+                AutoSelectSide side = PoolMatchSide(r, criteria.PoolSide, poolMap);
+                if (side != AutoSelectSide.DontCare)
+                    return side;
+                // Requested pool matched by neither image → nothing to select.
+                return AutoSelectSide.DontCare;
             }
 
-            return result;
+            // Time tied or no criterion active → select first.
+            return AutoSelectSide.First;
+        }
+
+        private static AutoSelectSide Opposite(AutoSelectSide side)
+        {
+            return (side == AutoSelectSide.First) ? AutoSelectSide.Second : AutoSelectSide.First;
+        }
+
+        private static AutoSelectSide OlderSide(CoreResult r)
+        {
+            if (r.first.time < r.second.time) return AutoSelectSide.First;
+            if (r.second.time < r.first.time) return AutoSelectSide.Second;
+            return AutoSelectSide.DontCare;
+        }
+
+        private static AutoSelectSide SmallerSizeSide(CoreResult r)
+        {
+            if (r.first.size < r.second.size) return AutoSelectSide.First;
+            if (r.second.size < r.first.size) return AutoSelectSide.Second;
+            return AutoSelectSide.DontCare;
+        }
+
+        private static AutoSelectSide WorseQualitySide(CoreResult r)
+        {
+            if (r.first.blockiness < 0 || r.first.blurring < 0 ||
+                r.second.blockiness < 0 || r.second.blurring < 0)
+                return AutoSelectSide.DontCare;
+
+            double q1 = r.first.blockiness + r.first.blurring;
+            double q2 = r.second.blockiness + r.second.blurring;
+            if (q1 > q2) return AutoSelectSide.First;
+            if (q2 > q1) return AutoSelectSide.Second;
+            return AutoSelectSide.DontCare;
+        }
+
+        private static AutoSelectSide LowerResolutionSide(CoreResult r)
+        {
+            long res1 = (long)r.first.width * r.first.height;
+            long res2 = (long)r.second.width * r.second.height;
+            if (res1 < res2) return AutoSelectSide.First;
+            if (res2 < res1) return AutoSelectSide.Second;
+            return AutoSelectSide.DontCare;
+        }
+
+        private static AutoSelectSide PoolMatchSide(CoreResult r, AutoSelectSide requestedPool, Dictionary<string, int> poolMap)
+        {
+            int pool1 = GetPool(r.first, poolMap);
+            int pool2 = GetPool(r.second, poolMap);
+
+            if (requestedPool == AutoSelectSide.First)
+            {
+                if (pool1 == 1) return AutoSelectSide.First;
+                if (pool2 == 1) return AutoSelectSide.Second;
+            }
+            else
+            {
+                if (pool1 == 2) return AutoSelectSide.First;
+                if (pool2 == 2) return AutoSelectSide.Second;
+            }
+            return AutoSelectSide.DontCare;
         }
 
         private static int GetPool(CoreImageInfo image, Dictionary<string, int> poolMap)

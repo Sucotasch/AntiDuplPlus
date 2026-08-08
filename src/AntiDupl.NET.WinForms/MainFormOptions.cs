@@ -70,7 +70,7 @@ namespace AntiDupl.NET.WinForms
         }
 
         public Point location = DefaultLocation();
-        public Size size = new Size(MainForm.MIN_WIDTH, MainForm.MIN_HEIGHT);
+        public Size size = DefaultSize();
         public bool maximized = false;
 
         public MainFormOptions()
@@ -115,17 +115,25 @@ namespace AntiDupl.NET.WinForms
         public void SetDefault()
         {
             location = DefaultLocation();
-            size = new Size(MainForm.MIN_WIDTH, MainForm.MIN_HEIGHT);
+            size = DefaultSize();
             maximized = false;
             m_toolStripView = true;
             m_statusStripView = true;
         }
 
+        static private Size DefaultSize()
+        {
+            Rectangle rect = Screen.PrimaryScreen.WorkingArea;
+            int width = Math.Max(MainForm.MIN_WIDTH, rect.Width * 80 / 100);
+            int height = Math.Max(MainForm.MIN_HEIGHT, rect.Height * 85 / 100);
+            return new Size(width, height);
+        }
+
         static private Point DefaultLocation()
         {
             Rectangle rect = Screen.PrimaryScreen.WorkingArea;
-            int left = (rect.Left + rect.Width - MainForm.MIN_WIDTH)/2;
-            int top = (rect.Top + rect.Height - MainForm.MIN_HEIGHT)/2;
+            int left = (rect.Left + rect.Width - DefaultSize().Width) / 2;
+            int top = (rect.Top + rect.Height - DefaultSize().Height) / 2;
             return new Point(left, top);
         }
     }

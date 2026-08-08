@@ -18,6 +18,7 @@
 #include <wincodec.h>
 #include <nvjpeg.h>
 #include <cuda_runtime.h>
+#include "QualityDetectors.h"
 
 namespace fs = std::filesystem;
 
@@ -44,47 +45,6 @@ static uint32_t SimpleCRC32(const std::wstring& s) {
         }
     }
     return crc ^ 0xFFFFFFFF;
-}
-
-// Blockiness: detecting 8x8 DCT block boundaries
-static double GetBlockinessSimple(const uint8_t* gray, int w, int h) {
-    if (w < 9 || h < 9) return 0.0;
-    uint64_t blockEdgeSum = 0;
-    int blockCount = 0;
-    for (int y = 8; y < h; y += 8) {
-        for (int x = 0; x < w; x++) {
-            int diff = abs((int)gray[y * w + x] - (int)gray[(y - 1) * w + x]);
-            blockEdgeSum += diff;
-            blockCount++;
-        }
-    }
-    for (int x = 8; x < w; x += 8) {
-        for (int y = 0; y < h; y++) {
-            int diff = abs((int)gray[y * w + x] - (int)gray[y * w + (x - 1)]);
-            blockEdgeSum += diff;
-            blockCount++;
-        }
-    }
-    return blockCount > 0 ? (double)blockEdgeSum / blockCount : 0.0;
-}
-
-// Blurring: edge strength via Sobel gradient magnitude
-static double GetBlurringSimple(const uint8_t* gray, int w, int h) {
-    if (w < 3 || h < 3) return 0.0;
-    uint64_t edgeSum = 0;
-    int count = 0;
-    for (int y = 1; y < h - 1; y++) {
-        for (int x = 1; x < w - 1; x++) {
-            int gx = -gray[(y-1)*w + (x-1)] + gray[(y-1)*w + (x+1)]
-                     -2*gray[y*w + (x-1)]     + 2*gray[y*w + (x+1)]
-                     -gray[(y+1)*w + (x-1)] + gray[(y+1)*w + (x+1)];
-            int gy = -gray[(y-1)*w + (x-1)] - 2*gray[(y-1)*w + x] - gray[(y-1)*w + (x+1)]
-                     +gray[(y+1)*w + (x-1)] + 2*gray[(y+1)*w + x] + gray[(y+1)*w + (x+1)];
-            edgeSum += abs(gx) + abs(gy);
-            count++;
-        }
-    }
-    return count > 0 ? (double)edgeSum / count : 0.0;
 }
 
 static std::wstring GenerateAdiFileName(const std::wstring& path, int thumbSize) {
@@ -146,11 +106,6 @@ static void ResizeBilinear(const uint8_t* src, int srcW, int srcH, uint8_t* dst,
             }
         }
     }
-}
-
-static void RgbToGray(const uint8_t* rgb, uint8_t* gray, int w, int h) {
-    for (int i = 0; i < w * h; i++)
-        gray[i] = (uint8_t)(0.299f * rgb[i*3] + 0.587f * rgb[i*3+1] + 0.114f * rgb[i*3+2]);
 }
 
 static bool DecodeWithWIC(const wchar_t* path, std::vector<uint8_t>& outRgb, int& outW, int& outH) {
@@ -354,7 +309,11 @@ static void ProcessDecoded(const std::vector<uint8_t>& rgb, int w, int h, size_t
     std::vector<uint8_t> gray(thumbSize * thumbSize);
     std::vector<uint8_t> thumbRGB(thumbSize * thumbSize * 3);
     ResizeBilinear(rgb.data(), w, h, thumbRGB.data(), thumbSize, thumbSize);
-    RgbToGray(thumbRGB.data(), gray.data(), thumbSize, thumbSize);
+    {
+        ad::TView rgbV(thumbSize, thumbSize, thumbSize * 3, ad::TView::Rgb24, thumbRGB.data());
+        ad::TView grayV(thumbSize, thumbSize, thumbSize, ad::TView::Gray8, gray.data());
+        Simd::RgbToGray(rgbV, grayV);
+    }
 
     ImageInfo info;
     info.path = imageFiles[origIdx].wstring();
@@ -365,9 +324,11 @@ static void ProcessDecoded(const std::vector<uint8_t>& rgb, int w, int h, size_t
     // Compute blockiness/blurring on full-resolution grayscale
     {
         std::vector<uint8_t> fullGray(w * h);
-        RgbToGray(rgb.data(), fullGray.data(), w, h);
-        info.blockiness = GetBlockinessSimple(fullGray.data(), w, h);
-        info.blurring = GetBlurringSimple(fullGray.data(), w, h);
+        ad::TView rgbV(w, h, w * 3, ad::TView::Rgb24, const_cast<uint8_t*>(rgb.data()));
+        ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
+        Simd::RgbToGray(rgbV, grayV);
+        info.blockiness = ad::GetBlockiness(grayV);
+        info.blurring = ad::TBlurringDetector().Detect(grayV);
     }
     info.thumbnail = gray;
     info.crc32c = CalculateCRC32c(gray.data(), gray.size());
@@ -531,6 +492,14 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                 auto decodeStartTime = std::chrono::high_resolution_clock::now();
 
                 // GPU decode JPEG
+                unsigned char* gpuBuf = nullptr; size_t gpuBufSize = 0;
+                auto ensureBuf = [&](size_t needed) {
+                    if (needed <= gpuBufSize) return true;
+                    if (gpuBuf) cudaFree(gpuBuf);
+                    gpuBuf = nullptr;
+                    if (cudaMalloc(&gpuBuf, needed) != cudaSuccess) return false;
+                    gpuBufSize = needed; return true;
+                };
                 for (size_t idx : updJpegIdx) {
                     const auto& fp = toDecode[idx];
                     try {
@@ -546,8 +515,7 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                         if (nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)rawData.data(), (size_t)fileSize, &nComp, &subsamp, widths, heights) != NVJPEG_STATUS_SUCCESS || nComp==0) continue;
                         int srcW = widths[0], srcH = heights[0];
                         size_t imgPitch = ((srcW * 3 + 31) / 32) * 32;
-                        unsigned char* gpuBuf = nullptr;
-                        if (cudaMalloc(&gpuBuf, imgPitch * srcH) != cudaSuccess) continue;
+                        if (!ensureBuf(imgPitch * srcH)) continue;
                         nvjpegImage_t out; out.channel[0] = gpuBuf; out.pitch[0] = (int)imgPitch;
                         const unsigned char* pData = (const unsigned char*)rawData.data();
                         size_t pDataSize = rawData.size();
@@ -556,7 +524,6 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                         cudaDeviceSynchronize();
                         std::vector<uint8_t> rgb(srcW * srcH * 3);
                         cudaMemcpy2D(rgb.data(), srcW * 3, gpuBuf, (int)imgPitch, srcW * 3, srcH, cudaMemcpyDeviceToHost);
-                        cudaFree(gpuBuf);
 
                         // Create ImageInfo for decoded file
                         ImageInfo img;
@@ -568,14 +535,20 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                         // Compute blockiness/blurring on full-resolution grayscale
                         {
                             std::vector<uint8_t> fullGray(srcW * srcH);
-                            RgbToGray(rgb.data(), fullGray.data(), srcW, srcH);
-                            img.blockiness = GetBlockinessSimple(fullGray.data(), srcW, srcH);
-                            img.blurring = GetBlurringSimple(fullGray.data(), srcW, srcH);
+                            ad::TView rgbV(srcW, srcH, srcW * 3, ad::TView::Rgb24, rgb.data());
+                            ad::TView grayV(srcW, srcH, srcW, ad::TView::Gray8, fullGray.data());
+                            Simd::RgbToGray(rgbV, grayV);
+                            img.blockiness = ad::GetBlockiness(grayV);
+                            img.blurring = ad::TBlurringDetector().Detect(grayV);
                         }
                         std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
                         std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
                         ResizeBilinear(rgb.data(), srcW, srcH, thumbRGB.data(), args.thumbSize, args.thumbSize);
-                        RgbToGray(thumbRGB.data(), gray.data(), args.thumbSize, args.thumbSize);
+                        {
+                            ad::TView rgbV(args.thumbSize, args.thumbSize, args.thumbSize * 3, ad::TView::Rgb24, thumbRGB.data());
+                            ad::TView grayV(args.thumbSize, args.thumbSize, args.thumbSize, ad::TView::Gray8, gray.data());
+                            Simd::RgbToGray(rgbV, grayV);
+                        }
                         img.thumbnail = gray;
                         img.crc32c = CalculateCRC32c(gray.data(), gray.size());
                         uint64_t sum = 0, sumSq = 0;
@@ -589,6 +562,8 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                         std::wcout << L"\r[GPU]  " << processed << L"/" << toDecode.size() << L" (" << pct << L"%)" << std::flush;
                     } catch (...) { continue; }
                 }
+                if (gpuBuf) cudaFree(gpuBuf);
+                gpuBuf = nullptr;
 
                 // CPU decode non-JPEG
                 for (size_t idx : updNonJpegIdx) {
@@ -604,14 +579,20 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                     // Compute blockiness/blurring on full-resolution grayscale
                     {
                         std::vector<uint8_t> fullGray(w * h);
-                        RgbToGray(rgb.data(), fullGray.data(), w, h);
-                        img.blockiness = GetBlockinessSimple(fullGray.data(), w, h);
-                        img.blurring = GetBlurringSimple(fullGray.data(), w, h);
+                        ad::TView rgbV(w, h, w * 3, ad::TView::Rgb24, rgb.data());
+                        ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
+                        Simd::RgbToGray(rgbV, grayV);
+                        img.blockiness = ad::GetBlockiness(grayV);
+                        img.blurring = ad::TBlurringDetector().Detect(grayV);
                     }
                     std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
                     std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
                     ResizeBilinear(rgb.data(), w, h, thumbRGB.data(), args.thumbSize, args.thumbSize);
-                    RgbToGray(thumbRGB.data(), gray.data(), args.thumbSize, args.thumbSize);
+                    {
+                        ad::TView rgbV(args.thumbSize, args.thumbSize, args.thumbSize * 3, ad::TView::Rgb24, thumbRGB.data());
+                        ad::TView grayV(args.thumbSize, args.thumbSize, args.thumbSize, ad::TView::Gray8, gray.data());
+                        Simd::RgbToGray(rgbV, grayV);
+                    }
                     img.thumbnail = gray;
                     img.crc32c = CalculateCRC32c(gray.data(), gray.size());
                     uint64_t sum = 0, sumSq = 0;
@@ -753,6 +734,15 @@ int wmain_impl(int argc, wchar_t* argv[]) {
         std::wcout << L"[GPU]  Decoding " << jpegIndices.size() << L" JPEG files..." << std::endl;
         auto decodeStartTime = std::chrono::high_resolution_clock::now();
 
+        unsigned char* gpuBuf = nullptr; size_t gpuBufSize = 0;
+        auto ensureBuf = [&](size_t needed) {
+            if (needed <= gpuBufSize) return true;
+            if (gpuBuf) cudaFree(gpuBuf);
+            gpuBuf = nullptr;
+            if (cudaMalloc(&gpuBuf, needed) != cudaSuccess) return false;
+            gpuBufSize = needed; return true;
+        };
+
         for (size_t i = 0; i < jpegIndices.size(); i++) {
             const auto& fp = imageFiles[jpegIndices[i]];
             try {
@@ -769,9 +759,7 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                 int srcW = widths[0], srcH = heights[0];
 
                 size_t imgPitch = ((srcW * 3 + 31) / 32) * 32;
-                unsigned char* gpuBuf = nullptr;
-                cudaError_t allocErr = cudaMalloc(&gpuBuf, imgPitch * srcH);
-                if (allocErr != cudaSuccess) continue;
+                if (!ensureBuf(imgPitch * srcH)) continue;
 
                 nvjpegImage_t out;
                 out.channel[0] = gpuBuf;
@@ -781,18 +769,18 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                 size_t pDataSize = rawData.size();
 
                 nvjpegStatus_t initS = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, 1, NVJPEG_OUTPUT_RGBI);
-                if (initS != NVJPEG_STATUS_SUCCESS) { cudaFree(gpuBuf); continue; }
+                if (initS != NVJPEG_STATUS_SUCCESS) continue;
                 nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, g_nvjpegState, &pData, &pDataSize, &out, nullptr);
                 cudaError_t cudaErr = cudaDeviceSynchronize();
-                if (decS != NVJPEG_STATUS_SUCCESS || cudaErr != cudaSuccess) { cudaFree(gpuBuf); continue; }
+                if (decS != NVJPEG_STATUS_SUCCESS || cudaErr != cudaSuccess) continue;
 
                 std::vector<uint8_t> rgb(srcW * srcH * 3);
                 cudaMemcpy2D(rgb.data(), srcW * 3, gpuBuf, (int)imgPitch, srcW * 3, srcH, cudaMemcpyDeviceToHost);
-                cudaFree(gpuBuf);
 
                 ProcessDecoded(rgb, srcW, srcH, jpegIndices[i], imageFiles, args.thumbSize, GetFileTime(fp), images, processed, jpegIndices.size(), decodeStartTime);
             } catch (...) { continue; }
         }
+        if (gpuBuf) cudaFree(gpuBuf);
         std::wcout << std::endl;
     }
 
@@ -805,7 +793,11 @@ int wmain_impl(int argc, wchar_t* argv[]) {
             std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
             std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
             ResizeBilinear(rgb.data(), w, h, thumbRGB.data(), args.thumbSize, args.thumbSize);
-            RgbToGray(thumbRGB.data(), gray.data(), args.thumbSize, args.thumbSize);
+            {
+                ad::TView rgbV(args.thumbSize, args.thumbSize, args.thumbSize * 3, ad::TView::Rgb24, thumbRGB.data());
+                ad::TView grayV(args.thumbSize, args.thumbSize, args.thumbSize, ad::TView::Gray8, gray.data());
+                Simd::RgbToGray(rgbV, grayV);
+            }
             ImageInfo info;
             info.path = imageFiles[idx].wstring(); info.size = (uint64_t)fs::file_size(imageFiles[idx]);
             info.time = GetFileTime(imageFiles[idx]); info.hash = 0;
@@ -814,9 +806,11 @@ int wmain_impl(int argc, wchar_t* argv[]) {
             // Compute blockiness/blurring on full-resolution grayscale
             {
                 std::vector<uint8_t> fullGray(w * h);
-                RgbToGray(rgb.data(), fullGray.data(), w, h);
-                info.blockiness = GetBlockinessSimple(fullGray.data(), w, h);
-                info.blurring = GetBlurringSimple(fullGray.data(), w, h);
+                ad::TView rgbV(w, h, w * 3, ad::TView::Rgb24, rgb.data());
+                ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
+                Simd::RgbToGray(rgbV, grayV);
+                info.blockiness = ad::GetBlockiness(grayV);
+                info.blurring = ad::TBlurringDetector().Detect(grayV);
             }
             info.thumbnail = gray; info.crc32c = CalculateCRC32c(gray.data(), gray.size());
             images.push_back(info); processed++;

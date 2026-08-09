@@ -26,8 +26,8 @@
     <UseDebugLibraries Condition="'$(Configuration)'=='Publish'">false</UseDebugLibraries>
   </PropertyGroup>
   <PropertyGroup>
-    <OutDir>$(SolutionDir)\..\..\bin\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)\..\..\obj\$(Configuration)\$(ProjectName)\</IntDir>
+    <OutDir>$(ProjectDir)..\..\bin\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\..\obj\$(Configuration)\$(ProjectName)\</IntDir>
     <LinkIncremental Condition="'$(Configuration)'=='Debug'">true</LinkIncremental>
     <LinkIncremental Condition="'$(Configuration)'=='Release'">false</LinkIncremental>
     <LinkIncremental Condition="'$(Configuration)'=='Publish'">false</LinkIncremental>
@@ -72,7 +72,7 @@
       <AdditionalOptions>/ignore:4221 %(AdditionalOptions)</AdditionalOptions>
     </Lib>
     <BuildLog>
-      <Path>$(SolutionDir)\..\..\..\obj\$(Configuration)\$(ProjectName)\Build.log</Path>
+      <Path>$(ProjectDir)..\..\obj\$(Configuration)\$(ProjectName)\Build.log</Path>
     </BuildLog>
   </ItemDefinitionGroup>
 </Project>

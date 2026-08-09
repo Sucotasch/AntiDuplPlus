@@ -33,14 +33,17 @@ Solution: `src/AntiDupl.sln` (build dependency order matters):
 
 ### Prerequisites
 - Visual Studio 2022 (v143 toolset)
-- CUDA Toolkit 12.8+ (`CUDA 12.8.props` / `.targets`)
+- CUDA Toolkit 13.1 (builds `NvJpegCollector.exe` against `nvjpeg64_13.dll`); 12.8 also installed for `cudart64_12.dll`
 - vcpkg (triplet: `x64-windows-static`) — deps in `src/vcpkg.json`
 - .NET 8.0 SDK
 
 ### Commands
 
 ```bash
-# Full solution (recommended)
+# DEPLOY for testing (recommended - does everything below + copies CUDA deps + verifies)
+cmd\Deploy.cmd
+
+# Full solution (slow, may trigger vcpkg manifest install)
 msbuild src\AntiDupl.sln /p:Configuration=Release /p:Platform=x64
 
 # Single C++ project (VS Developer Command Prompt)
@@ -50,10 +53,19 @@ msbuild src\AntiDupl\AntiDupl.vcxproj /p:Configuration=Release /p:Platform=x64 /
 dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj /p:SolutionDir="src\\" -c Release
 ```
 
+### Deploying for testing (MANDATORY)
+After ANY code change, run **`cmd\Deploy.cmd`** and verify it ends with `[OK] Deploy complete.` before reporting the task done. It:
+1. Builds `AntiDupl.dll` + `NvJpegCollector.exe` (C++) and `AntiDupl.NET.WinForms` (C#).
+2. Copies CUDA runtime deps (`nvjpeg64_13.dll`, `cudart64_13.dll`) next to the exe (they are **not** there by default; `AntiDupl.dll` needs `cudart64_12.dll`).
+3. Runs `cmd/CopyData.cmd` (resources).
+4. Verifies all artifacts exist in `bin/Release/`.
+
+**Rule: a task is NOT done until `cmd\Deploy.cmd` passes.** Test the GUI from `bin/Release/AntiDupl.NET.WinForms.exe` — that is the ONLY folder the GUI runs from and launches `NvJpegCollector.exe` from (`MainMenu.cs` uses `Application.StartupPath`).
+
 ### Configurations & output
 - **Debug|x64**, **Release|x64**, **Publish|x64**
 - NvJpegCollector: **Release only**
-- Output: `bin/<Configuration>/` (shared by C++ and C#)
+- Output: `bin/<Configuration>/` (shared by C++ and C#). All C++ `OutDir`/`IntDir` are `$(ProjectDir)..\..\bin\` — independent of `$(SolutionDir)`, so single-project builds land in the same `bin/` as solution builds.
 - Intermediates: `obj/<Configuration>/<ProjectName>/`
 
 ### Build quirks

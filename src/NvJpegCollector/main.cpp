@@ -11,7 +11,12 @@
 #include <filesystem>
 #include <chrono>
 #include <algorithm>
+#include <deque>
 #include <map>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 #include <limits>
 #include <shlobj.h>
 #include <windows.h>
@@ -90,24 +95,6 @@ static bool ShowFolderDialog(std::wstring& result) {
     return SUCCEEDED(hr) && !result.empty();
 }
 
-static void ResizeBilinear(const uint8_t* src, int srcW, int srcH, uint8_t* dst, int dstW, int dstH) {
-    for (int y = 0; y < dstH; y++) {
-        for (int x = 0; x < dstW; x++) {
-            float srcX = (x + 0.5f) * srcW / dstW - 0.5f;
-            float srcY = (y + 0.5f) * srcH / dstH - 0.5f;
-            if (srcX < 0) srcX = 0; if (srcY < 0) srcY = 0;
-            int x0 = (int)srcX, y0 = (int)srcY;
-            int x1 = (std::min)(x0 + 1, srcW - 1), y1 = (std::min)(y0 + 1, srcH - 1);
-            float fx = srcX - x0, fy = srcY - y0;
-            for (int c = 0; c < 3; c++) {
-                float v = src[y0 * srcW * 3 + x0 * 3 + c] * (1-fx)*(1-fy) + src[y0 * srcW * 3 + x1 * 3 + c] * fx*(1-fy)
-                        + src[y1 * srcW * 3 + x0 * 3 + c] * (1-fx)*fy + src[y1 * srcW * 3 + x1 * 3 + c] * fx*fy;
-                dst[y * dstW * 3 + x * 3 + c] = (uint8_t)v;
-            }
-        }
-    }
-}
-
 static bool DecodeWithWIC(const wchar_t* path, std::vector<uint8_t>& outRgb, int& outW, int& outH) {
     IWICImagingFactory* pFactory = nullptr;
     HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFactory));
@@ -156,18 +143,23 @@ static uint8_t GetImageType(const std::wstring& ext) {
 
 struct Arguments {
     std::wstring inputPath, outputPath, databaseName;
-    int thumbSize=32, batchSize=64; bool help=false, update=false;
+    int thumbSize=32, batchSize=64, workers=0; bool help=false, update=false;
 };
 
 Arguments ParseArguments(int argc, wchar_t* argv[]) {
     Arguments args;
+    auto parseInt = [&](const std::wstring& v, int def)->int {
+        try { return std::stoi(v); }
+        catch (...) { return def; }
+    };
     for (int i=1; i<argc; i++) {
         std::wstring arg = argv[i];
         if ((arg==L"--input"||arg==L"-i")&&i+1<argc) args.inputPath=argv[++i];
         else if ((arg==L"--output"||arg==L"-o")&&i+1<argc) args.outputPath=argv[++i];
         else if ((arg==L"--name"||arg==L"-n")&&i+1<argc) args.databaseName=argv[++i];
-        else if ((arg==L"--size"||arg==L"-s")&&i+1<argc) args.thumbSize=std::stoi(argv[++i]);
-        else if ((arg==L"--batch"||arg==L"-b")&&i+1<argc) args.batchSize=std::stoi(argv[++i]);
+        else if ((arg==L"--size"||arg==L"-s")&&i+1<argc) args.thumbSize=parseInt(argv[++i], args.thumbSize);
+        else if ((arg==L"--batch"||arg==L"-b")&&i+1<argc) args.batchSize=parseInt(argv[++i], args.batchSize);
+        else if ((arg==L"--workers"||arg==L"-w")&&i+1<argc) args.workers=parseInt(argv[++i], 0);
         else if (arg==L"--update"||arg==L"-u") args.update=true;
         else if (arg==L"--help"||arg==L"-h") args.help=true;
     }
@@ -182,6 +174,7 @@ void PrintHelp() {
     std::wcout << L"  --name, -n        Database name (default: last folder name)\n";
     std::wcout << L"  --size, -s        Thumbnail size (default: 32)\n";
     std::wcout << L"  --batch, -b       Batch size for nvJPEG (default: 64)\n";
+    std::wcout << L"  --workers, -w     CPU worker threads for analysis (default: auto = physical cores - 1)\n";
     std::wcout << L"  --update, -u      Update existing database (incremental: add new, remove deleted)\n";
     std::wcout << L"\nSupported: JPEG/JPG/JFIF (GPU), PNG, BMP, TIFF, WebP, GIF (CPU via WIC)\n";
 }
@@ -198,6 +191,9 @@ bool InitNvJpeg() {
     status = nvjpegJpegStateCreate(g_nvjpegHandle, &g_nvjpegState);
     if (status != NVJPEG_STATUS_SUCCESS) return false;
     cudaStreamCreate(&g_stream);
+    // Configure batched decode once (batch=1 per DEV guide; output luma-only Y plane)
+    status = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, 1, NVJPEG_OUTPUT_Y);
+    if (status != NVJPEG_STATUS_SUCCESS) return false;
     return true;
 }
 
@@ -300,64 +296,231 @@ static bool LoadExistingDatabase(const std::wstring& dbFolder, int expectedThumb
     return true;
 }
 
-// Helper: process decoded image
-static void ProcessDecoded(const std::vector<uint8_t>& rgb, int w, int h, size_t origIdx,
-    const std::vector<fs::path>& imageFiles, int thumbSize, uint64_t fileTime,
-    std::vector<ImageInfo>& images, int& processed, size_t totalJpeg,
-    std::chrono::high_resolution_clock::time_point decodeStartTime)
-{
-    std::vector<uint8_t> gray(thumbSize * thumbSize);
-    std::vector<uint8_t> thumbRGB(thumbSize * thumbSize * 3);
-    ResizeBilinear(rgb.data(), w, h, thumbRGB.data(), thumbSize, thumbSize);
-    {
-        ad::TView rgbV(thumbSize, thumbSize, thumbSize * 3, ad::TView::Rgb24, thumbRGB.data());
-        ad::TView grayV(thumbSize, thumbSize, thumbSize, ad::TView::Gray8, gray.data());
-        Simd::RgbToGray(rgbV, grayV);
-    }
-
+// Helper: process a full-resolution grayscale image into ImageInfo (matches DLL TDataCollector::FillPixelData)
+static ImageInfo ProcessGray(const uint8_t* gray, int w, int h, const fs::path& path, int thumbSize) {
     ImageInfo info;
-    info.path = imageFiles[origIdx].wstring();
-    info.size = (uint64_t)fs::file_size(imageFiles[origIdx]);
-    info.time = fileTime; info.hash = 0;
-    info.type = GetImageType(imageFiles[origIdx].extension().wstring());
+    info.path = path.wstring();
+    info.size = (uint64_t)fs::file_size(path);
+    info.time = GetFileTime(path); info.hash = 0;
+    info.type = GetImageType(path.extension().wstring());
     info.width = w; info.height = h;
     // Compute blockiness/blurring on full-resolution grayscale
     {
-        std::vector<uint8_t> fullGray(w * h);
-        ad::TView rgbV(w, h, w * 3, ad::TView::Rgb24, const_cast<uint8_t*>(rgb.data()));
-        ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
-        Simd::RgbToGray(rgbV, grayV);
+        ad::TView grayV(w, h, w, ad::TView::Gray8, const_cast<uint8_t*>(gray));
         info.blockiness = ad::GetBlockiness(grayV);
         info.blurring = ad::TBlurringDetector().Detect(grayV);
     }
-    info.thumbnail = gray;
-    info.crc32c = CalculateCRC32c(gray.data(), gray.size());
+    // Thumbnail via SIMD bilinear resize (gray -> gray), same as DLL
+    std::vector<uint8_t> thumb(thumbSize * thumbSize);
+    {
+        ad::TView srcV(w, h, w, ad::TView::Gray8, const_cast<uint8_t*>(gray));
+        ad::TView dstV(thumbSize, thumbSize, thumbSize, ad::TView::Gray8, thumb.data());
+        Simd::Resize(srcV, dstV);
+    }
+    info.thumbnail = std::move(thumb);
+    info.crc32c = CalculateCRC32c(info.thumbnail.data(), info.thumbnail.size());
 
     // Рассчитываем SSIM-статистику здесь, чтобы устранить гонку потоков при сравнении
     {
         uint64_t sum = 0, sumSq = 0;
         for (int i = 0; i < thumbSize * thumbSize; i++) {
-            sum += gray[i];
-            sumSq += (uint64_t)gray[i] * gray[i];
+            sum += info.thumbnail[i];
+            sumSq += (uint64_t)info.thumbnail[i] * info.thumbnail[i];
         }
         info.average = (float)sum / (thumbSize * thumbSize);
         float avgSq = (float)sumSq / (thumbSize * thumbSize);
         info.varianceSquare = fabs(avgSq - (info.average * info.average));
     }
-
-    images.push_back(info); processed++;
-
-    int pct = (int)((processed) * 100 / totalJpeg);
-    auto elapsed = std::chrono::high_resolution_clock::now() - decodeStartTime;
-    double speed = processed / (std::chrono::duration<double>(elapsed).count() + 0.001);
-    std::wcout << L"\r[GPU]  " << processed << L"/" << totalJpeg << L" (" << pct << L"%) | " << (int)speed << L" img/sec" << std::flush;
+    return info;
 }
+
+// Per-file GPU decode slot (double-buffered: GPU decodes next while CPU analyzes current)
+struct JpegSlot {
+    std::vector<char> raw;
+    unsigned char* gpu = nullptr;
+    size_t gpuCap = 0;
+    std::vector<uint8_t> gray;
+    cudaEvent_t done = nullptr;
+    int w = 0, h = 0;
+    fs::path path;
+};
+
+static bool JpegSlotEnsure(JpegSlot& s, size_t needed) {
+    if (s.gpuCap >= needed) return true;
+    if (s.gpu) cudaFree(s.gpu);
+    s.gpu = nullptr; s.gpuCap = 0;
+    if (cudaMalloc(&s.gpu, needed) != cudaSuccess) return false;
+    s.gpuCap = needed;
+    return true;
+}
+
+// Detect physical core count (fallback: assume Hyper-Threading -> logical/2)
+static int DetectPhysicalCores() {
+    DWORD len = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, NULL, &len);
+    if (len == 0) return (std::max)(1, (int)std::thread::hardware_concurrency() / 2);
+    std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX> buf(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) + 2);
+    if (!GetLogicalProcessorInformationEx(RelationProcessorCore, buf.data(), &len)) {
+        return (std::max)(1, (int)std::thread::hardware_concurrency() / 2);
+    }
+    int cores = 0;
+    DWORD off = 0;
+    while (off + sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX) <= len) {
+        auto* info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(reinterpret_cast<char*>(buf.data()) + off);
+        if (info->Relationship == RelationProcessorCore) cores++;
+        off += info->Size;
+    }
+    return (std::max)(1, cores);
+}
+
+// Resolve worker count: explicit arg wins (clamped to logical-1), else physical-1
+static int ResolveWorkers(int requested) {
+    int logical = (int)std::thread::hardware_concurrency();
+    if (logical <= 1) return 1;
+    int workers = requested > 0 ? requested : (DetectPhysicalCores() - 1);
+    workers = (std::max)(1, (std::min)(workers, logical - 1));
+    return workers;
+}
+
+// Decode a list of JPEG files with GPU<->CPU overlap (async D2H + events on g_stream).
+// Producer (this thread) decodes on GPU; worker threads run the CPU analysis.
+static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files, int thumbSize, int workers) {
+    std::vector<ImageInfo> result;
+    result.reserve(files.size());
+    if (files.empty()) return result;
+
+    const int nWorkers = ResolveWorkers(workers);
+    const int kSlots = (std::max)(2, (std::min)(nWorkers + 2, 8));
+    std::vector<JpegSlot> slots(kSlots);
+    for (auto& s : slots) cudaEventCreateWithFlags(&s.done, cudaEventDisableTiming);
+
+    std::mutex mtx;
+    std::condition_variable cvFree, cvReady;
+    std::deque<int> freeQ, readyQ;
+    for (int i = 0; i < kSlots; i++) freeQ.push_back(i);
+
+    std::vector<ImageInfo> out;
+    std::mutex outMtx;
+    std::atomic<int> issued{0}, completed{0};
+    bool stop = false;
+
+    auto decodeStartTime = std::chrono::high_resolution_clock::now();
+
+    auto decodeOne = [&](int slotIdx, const fs::path& fp) -> bool {
+        JpegSlot& cur = slots[slotIdx];
+        try {
+            std::ifstream file(fp, std::ios::binary | std::ios::ate);
+            if (!file.is_open()) return false;
+            std::streamsize fileSize = file.tellg();
+            file.seekg(0, std::ios::beg);
+            cur.raw.resize((size_t)fileSize);
+            file.read(cur.raw.data(), fileSize);
+
+            int nComp = 0, widths[NVJPEG_MAX_COMPONENT], heights[NVJPEG_MAX_COMPONENT];
+            nvjpegChromaSubsampling_t subsamp;
+            if (nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)cur.raw.data(), cur.raw.size(), &nComp, &subsamp, widths, heights) != NVJPEG_STATUS_SUCCESS || nComp == 0) return false;
+            int srcW = widths[0], srcH = heights[0];
+
+            size_t imgPitch = ((srcW + 31) / 32) * 32;
+            if (!JpegSlotEnsure(cur, imgPitch * srcH)) return false;
+            cur.gray.resize((size_t)srcW * srcH);
+            cur.w = srcW; cur.h = srcH; cur.path = fp;
+
+            nvjpegImage_t outImg;
+            outImg.channel[0] = cur.gpu;
+            outImg.pitch[0] = (int)imgPitch;
+            const unsigned char* pData = (const unsigned char*)cur.raw.data();
+            size_t pDataSize = cur.raw.size();
+
+            nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, g_nvjpegState, &pData, &pDataSize, &outImg, g_stream);
+            if (decS != NVJPEG_STATUS_SUCCESS) return false;
+            cudaMemcpy2DAsync(cur.gray.data(), srcW, cur.gpu, (int)imgPitch, srcW, srcH, cudaMemcpyDeviceToHost, g_stream);
+            cudaEventRecord(cur.done, g_stream);
+            return true;
+        } catch (...) { return false; }
+    };
+
+    // Worker threads: CPU analysis of decoded gray buffers
+    std::vector<std::thread> threads;
+    threads.reserve(nWorkers);
+    for (int t = 0; t < nWorkers; t++) {
+        threads.emplace_back([&]() {
+            for (;;) {
+                int sid;
+                {
+                    std::unique_lock<std::mutex> lk(mtx);
+                    cvReady.wait(lk, [&]{ return stop || !readyQ.empty(); });
+                    if (readyQ.empty()) return;   // stop and drained
+                    sid = readyQ.front(); readyQ.pop_front();
+                }
+                JpegSlot& s = slots[sid];
+                cudaEventSynchronize(s.done);
+                ImageInfo info = ProcessGray(s.gray.data(), s.w, s.h, s.path, thumbSize);
+                {
+                    std::lock_guard<std::mutex> lk(outMtx);
+                    out.push_back(std::move(info));
+                }
+                completed++;
+                {
+                    std::lock_guard<std::mutex> lk(mtx);
+                    freeQ.push_back(sid);
+                }
+                cvFree.notify_one();
+            }
+        });
+    }
+
+    // Producer: this thread reads files and issues async GPU decodes
+    for (size_t i = 0; i < files.size(); i++) {
+        int sid;
+        {
+            std::unique_lock<std::mutex> lk(mtx);
+            cvFree.wait(lk, [&]{ return !freeQ.empty(); });
+            sid = freeQ.front(); freeQ.pop_front();
+        }
+        if (decodeOne(sid, files[i])) {
+            issued++;
+            {
+                std::lock_guard<std::mutex> lk(mtx);
+                readyQ.push_back(sid);
+            }
+            cvReady.notify_one();
+        } else {
+            {
+                std::lock_guard<std::mutex> lk(mtx);
+                freeQ.push_back(sid);
+            }
+            cvFree.notify_one();
+        }
+
+        int pct = (int)(issued.load() * 100 / files.size());
+        auto elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - decodeStartTime).count();
+        double speed = issued.load() / (elapsed + 0.001);
+        std::wcout << L"\r[GPU]  " << issued.load() << L"/" << files.size() << L" (" << pct << L"%) | " << (int)speed << L" img/sec" << std::flush;
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(mtx);
+        stop = true;
+    }
+    cvReady.notify_all();
+    for (auto& th : threads) th.join();
+
+    {
+        std::lock_guard<std::mutex> lk(outMtx);
+        result = std::move(out);
+    }
+
+    for (auto& s : slots) { if (s.done) cudaEventDestroy(s.done); if (s.gpu) cudaFree(s.gpu); }
+    return result;
+}
+
 
 int wmain_impl(int argc, wchar_t* argv[]) {
     Arguments args = ParseArguments(argc, argv);
     if (args.help) { PrintHelp(); PauseAndExit(); return 0; }
 
-    std::wcout << L"=== NvJpegCollector v2 (GPU RGBI, subfolder support) ===" << std::endl;
+    std::wcout << L"=== NvJpegCollector v2 (GPU Y, async, worker pool) ===" << std::endl;
     if (args.inputPath.empty()) {
         std::wcout << L"=== NvJpegCollector ===" << std::endl;
         std::wcout << L"No input path. Opening folder selector..." << std::endl;
@@ -489,120 +652,33 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                 }
 
                 int processed = 0;
-                auto decodeStartTime = std::chrono::high_resolution_clock::now();
 
-                // GPU decode JPEG
-                unsigned char* gpuBuf = nullptr; size_t gpuBufSize = 0;
-                auto ensureBuf = [&](size_t needed) {
-                    if (needed <= gpuBufSize) return true;
-                    if (gpuBuf) cudaFree(gpuBuf);
-                    gpuBuf = nullptr;
-                    if (cudaMalloc(&gpuBuf, needed) != cudaSuccess) return false;
-                    gpuBufSize = needed; return true;
-                };
-                for (size_t idx : updJpegIdx) {
-                    const auto& fp = toDecode[idx];
-                    try {
-                        std::ifstream file(fp, std::ios::binary | std::ios::ate);
-                        if (!file.is_open()) continue;
-                        std::streamsize fileSize = file.tellg();
-                        file.seekg(0, std::ios::beg);
-                        std::vector<char> rawData((size_t)fileSize);
-                        file.read(rawData.data(), fileSize);
-
-                        int nComp=0, widths[NVJPEG_MAX_COMPONENT], heights[NVJPEG_MAX_COMPONENT];
-                        nvjpegChromaSubsampling_t subsamp;
-                        if (nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)rawData.data(), (size_t)fileSize, &nComp, &subsamp, widths, heights) != NVJPEG_STATUS_SUCCESS || nComp==0) continue;
-                        int srcW = widths[0], srcH = heights[0];
-                        size_t imgPitch = ((srcW * 3 + 31) / 32) * 32;
-                        if (!ensureBuf(imgPitch * srcH)) continue;
-                        nvjpegImage_t out; out.channel[0] = gpuBuf; out.pitch[0] = (int)imgPitch;
-                        const unsigned char* pData = (const unsigned char*)rawData.data();
-                        size_t pDataSize = rawData.size();
-                        nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, 1, NVJPEG_OUTPUT_RGBI);
-                        nvjpegDecodeBatched(g_nvjpegHandle, g_nvjpegState, &pData, &pDataSize, &out, nullptr);
-                        cudaDeviceSynchronize();
-                        std::vector<uint8_t> rgb(srcW * srcH * 3);
-                        cudaMemcpy2D(rgb.data(), srcW * 3, gpuBuf, (int)imgPitch, srcW * 3, srcH, cudaMemcpyDeviceToHost);
-
-                        // Create ImageInfo for decoded file
-                        ImageInfo img;
-                        img.path = fp.wstring();
-                        img.size = (uint64_t)fs::file_size(fp);
-                        img.time = GetFileTime(fp); img.hash = 0;
-                        img.type = GetImageType(fp.extension().wstring());
-                        img.width = srcW; img.height = srcH;
-                        // Compute blockiness/blurring on full-resolution grayscale
-                        {
-                            std::vector<uint8_t> fullGray(srcW * srcH);
-                            ad::TView rgbV(srcW, srcH, srcW * 3, ad::TView::Rgb24, rgb.data());
-                            ad::TView grayV(srcW, srcH, srcW, ad::TView::Gray8, fullGray.data());
-                            Simd::RgbToGray(rgbV, grayV);
-                            img.blockiness = ad::GetBlockiness(grayV);
-                            img.blurring = ad::TBlurringDetector().Detect(grayV);
-                        }
-                        std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
-                        std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
-                        ResizeBilinear(rgb.data(), srcW, srcH, thumbRGB.data(), args.thumbSize, args.thumbSize);
-                        {
-                            ad::TView rgbV(args.thumbSize, args.thumbSize, args.thumbSize * 3, ad::TView::Rgb24, thumbRGB.data());
-                            ad::TView grayV(args.thumbSize, args.thumbSize, args.thumbSize, ad::TView::Gray8, gray.data());
-                            Simd::RgbToGray(rgbV, grayV);
-                        }
-                        img.thumbnail = gray;
-                        img.crc32c = CalculateCRC32c(gray.data(), gray.size());
-                        uint64_t sum = 0, sumSq = 0;
-                        for (int p = 0; p < args.thumbSize * args.thumbSize; p++) { sum += gray[p]; sumSq += (uint64_t)gray[p] * gray[p]; }
-                        img.average = (float)sum / (args.thumbSize * args.thumbSize);
-                        float avgSq = (float)sumSq / (args.thumbSize * args.thumbSize);
-                        img.varianceSquare = fabs(avgSq - (img.average * img.average));
-                        images.push_back(img);
-                        processed++;
-                        int pct = (int)(processed * 100 / toDecode.size());
-                        std::wcout << L"\r[GPU]  " << processed << L"/" << toDecode.size() << L" (" << pct << L"%)" << std::flush;
-                    } catch (...) { continue; }
+                // GPU decode JPEG (async double-buffered)
+                {
+                    std::vector<fs::path> updJpegPaths;
+                    updJpegPaths.reserve(updJpegIdx.size());
+                    for (size_t idx : updJpegIdx) updJpegPaths.push_back(toDecode[idx]);
+                    std::vector<ImageInfo> updJpegImages = ProcessJpegList(updJpegPaths, args.thumbSize, args.workers);
+                    images.insert(images.end(), updJpegImages.begin(), updJpegImages.end());
+                    processed += (int)updJpegImages.size();
                 }
-                if (gpuBuf) cudaFree(gpuBuf);
-                gpuBuf = nullptr;
 
                 // CPU decode non-JPEG
                 for (size_t idx : updNonJpegIdx) {
                     const auto& fp = toDecode[idx];
                     std::vector<uint8_t> rgb; int w=0, h=0;
                     if (!DecodeWithWIC(fp.c_str(), rgb, w, h)) continue;
-                    ImageInfo img;
-                    img.path = fp.wstring();
-                    img.size = (uint64_t)fs::file_size(fp);
-                    img.time = GetFileTime(fp); img.hash = 0;
-                    img.type = GetImageType(fp.extension().wstring());
-                    img.width = w; img.height = h;
-                    // Compute blockiness/blurring on full-resolution grayscale
+                    std::vector<uint8_t> fullGray(w * h);
                     {
-                        std::vector<uint8_t> fullGray(w * h);
                         ad::TView rgbV(w, h, w * 3, ad::TView::Rgb24, rgb.data());
                         ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
                         Simd::RgbToGray(rgbV, grayV);
-                        img.blockiness = ad::GetBlockiness(grayV);
-                        img.blurring = ad::TBlurringDetector().Detect(grayV);
                     }
-                    std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
-                    std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
-                    ResizeBilinear(rgb.data(), w, h, thumbRGB.data(), args.thumbSize, args.thumbSize);
-                    {
-                        ad::TView rgbV(args.thumbSize, args.thumbSize, args.thumbSize * 3, ad::TView::Rgb24, thumbRGB.data());
-                        ad::TView grayV(args.thumbSize, args.thumbSize, args.thumbSize, ad::TView::Gray8, gray.data());
-                        Simd::RgbToGray(rgbV, grayV);
-                    }
-                    img.thumbnail = gray;
-                    img.crc32c = CalculateCRC32c(gray.data(), gray.size());
-                    uint64_t sum = 0, sumSq = 0;
-                    for (int p = 0; p < args.thumbSize * args.thumbSize; p++) { sum += gray[p]; sumSq += (uint64_t)gray[p] * gray[p]; }
-                    img.average = (float)sum / (args.thumbSize * args.thumbSize);
-                    float avgSq = (float)sumSq / (args.thumbSize * args.thumbSize);
-                    img.varianceSquare = fabs(avgSq - (img.average * img.average));
+                    ImageInfo img = ProcessGray(fullGray.data(), w, h, fp, args.thumbSize);
                     images.push_back(img);
                     processed++;
                 }
+
 
                 std::wcout << std::endl << L"[UPDATE] Decoded " << processed << L" files." << std::endl;
 
@@ -729,58 +805,16 @@ int wmain_impl(int argc, wchar_t* argv[]) {
     auto startTime = std::chrono::high_resolution_clock::now();
     int processed = 0;
 
-    // ========== JPEG via nvJPEG (GPU, per-file) ==========
+    // ========== JPEG via nvJPEG (GPU, async double-buffered) ==========
     if (!jpegIndices.empty()) {
         std::wcout << L"[GPU]  Decoding " << jpegIndices.size() << L" JPEG files..." << std::endl;
-        auto decodeStartTime = std::chrono::high_resolution_clock::now();
-
-        unsigned char* gpuBuf = nullptr; size_t gpuBufSize = 0;
-        auto ensureBuf = [&](size_t needed) {
-            if (needed <= gpuBufSize) return true;
-            if (gpuBuf) cudaFree(gpuBuf);
-            gpuBuf = nullptr;
-            if (cudaMalloc(&gpuBuf, needed) != cudaSuccess) return false;
-            gpuBufSize = needed; return true;
-        };
-
-        for (size_t i = 0; i < jpegIndices.size(); i++) {
-            const auto& fp = imageFiles[jpegIndices[i]];
-            try {
-                std::ifstream file(fp, std::ios::binary | std::ios::ate);
-                if (!file.is_open()) continue;
-                std::streamsize fileSize = file.tellg();
-                file.seekg(0, std::ios::beg);
-                std::vector<char> rawData((size_t)fileSize);
-                file.read(rawData.data(), fileSize);
-
-                int nComp=0, widths[NVJPEG_MAX_COMPONENT], heights[NVJPEG_MAX_COMPONENT];
-                nvjpegChromaSubsampling_t subsamp;
-                if (nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)rawData.data(), (size_t)fileSize, &nComp, &subsamp, widths, heights) != NVJPEG_STATUS_SUCCESS || nComp==0) continue;
-                int srcW = widths[0], srcH = heights[0];
-
-                size_t imgPitch = ((srcW * 3 + 31) / 32) * 32;
-                if (!ensureBuf(imgPitch * srcH)) continue;
-
-                nvjpegImage_t out;
-                out.channel[0] = gpuBuf;
-                out.pitch[0] = (int)imgPitch;
-
-                const unsigned char* pData = (const unsigned char*)rawData.data();
-                size_t pDataSize = rawData.size();
-
-                nvjpegStatus_t initS = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, 1, NVJPEG_OUTPUT_RGBI);
-                if (initS != NVJPEG_STATUS_SUCCESS) continue;
-                nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, g_nvjpegState, &pData, &pDataSize, &out, nullptr);
-                cudaError_t cudaErr = cudaDeviceSynchronize();
-                if (decS != NVJPEG_STATUS_SUCCESS || cudaErr != cudaSuccess) continue;
-
-                std::vector<uint8_t> rgb(srcW * srcH * 3);
-                cudaMemcpy2D(rgb.data(), srcW * 3, gpuBuf, (int)imgPitch, srcW * 3, srcH, cudaMemcpyDeviceToHost);
-
-                ProcessDecoded(rgb, srcW, srcH, jpegIndices[i], imageFiles, args.thumbSize, GetFileTime(fp), images, processed, jpegIndices.size(), decodeStartTime);
-            } catch (...) { continue; }
-        }
-        if (gpuBuf) cudaFree(gpuBuf);
+        std::vector<fs::path> jpegPaths;
+        jpegPaths.reserve(jpegIndices.size());
+        for (size_t i = 0; i < jpegIndices.size(); i++)
+            jpegPaths.push_back(imageFiles[jpegIndices[i]]);
+        std::vector<ImageInfo> jpegImages = ProcessJpegList(jpegPaths, args.thumbSize, args.workers);
+        images.insert(images.end(), jpegImages.begin(), jpegImages.end());
+        processed += (int)jpegImages.size();
         std::wcout << std::endl;
     }
 
@@ -790,35 +824,23 @@ int wmain_impl(int argc, wchar_t* argv[]) {
         for (size_t idx : nonJpegIndices) {
             std::vector<uint8_t> rgb; int w=0, h=0;
             if (!DecodeWithWIC(imageFiles[idx].c_str(), rgb, w, h)) continue;
-            std::vector<uint8_t> gray(args.thumbSize * args.thumbSize);
-            std::vector<uint8_t> thumbRGB(args.thumbSize * args.thumbSize * 3);
-            ResizeBilinear(rgb.data(), w, h, thumbRGB.data(), args.thumbSize, args.thumbSize);
+            std::vector<uint8_t> fullGray(w * h);
             {
-                ad::TView rgbV(args.thumbSize, args.thumbSize, args.thumbSize * 3, ad::TView::Rgb24, thumbRGB.data());
-                ad::TView grayV(args.thumbSize, args.thumbSize, args.thumbSize, ad::TView::Gray8, gray.data());
-                Simd::RgbToGray(rgbV, grayV);
-            }
-            ImageInfo info;
-            info.path = imageFiles[idx].wstring(); info.size = (uint64_t)fs::file_size(imageFiles[idx]);
-            info.time = GetFileTime(imageFiles[idx]); info.hash = 0;
-            info.type = GetImageType(imageFiles[idx].extension().wstring());
-            info.width = w; info.height = h;
-            // Compute blockiness/blurring on full-resolution grayscale
-            {
-                std::vector<uint8_t> fullGray(w * h);
                 ad::TView rgbV(w, h, w * 3, ad::TView::Rgb24, rgb.data());
                 ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
                 Simd::RgbToGray(rgbV, grayV);
-                info.blockiness = ad::GetBlockiness(grayV);
-                info.blurring = ad::TBlurringDetector().Detect(grayV);
             }
-            info.thumbnail = gray; info.crc32c = CalculateCRC32c(gray.data(), gray.size());
+            ImageInfo info = ProcessGray(fullGray.data(), w, h, imageFiles[idx], args.thumbSize);
             images.push_back(info); processed++;
         }
     }
 
+
     // ========== Save (AntiDupl-compatible index.adi + 0000.adi format) ==========
     std::wcout << std::endl << L"[SAVE] Writing database..." << std::endl;
+
+    // Worker threads produce results out of order -> sort by path for deterministic output
+    std::sort(images.begin(), images.end(), [](const ImageInfo& a, const ImageInfo& b) { return a.path < b.path; });
 
     // Helper: write string in AntiDupl format (count(8) + wchar_t[count]*2)
     auto writeStr = [&](FILE* f, const std::wstring& s) {

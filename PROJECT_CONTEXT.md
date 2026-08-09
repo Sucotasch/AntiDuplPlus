@@ -161,10 +161,21 @@ NvJpegCollector записывает `hash=0` для всех изображен
 ---
 
 ## Оборудование (dev)
+- OS: Windows 10
+- CPU: Intel i7-5820K (6 cores / 12 threads)
+- RAM: 64 GB
 - GPU: NVIDIA RTX 4070 Ti Super 16GB (Ada Lovelace, SM 8.9)
-- CUDA: 12.8
-- RAM: 64GB
+- CUDA: 13.1 (collector links `nvjpeg64_13.dll`); 12.8 also installed for `cudart64_12.dll` (needed by `AntiDupl.dll`)
 - NVJPEG_BACKEND_DEFAULT (software decoder on GPU)
+
+## Деплой для тестирования (обязательно после любых изменений)
+- Запускать `cmd\Deploy.cmd` — собирает C++ (AntiDupl.dll + NvJpegCollector.exe) и C# (WinForms), копирует CUDA-зависимости (`nvjpeg64_13.dll`, `cudart64_13.dll`) и resources, проверяет артефакты.
+- GUI тестировать ТОЛЬКО из `bin\Release\AntiDupl.NET.WinForms.exe` (GUI запускает `NvJpegCollector.exe` из `Application.StartupPath`).
+- Задача не считается готовой, пока `Deploy.cmd` не завершился строкой `[OK] Deploy complete.`
+
+## Заметки по сборке (актуально 09.08.2026)
+- C++ `OutDir`/`IntDir` = `$(ProjectDir)..\..\bin\` / `$(ProjectDir)..\..\obj\` — не зависят от `$(SolutionDir)`, поэтому одиночная сборка vcxproj и сборка через sln дают один и тот же `bin\<Config>\`.
+- Старые копии `NvJpegCollector.exe` в `src\bin\Release\` и `src\AntiDupl.NET.WinForms\bin\Release\` устарели — использовать только корневой `bin\Release\`.
 
 ---
 
@@ -173,14 +184,12 @@ NvJpegCollector записывает `hash=0` для всех изображен
 ### Пошаговая инструкция
 
 1. Обновить version в src/version.txt
-2. Собрать C++ проект: msbuild src\AntiDupl\AntiDupl.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VcpkgManifestInstall=false
-3. Скопировать AntiDupl.dll: Copy-Item src\bin\Release\AntiDupl.dll bin\Release\AntiDupl.dll -Force
-4. Собрать C#: dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release
-5. Скопировать C# output: Copy-Item src\AntiDupl.NET.WinForms\bin\Release\AntiDupl.NET.WinForms.exe bin\Release\ -Force
-6. Self-contained publish: dotnet publish src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release -r win-x64 --self-contained true -o out/publish
-7. Добавить native deps: скопировать AntiDupl.dll, nvjpeg64_12.dll, cudart64_12.dll, NvJpegCollector.exe, data/ в out/publish
-8. Zip: cd out/publish && 7za a -tzip ..\bin\AntiDupl.NET-{VER}.zip *
-9. GitHub: git tag + gh release create --repo Sucotasch/AntiDuplPlus
+2. Собрать C++ проекты: cmd\Deploy.cmd (или msbuild src\AntiDupl.sln /p:Configuration=Release /p:Platform=x64) — теперь exe/dll падают прямо в bin\Release, отдельно копировать не нужно
+3. Собрать C#: dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release
+4. Self-contained publish: dotnet publish src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release -r win-x64 --self-contained true -o out/publish
+5. Добавить native deps: скопировать AntiDupl.dll, nvjpeg64_13.dll, cudart64_13.dll, NvJpegCollector.exe, data/ в out/publish (nvjpeg64_12.dll более не требуется, т.к. collector линкуется против 13.x)
+6. Zip: cd out/publish && 7za a -tzip ..\bin\AntiDupl.NET-{VER}.zip *
+7. GitHub: git tag + gh release create --repo Sucotasch/AntiDuplPlus
 
 ### Критические замечания
 - dotnet publish НЕ копирует native P/Invoke DLL (AntiDupl.dll) - копировать вручную

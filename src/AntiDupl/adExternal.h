@@ -32,7 +32,7 @@
 #ifndef __adExternal_h__
 #define __adExternal_h__
 
-#define AD_VERSION "2.5.1"
+#define AD_VERSION "2.5.2"
 
 #endif//__adExternal_h__
 

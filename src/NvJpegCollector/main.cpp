@@ -1,4 +1,4 @@
-/*
+﻿/*
 * NvJpegCollector - GPU-accelerated image pre-processing utility for AntiDuplPlus.
 * Decodes JPEG via nvJPEG (GPU) and other formats via WIC (CPU).
 */
@@ -183,6 +183,8 @@ static nvjpegHandle_t g_nvjpegHandle = nullptr;
 static nvjpegJpegState_t g_nvjpegState = nullptr;
 static cudaStream_t g_stream = nullptr;
 
+static int DetectPhysicalCores();
+
 bool InitNvJpeg() {
     nvjpegDevAllocator_t dev_alloc = { [](void** p, size_t s)->int { return (int)cudaMalloc(p,s); }, [](void* p)->int { return (int)cudaFree(p); } };
     nvjpegPinnedAllocator_t pinned_alloc = { [](void** p, size_t s, unsigned int)->int { return (int)cudaHostAlloc(p,s,cudaHostAllocDefault); }, [](void* p)->int { return (int)cudaFreeHost(p); } };
@@ -191,8 +193,9 @@ bool InitNvJpeg() {
     status = nvjpegJpegStateCreate(g_nvjpegHandle, &g_nvjpegState);
     if (status != NVJPEG_STATUS_SUCCESS) return false;
     cudaStreamCreate(&g_stream);
-    // Configure batched decode once (batch=1 per DEV guide; output luma-only Y plane)
-    status = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, 1, NVJPEG_OUTPUT_Y);
+    // Batched decode: batch=1 per DEV guide; entropy (Huffman) decode is CPU-bound on
+    // consumer GPUs, so parallelize it with max_cpu_threads = physical core count.
+    status = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, g_nvjpegState, 1, DetectPhysicalCores(), NVJPEG_OUTPUT_Y);
     if (status != NVJPEG_STATUS_SUCCESS) return false;
     return true;
 }
@@ -382,128 +385,141 @@ static int ResolveWorkers(int requested) {
     return workers;
 }
 
-// Decode a list of JPEG files with GPU<->CPU overlap (async D2H + events on g_stream).
-// Producer (this thread) decodes on GPU; worker threads run the CPU analysis.
+// Decode a list of JPEG files with N independent GPU decoder threads.
+// On consumer GPUs nvJPEG performs entropy (Huffman) decoding on the CPU inside
+// nvjpegDecodeBatched, so decode is CPU-bound; running several decoder threads
+// (each with its own nvjpegJpegState + CUDA stream) parallelizes it across cores.
 static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files, int thumbSize, int workers) {
     std::vector<ImageInfo> result;
     result.reserve(files.size());
     if (files.empty()) return result;
 
-    const int nWorkers = ResolveWorkers(workers);
-    const int kSlots = (std::max)(2, (std::min)(nWorkers + 2, 8));
-    std::vector<JpegSlot> slots(kSlots);
-    for (auto& s : slots) cudaEventCreateWithFlags(&s.done, cudaEventDisableTiming);
+    int logical = (int)std::thread::hardware_concurrency();
+    int nThreads = workers > 0 ? workers : DetectPhysicalCores();
+    nThreads = (std::max)(1, (std::min)(nThreads, (std::max)(1, logical - 1)));
+    nThreads = (std::min)(nThreads, (int)files.size());
 
-    std::mutex mtx;
-    std::condition_variable cvFree, cvReady;
-    std::deque<int> freeQ, readyQ;
-    for (int i = 0; i < kSlots; i++) freeQ.push_back(i);
-
+    std::atomic<size_t> nextIdx{0};
+    std::atomic<int> completed{0};
+    std::atomic<int> failed{0};
+    std::atomic<int> doneThreads{0};
     std::vector<ImageInfo> out;
     std::mutex outMtx;
-    std::atomic<int> issued{0}, completed{0};
-    bool stop = false;
 
-    auto decodeStartTime = std::chrono::high_resolution_clock::now();
-
-    auto decodeOne = [&](int slotIdx, const fs::path& fp) -> bool {
-        JpegSlot& cur = slots[slotIdx];
-        try {
-            std::ifstream file(fp, std::ios::binary | std::ios::ate);
-            if (!file.is_open()) return false;
-            std::streamsize fileSize = file.tellg();
-            file.seekg(0, std::ios::beg);
-            cur.raw.resize((size_t)fileSize);
-            file.read(cur.raw.data(), fileSize);
-
-            int nComp = 0, widths[NVJPEG_MAX_COMPONENT], heights[NVJPEG_MAX_COMPONENT];
-            nvjpegChromaSubsampling_t subsamp;
-            if (nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)cur.raw.data(), cur.raw.size(), &nComp, &subsamp, widths, heights) != NVJPEG_STATUS_SUCCESS || nComp == 0) return false;
-            int srcW = widths[0], srcH = heights[0];
-
-            size_t imgPitch = ((srcW + 31) / 32) * 32;
-            if (!JpegSlotEnsure(cur, imgPitch * srcH)) return false;
-            cur.gray.resize((size_t)srcW * srcH);
-            cur.w = srcW; cur.h = srcH; cur.path = fp;
-
-            nvjpegImage_t outImg;
-            outImg.channel[0] = cur.gpu;
-            outImg.pitch[0] = (int)imgPitch;
-            const unsigned char* pData = (const unsigned char*)cur.raw.data();
-            size_t pDataSize = cur.raw.size();
-
-            nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, g_nvjpegState, &pData, &pDataSize, &outImg, g_stream);
-            if (decS != NVJPEG_STATUS_SUCCESS) return false;
-            cudaMemcpy2DAsync(cur.gray.data(), srcW, cur.gpu, (int)imgPitch, srcW, srcH, cudaMemcpyDeviceToHost, g_stream);
-            cudaEventRecord(cur.done, g_stream);
-            return true;
-        } catch (...) { return false; }
+    struct FailedRec { std::wstring path; int stage; long code; };
+    std::vector<FailedRec> failedLog;
+    std::mutex failMtx;
+    auto logFail = [&](const fs::path& fp, int stage, long code) {
+        if (failed.fetch_add(1) < 20) {
+            std::lock_guard<std::mutex> lk(failMtx);
+            failedLog.push_back({ fp.wstring(), stage, code });
+        }
     };
 
-    // Worker threads: CPU analysis of decoded gray buffers
+    // Per-phase timing accumulators (microseconds)
+    struct PhaseTimes {
+        std::atomic<uint64_t> fileRead{0};    // disk read of raw JPEG bytes
+        std::atomic<uint64_t> getInfo{0};     // nvjpegGetImageInfo header parse
+        std::atomic<uint64_t> decodeLaunch{0}; // nvjpegDecodeBatched + async D2H enqueue (CPU entropy + launch)
+        std::atomic<uint64_t> waitEvent{0};   // cudaEventSynchronize (GPU IDCT + D2H wait)
+        std::atomic<uint64_t> processGray{0}; // CPU blockiness/blurring/resize/crc
+        std::atomic<int> n{0};
+    } pt;
+    auto nowUs = []() { return (uint64_t)std::chrono::duration<double, std::micro>(std::chrono::high_resolution_clock::now().time_since_epoch()).count(); };
+    auto decodeStartTime = std::chrono::high_resolution_clock::now();
+
     std::vector<std::thread> threads;
-    threads.reserve(nWorkers);
-    for (int t = 0; t < nWorkers; t++) {
+    threads.reserve(nThreads);
+    for (int t = 0; t < nThreads; t++) {
         threads.emplace_back([&]() {
+            struct DoneGuard { std::atomic<int>& d; ~DoneGuard() { d.fetch_add(1); } } doneGuard{doneThreads};
+            nvjpegJpegState_t state = nullptr;
+            cudaStream_t stream = nullptr;
+            bool ok = nvjpegJpegStateCreate(g_nvjpegHandle, &state) == NVJPEG_STATUS_SUCCESS;
+            if (ok) ok = cudaStreamCreate(&stream) == cudaSuccess;
+            if (ok) ok = nvjpegDecodeBatchedInitialize(g_nvjpegHandle, state, 1, 1, NVJPEG_OUTPUT_Y) == NVJPEG_STATUS_SUCCESS;
+            if (!ok) return;
+
+            JpegSlot slot;
+            cudaEventCreateWithFlags(&slot.done, cudaEventDisableTiming);
+
             for (;;) {
-                int sid;
-                {
-                    std::unique_lock<std::mutex> lk(mtx);
-                    cvReady.wait(lk, [&]{ return stop || !readyQ.empty(); });
-                    if (readyQ.empty()) return;   // stop and drained
-                    sid = readyQ.front(); readyQ.pop_front();
-                }
-                JpegSlot& s = slots[sid];
-                cudaEventSynchronize(s.done);
-                ImageInfo info = ProcessGray(s.gray.data(), s.w, s.h, s.path, thumbSize);
-                {
-                    std::lock_guard<std::mutex> lk(outMtx);
-                    out.push_back(std::move(info));
-                }
-                completed++;
-                {
-                    std::lock_guard<std::mutex> lk(mtx);
-                    freeQ.push_back(sid);
-                }
-                cvFree.notify_one();
+                size_t idx = nextIdx.fetch_add(1);
+                if (idx >= files.size()) break;
+                const fs::path& fp = files[idx];
+
+                try {
+                    uint64_t t0 = nowUs();
+                    std::ifstream file(fp, std::ios::binary | std::ios::ate);
+                    if (!file.is_open()) { logFail(fp, 1, 0); continue; }
+                    std::streamsize fileSize = file.tellg();
+                    file.seekg(0, std::ios::beg);
+                    slot.raw.resize((size_t)fileSize);
+                    file.read(slot.raw.data(), fileSize);
+                    uint64_t t1 = nowUs(); pt.fileRead += t1 - t0;
+
+                    int nComp = 0, widths[NVJPEG_MAX_COMPONENT], heights[NVJPEG_MAX_COMPONENT];
+                    nvjpegChromaSubsampling_t subsamp;
+                    nvjpegStatus_t infoS = nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)slot.raw.data(), slot.raw.size(), &nComp, &subsamp, widths, heights);
+                    if (infoS != NVJPEG_STATUS_SUCCESS || nComp == 0) { logFail(fp, 2, (long)infoS); continue; }
+                    uint64_t t2 = nowUs(); pt.getInfo += t2 - t1;
+                    int srcW = widths[0], srcH = heights[0];
+
+                    size_t imgPitch = ((srcW + 31) / 32) * 32;
+                    if (!JpegSlotEnsure(slot, imgPitch * srcH)) { logFail(fp, 3, 0); continue; }
+                    slot.gray.resize((size_t)srcW * srcH);
+                    slot.w = srcW; slot.h = srcH; slot.path = fp;
+
+                    nvjpegImage_t outImg;
+                    outImg.channel[0] = slot.gpu;
+                    outImg.pitch[0] = (int)imgPitch;
+                    const unsigned char* pData = (const unsigned char*)slot.raw.data();
+                    size_t pDataSize = slot.raw.size();
+
+                    nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, state, &pData, &pDataSize, &outImg, stream);
+                    if (decS != NVJPEG_STATUS_SUCCESS) { logFail(fp, 4, (long)decS); continue; }
+                    cudaMemcpy2DAsync(slot.gray.data(), srcW, slot.gpu, (int)imgPitch, srcW, srcH, cudaMemcpyDeviceToHost, stream);
+                    cudaEventRecord(slot.done, stream);
+                    pt.decodeLaunch += nowUs() - t2;
+
+                    uint64_t tw0 = nowUs();
+                    cudaEventSynchronize(slot.done);
+                    uint64_t tw1 = nowUs(); pt.waitEvent += tw1 - tw0;
+                    ImageInfo info = ProcessGray(slot.gray.data(), slot.w, slot.h, slot.path, thumbSize);
+                    pt.processGray += nowUs() - tw1;
+                    pt.n++;
+                    {
+                        std::lock_guard<std::mutex> lk(outMtx);
+                        out.push_back(std::move(info));
+                    }
+                    completed++;
+                } catch (...) { logFail(fp, 5, 0); }
             }
+
+            cudaEventDestroy(slot.done);
+            if (stream) cudaStreamDestroy(stream);
+            if (state) nvjpegJpegStateDestroy(state);
         });
     }
 
-    // Producer: this thread reads files and issues async GPU decodes
-    for (size_t i = 0; i < files.size(); i++) {
-        int sid;
-        {
-            std::unique_lock<std::mutex> lk(mtx);
-            cvFree.wait(lk, [&]{ return !freeQ.empty(); });
-            sid = freeQ.front(); freeQ.pop_front();
+    // Progress report while decoder threads work (throttled -> no console bottleneck).
+    // Loop until ALL worker threads exit; completed may stay below files.size() when
+    // some files fail to decode (failed>0) - we must NOT wait forever for those.
+    int lastDone = -1;
+    while (doneThreads.load() < nThreads) {
+        int done = completed.load();
+        if (done != lastDone) {
+            lastDone = done;
+            int pct = (int)(done * 100 / files.size());
+            auto elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - decodeStartTime).count();
+            double speed = done / (elapsed + 0.001);
+            std::wcout << L"\r[GPU]  " << done << L"/" << files.size() << L" (" << pct << L"%) | " << (int)speed << L" img/sec" << std::flush;
         }
-        if (decodeOne(sid, files[i])) {
-            issued++;
-            {
-                std::lock_guard<std::mutex> lk(mtx);
-                readyQ.push_back(sid);
-            }
-            cvReady.notify_one();
-        } else {
-            {
-                std::lock_guard<std::mutex> lk(mtx);
-                freeQ.push_back(sid);
-            }
-            cvFree.notify_one();
-        }
-
-        int pct = (int)(issued.load() * 100 / files.size());
-        auto elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - decodeStartTime).count();
-        double speed = issued.load() / (elapsed + 0.001);
-        std::wcout << L"\r[GPU]  " << issued.load() << L"/" << files.size() << L" (" << pct << L"%) | " << (int)speed << L" img/sec" << std::flush;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
+    auto elapsedTotal = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - decodeStartTime).count();
+    std::wcout << L"\r[GPU]  " << completed.load() << L"/" << files.size() << L" (100%) | " << (int)((completed.load() + failed.load()) / (elapsedTotal + 0.001)) << L" img/sec" << std::flush;
 
-    {
-        std::lock_guard<std::mutex> lk(mtx);
-        stop = true;
-    }
-    cvReady.notify_all();
     for (auto& th : threads) th.join();
 
     {
@@ -511,7 +527,28 @@ static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files
         result = std::move(out);
     }
 
-    for (auto& s : slots) { if (s.done) cudaEventDestroy(s.done); if (s.gpu) cudaFree(s.gpu); }
+    if (failed.load() > 0) {
+        std::wcout << std::endl;
+        std::wcout << L"[FAILED] " << failed.load() << L" files could not be decoded." << std::endl;
+        std::wofstream failLog(GetExeDir() + L"\\failed.log", std::ios::trunc);
+        for (const FailedRec& r : failedLog)
+            failLog << L"stage=" << r.stage << L" code=" << r.code << L"\t" << r.path << std::endl;
+    }
+
+    if (pt.n > 0) {
+        double f = 1000.0 / pt.n;  // us -> ms per image
+        std::wcout << std::endl;
+        std::wcout << L"[STATS] per-image avg (ms): fileRead=" << pt.fileRead.load() * f / 1000.0
+                   << L" getInfo=" << pt.getInfo.load() * f / 1000.0
+                   << L" decodeLaunch=" << pt.decodeLaunch.load() * f / 1000.0
+                   << L" waitEvent=" << pt.waitEvent.load() * f / 1000.0
+                   << L" processGray=" << pt.processGray.load() * f / 1000.0
+                   << L" (n=" << pt.n.load() << L")" << std::endl;
+        uint64_t total = pt.fileRead + pt.getInfo + pt.decodeLaunch + pt.waitEvent + pt.processGray;
+        double totalMs = total * f / 1000.0;
+        std::wcout << L"[STATS] sum=" << totalMs << L" ms/image (sum of phases above)" << std::endl;
+    }
+
     return result;
 }
 

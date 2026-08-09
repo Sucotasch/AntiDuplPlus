@@ -403,6 +403,7 @@ static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files
     std::atomic<int> completed{0};
     std::atomic<int> failed{0};
     std::atomic<int> doneThreads{0};
+    std::atomic<int> aliveDecoders{0};
     std::vector<ImageInfo> out;
     std::mutex outMtx;
 
@@ -428,11 +429,58 @@ static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files
     auto nowUs = []() { return (uint64_t)std::chrono::duration<double, std::micro>(std::chrono::high_resolution_clock::now().time_since_epoch()).count(); };
     auto decodeStartTime = std::chrono::high_resolution_clock::now();
 
+    // ---- Reader -> decoder pipeline ----
+    // On an HDD, several reader threads cause head thrashing (each file open/read
+    // seeks independently), so we use a SINGLE sequential reader thread feeding a
+    // bounded queue; N decoder threads consume it and parallelize the CPU-bound decode.
+    const size_t kQueueCap = (size_t)(nThreads * 2);
+    struct RawItem { size_t idx; std::vector<char> raw; };
+    std::deque<RawItem> queue;
+    std::mutex qMtx;
+    std::condition_variable cvNotEmpty, cvNotFull;
+    bool readDone = false;
+
+    aliveDecoders.store(nThreads);
+
+    std::thread reader([&]() {
+        for (;;) {
+            size_t idx = nextIdx.fetch_add(1);
+            if (idx >= files.size()) break;
+            RawItem item; item.idx = idx;
+            const fs::path& fp = files[idx];
+            uint64_t t0 = nowUs();
+            try {
+                std::ifstream file(fp, std::ios::binary | std::ios::ate);
+                if (!file.is_open()) { logFail(fp, 1, 0); continue; }
+                std::streamsize fileSize = file.tellg();
+                file.seekg(0, std::ios::beg);
+                item.raw.resize((size_t)fileSize);
+                file.read(item.raw.data(), fileSize);
+            } catch (...) { logFail(fp, 5, 0); continue; }
+            pt.fileRead += nowUs() - t0;
+            {
+                std::unique_lock<std::mutex> lk(qMtx);
+                cvNotFull.wait(lk, [&]{ return queue.size() < kQueueCap || aliveDecoders.load() == 0; });
+                if (aliveDecoders.load() == 0) break;
+                queue.push_back(std::move(item));
+            }
+            cvNotEmpty.notify_one();
+        }
+        {
+            std::lock_guard<std::mutex> lk(qMtx);
+            readDone = true;
+        }
+        cvNotEmpty.notify_all();
+    });
+
     std::vector<std::thread> threads;
     threads.reserve(nThreads);
     for (int t = 0; t < nThreads; t++) {
         threads.emplace_back([&]() {
-            struct DoneGuard { std::atomic<int>& d; ~DoneGuard() { d.fetch_add(1); } } doneGuard{doneThreads};
+            struct DoneGuard {
+                std::atomic<int>& dt; std::atomic<int>& alive;
+                ~DoneGuard() { dt.fetch_add(1); alive.fetch_add(-1); }
+            } doneGuard{doneThreads, aliveDecoders};
             nvjpegJpegState_t state = nullptr;
             cudaStream_t stream = nullptr;
             bool ok = nvjpegJpegStateCreate(g_nvjpegHandle, &state) == NVJPEG_STATUS_SUCCESS;
@@ -444,23 +492,22 @@ static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files
             cudaEventCreateWithFlags(&slot.done, cudaEventDisableTiming);
 
             for (;;) {
-                size_t idx = nextIdx.fetch_add(1);
-                if (idx >= files.size()) break;
-                const fs::path& fp = files[idx];
+                RawItem item;
+                {
+                    std::unique_lock<std::mutex> lk(qMtx);
+                    cvNotEmpty.wait(lk, [&]{ return !queue.empty() || readDone; });
+                    if (queue.empty()) break;
+                    item = std::move(queue.front());
+                    queue.pop_front();
+                }
+                cvNotFull.notify_one();
+                const fs::path& fp = files[item.idx];
 
                 try {
-                    uint64_t t0 = nowUs();
-                    std::ifstream file(fp, std::ios::binary | std::ios::ate);
-                    if (!file.is_open()) { logFail(fp, 1, 0); continue; }
-                    std::streamsize fileSize = file.tellg();
-                    file.seekg(0, std::ios::beg);
-                    slot.raw.resize((size_t)fileSize);
-                    file.read(slot.raw.data(), fileSize);
-                    uint64_t t1 = nowUs(); pt.fileRead += t1 - t0;
-
+                    uint64_t t1 = nowUs();
                     int nComp = 0, widths[NVJPEG_MAX_COMPONENT], heights[NVJPEG_MAX_COMPONENT];
                     nvjpegChromaSubsampling_t subsamp;
-                    nvjpegStatus_t infoS = nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)slot.raw.data(), slot.raw.size(), &nComp, &subsamp, widths, heights);
+                    nvjpegStatus_t infoS = nvjpegGetImageInfo(g_nvjpegHandle, (const unsigned char*)item.raw.data(), item.raw.size(), &nComp, &subsamp, widths, heights);
                     if (infoS != NVJPEG_STATUS_SUCCESS || nComp == 0) { logFail(fp, 2, (long)infoS); continue; }
                     uint64_t t2 = nowUs(); pt.getInfo += t2 - t1;
                     int srcW = widths[0], srcH = heights[0];
@@ -473,8 +520,8 @@ static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files
                     nvjpegImage_t outImg;
                     outImg.channel[0] = slot.gpu;
                     outImg.pitch[0] = (int)imgPitch;
-                    const unsigned char* pData = (const unsigned char*)slot.raw.data();
-                    size_t pDataSize = slot.raw.size();
+                    const unsigned char* pData = (const unsigned char*)item.raw.data();
+                    size_t pDataSize = item.raw.size();
 
                     nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, state, &pData, &pDataSize, &outImg, stream);
                     if (decS != NVJPEG_STATUS_SUCCESS) { logFail(fp, 4, (long)decS); continue; }
@@ -521,6 +568,7 @@ static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files
     std::wcout << L"\r[GPU]  " << completed.load() << L"/" << files.size() << L" (100%) | " << (int)((completed.load() + failed.load()) / (elapsedTotal + 0.001)) << L" img/sec" << std::flush;
 
     for (auto& th : threads) th.join();
+    reader.join();
 
     {
         std::lock_guard<std::mutex> lk(outMtx);

@@ -22,8 +22,8 @@
 | Pool comparison / Сравнение пулов | N/A | **Pool1 vs Pool2** — cross-pool comparison |
 | Auto-Select / Автовыбор | Basic | **Extended** — time, size, quality, resolution, pools (AND-logic) |
 | Delete files / Удаление файлов | Recycle Bin only | **Recycle Bin + move** to a chosen folder |
-| Image quality / Качество изображений | blockiness + blurring (CPU) | **Same algorithms, GPU/CPU** — computed at DB creation; temporarily lost during porting, then restored |
-| SSIM | CPU SSIM (full algorithm) | **GPU SSIM** — same algorithm, GPU-accelerated; temporarily disabled during porting, then re-enabled |
+| Image quality / Качество изображений | blockiness + blurring (CPU) | **Same algorithms, GPU/CPU** — computed at DB creation |
+| SSIM | CPU SSIM (full algorithm) | **GPU SSIM** — same algorithm, GPU-accelerated |
 
 ---
 

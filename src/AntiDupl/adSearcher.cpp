@@ -216,7 +216,9 @@ namespace ad
         // Запоминаем текущий размер перед загрузкой — добавляем ТОЛЬКО новые записи
         const size_t prevCount = m_pImageDataPtrs->size();
 
-        adError result = m_pImageDataStorage->Load(dbFolder.c_str(), true);
+        adError result = m_pImageDataStorage->Load(dbFolder.c_str(), true,
+            dbInfo.RemapFrom.empty() ? nullptr : dbInfo.RemapFrom.c_str(),
+            dbInfo.Path.c_str());
 
         if (result == AD_OK) {
             const TImageDataStorage::TStorage& storage = m_pImageDataStorage->Storage();

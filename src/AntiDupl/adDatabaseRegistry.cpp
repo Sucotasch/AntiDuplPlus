@@ -70,6 +70,7 @@ namespace ad
                 db.Path = GetXmlAttr(line, L"Path");
                 db.Folder = GetXmlAttr(line, L"Folder");
                 db.Name = GetXmlAttr(line, L"Name");
+                db.RemapFrom = GetXmlAttr(line, L"RemapFrom");
                 std::wstring sizeStr = GetXmlAttr(line, L"ThumbSize");
                 try { db.ThumbSize = std::stoi(sizeStr); } catch (...) { db.ThumbSize = 32; }
 
@@ -102,6 +103,7 @@ namespace ad
             file << L"  <Database Path=\"" << db.Path << L"\"";
             if (!db.Folder.empty()) file << L" Folder=\"" << db.Folder << L"\"";
             if (!db.Name.empty()) file << L" Name=\"" << db.Name << L"\"";
+            if (!db.RemapFrom.empty()) file << L" RemapFrom=\"" << db.RemapFrom << L"\"";
             file << L" Enabled=\"" << (db.Enabled ? L"true" : L"false") << L"\"";
             file << L" ThumbSize=\"" << db.ThumbSize << L"\" Count=\"" << db.ImageCount
                  << L"\" Status=\"" << db.Status << L"\"";

@@ -40,7 +40,7 @@ namespace ad
 
 		TImageDataPtr Get(const TImageInfo& imageInfo);
 
-		adError Load(const TChar *path, bool allLoad = false);
+		adError Load(const TChar *path, bool allLoad = false, const TChar *remapFrom = nullptr, const TChar *remapTo = nullptr);
 		adError Save(const TChar *path);
 
 		adError ClearDatabase(const TChar *path);
@@ -96,10 +96,10 @@ namespace ad
 		bool SaveIndex(const TIndex & index, const TChar *path) const;
 		bool SaveData(const TData & data, const TChar *path) const;
 
-		bool LoadIndex(TIndex & index, const TChar *fileName, bool allLoad = false) const;
-		bool LoadData(TData & data, const TChar *path, short key);
-		adError LoadCollectorNative(const TChar *path, uint32_t thumbSizeFromHeader, bool allLoad);
-		bool LoadCollectorData(const TChar *path, TData & data, short key);
+		bool LoadIndex(TIndex & index, const TChar *fileName, bool allLoad = false, const TChar *remapFrom = nullptr, const TChar *remapTo = nullptr) const;
+		bool LoadData(TData & data, const TChar *path, short key, const TChar *remapFrom = nullptr, const TChar *remapTo = nullptr);
+		adError LoadCollectorNative(const TChar *path, uint32_t thumbSizeFromHeader, bool allLoad, const TChar *remapFrom = nullptr, const TChar *remapTo = nullptr);
+		bool LoadCollectorData(const TChar *path, TData & data, short key, const TChar *remapFrom = nullptr, const TChar *remapTo = nullptr);
 	};
     //-------------------------------------------------------------------------
 }

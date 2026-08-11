@@ -284,6 +284,16 @@ namespace AntiDupl.NET.WinForms.Forms
             colName.MinimumWidth = 150;
             grid.Columns.Add(colName);
 
+            var colMoved = new DataGridViewTextBoxColumn();
+            colMoved.Name = "Moved";
+            colMoved.DataPropertyName = "RemapIndicator";
+            colMoved.HeaderText = "Moved";
+            colMoved.Width = 55;
+            colMoved.MinimumWidth = 55;
+            colMoved.ReadOnly = true;
+            colMoved.ToolTipText = "Indicates that the source folder was moved and the database is being remapped to a new location.";
+            grid.Columns.Add(colMoved);
+
             var colCount = new DataGridViewTextBoxColumn();
             colCount.Name = "ImageCount";
             colCount.DataPropertyName = "ImageCount";
@@ -299,6 +309,16 @@ namespace AntiDupl.NET.WinForms.Forms
             colStatus.Width = 55;
             colStatus.MinimumWidth = 55;
             grid.Columns.Add(colStatus);
+
+            var colPath = new DataGridViewButtonColumn();
+            colPath.Name = "Path";
+            colPath.HeaderText = "";
+            colPath.Text = "Path...";
+            colPath.UseColumnTextForButtonValue = true;
+            colPath.Width = 65;
+            colPath.MinimumWidth = 65;
+            colPath.FlatStyle = FlatStyle.Flat;
+            grid.Columns.Add(colPath);
 
             var colUpdate = new DataGridViewButtonColumn();
             colUpdate.Name = "Update";
@@ -348,6 +368,11 @@ namespace AntiDupl.NET.WinForms.Forms
             {
                 var entry = grid.Rows[e.RowIndex].DataBoundItem as DbEntry;
                 if (entry != null) UpdateDatabase(entry);
+            }
+            else if (colName == "Path")
+            {
+                var entry = grid.Rows[e.RowIndex].DataBoundItem as DbEntry;
+                if (entry != null) ChangeSourceFolder(entry);
             }
             else if (colName == "Delete")
             {
@@ -438,6 +463,125 @@ namespace AntiDupl.NET.WinForms.Forms
 
             SaveDatabases();
             RefreshAllGrids();
+        }
+
+        /// <summary>
+        /// Lets the user point this database to a new source folder (e.g. after the folder was moved).
+        /// Stores the previous path in RemapFrom so the DLL can translate stored paths at load time.
+        /// </summary>
+        private void ChangeSourceFolder(DbEntry entry)
+        {
+            if (string.IsNullOrEmpty(entry.Path))
+            {
+                MessageBox.Show("Database path is not set.", "Change Source Folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string oldPath = entry.Path;
+            string dbFolder = string.IsNullOrEmpty(entry.Folder) ? oldPath : ResolvePath(entry.Folder);
+            string indexPath = Path.Combine(dbFolder, "index.adi");
+
+            string oldHint = "";
+            if (File.Exists(indexPath))
+            {
+                string storedPath = GetFirstStoredPath(indexPath);
+                if (!string.IsNullOrEmpty(storedPath))
+                    oldHint = storedPath;
+            }
+
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = $"Select the new location of the source folder for database \"{entry.Name}\".\n\nThe database currently points to:\n{oldPath}";
+                dialog.ShowNewFolderButton = false;
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+                string newPath = dialog.SelectedPath;
+                if (string.IsNullOrEmpty(newPath) || !Directory.Exists(newPath))
+                {
+                    MessageBox.Show("Selected folder does not exist.", "Change Source Folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (string.Equals(newPath.TrimEnd('\\', '/'), oldPath.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("The selected folder is the same as the current source folder.", "Change Source Folder",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // Validation: if the DB stores absolute paths, they should share a prefix with the old path.
+                if (!string.IsNullOrEmpty(oldHint) && oldHint.TrimEnd('\\', '/').ToLowerInvariant().IndexOf(
+                    oldPath.TrimEnd('\\', '/').ToLowerInvariant(), StringComparison.Ordinal) != 0)
+                {
+                    var result = MessageBox.Show(
+                        $"This database stores image paths starting with:\n{oldHint}\n\n" +
+                        $"The current source folder is:\n{oldPath}\n\n" +
+                        "These do not match. Continue anyway?",
+                        "Change Source Folder", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                    if (result != DialogResult.Yes) return;
+                }
+
+                entry.RemapFrom = oldPath;
+                entry.Path = newPath;
+                SaveDatabases();
+                RefreshAllGrids();
+
+                MessageBox.Show(
+                    $"Database \"{entry.Name}\" will now use the new source folder.\n\n" +
+                    $"From: {oldPath}\nTo: {newPath}\n\n" +
+                    "The database records will be remapped at load time. Run \"Update\" later to rewrite stored paths.",
+                    "Change Source Folder", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        /// <summary>
+        /// Reads the first stored image path from index.adi (both DLL-native "adii" and collector-native formats).
+        /// Used to validate that a database belongs to the folder being remapped.
+        /// </summary>
+        private static string GetFirstStoredPath(string indexPath)
+        {
+            try
+            {
+                using (var fs = new FileStream(indexPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var reader = new BinaryReader(fs))
+                {
+                    if (fs.Length < 12) return "";
+
+                    uint firstBytes = reader.ReadUInt32();
+                    bool dllNative = (firstBytes == 0x69696461u); // "adii"
+                    if (dllNative)
+                    {
+                        // DLL-native index layout (via TOutputFileStream "adii"):
+                        //   "adii"(4) + version(u32) + reducedImageSize(u32) + size(u64)
+                        //   per record: key(i16) + first(TPath) + last(TPath) + size(u64)
+                        // TPath is serialized as a length-prefixed wchar string.
+                        fs.Seek(4 + 4 + 8, SeekOrigin.Current); // skip version + reducedImageSize + size
+                        if (fs.Position + 2 > fs.Length) return "";
+                        reader.ReadInt16(); // key
+                        ulong firstLen = reader.ReadUInt64();
+                        if (firstLen > 10000 || (long)firstLen * 2 > fs.Length - fs.Position) return "";
+                        byte[] bytes = reader.ReadBytes((int)firstLen * 2);
+                        return System.Text.Encoding.Unicode.GetString(bytes);
+                    }
+                    else
+                    {
+                        // Collector-native: thumbSize(u32) + groupCount(u64) + per group:
+                        // key(i16) + firstLen(u64) + first(wchar) + lastLen(u64) + last(wchar) + imgCount(u64)
+                        ulong groupCount = reader.ReadUInt64();
+                        if (groupCount == 0) return "";
+
+                        reader.ReadInt16(); // key
+                        ulong firstLen = reader.ReadUInt64();
+                        if (firstLen > 10000 || (long)firstLen * 2 > fs.Length - fs.Position) return "";
+                        byte[] bytes = reader.ReadBytes((int)firstLen * 2);
+                        return System.Text.Encoding.Unicode.GetString(bytes);
+                    }
+                }
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         private void DeleteDatabase(DbEntry entry)
@@ -616,6 +760,7 @@ namespace AntiDupl.NET.WinForms.Forms
                 content += $" Path=\"{entry.Path}\"";
                 if (!string.IsNullOrEmpty(entry.Folder)) content += $" Folder=\"{entry.Folder}\"";
                 if (!string.IsNullOrEmpty(entry.Name)) content += $" Name=\"{entry.Name}\"";
+                if (!string.IsNullOrEmpty(entry.RemapFrom)) content += $" RemapFrom=\"{entry.RemapFrom}\"";
                 content += $" Enabled=\"{(entry.Enabled ? "true" : "false")}\"";
                 content += $" ThumbSize=\"{entry.ThumbSize}\"";
                 content += $" Count=\"{entry.ImageCount}\" Status=\"{entry.Status}\"";
@@ -780,6 +925,7 @@ namespace AntiDupl.NET.WinForms.Forms
                 entry.Name = GetAttr(tag, "Name");
                 entry.Path = GetAttr(tag, "Path");
                 entry.Folder = GetAttr(tag, "Folder");
+                entry.RemapFrom = GetAttr(tag, "RemapFrom");
                 entry.ImageCount = int.Parse(GetAttr(tag, "Count") ?? "0");
                 entry.Status = GetAttr(tag, "Status") ?? "Ready";
                 entry.Enabled = GetAttr(tag, "Enabled") != "false";
@@ -822,10 +968,13 @@ namespace AntiDupl.NET.WinForms.Forms
             public string Name { get; set; }
             public string Path { get; set; }
             public string Folder { get; set; }
+            public string RemapFrom { get; set; }
             public int ImageCount { get; set; }
             public int ThumbSize { get; set; } = 32;
             public string Status { get; set; }
             public int Pool { get; set; } = 0;
+
+            public string RemapIndicator => string.IsNullOrEmpty(RemapFrom) ? "" : "yes";
         }
 
         /// <summary>

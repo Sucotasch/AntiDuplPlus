@@ -202,12 +202,45 @@ namespace AntiDupl.NET.WinForms
 
         public void Execute()
         {
+            if (!CheckDatabaseImageSize())
+                return;
+
             m_mainSplitContainer.ClearResults();
             m_state = State.Start;
             Thread searchThread = new Thread(CoreThreadTask);
             searchThread.Start();
             m_stopButton.Enabled = true;
             ShowDialog();
+        }
+
+        /// <summary>
+        /// Warns when an enabled database was built with a thumbnail size different from the
+        /// current "Normalized image size" option. The GPU engine silently skips such images,
+        /// which otherwise results in an empty result with no explanation.
+        /// </summary>
+        private bool CheckDatabaseImageSize()
+        {
+            int requiredSize = m_coreOptions.advancedOptions.reducedImageSize;
+            var databases = Forms.DatabaseManagerForm.GetEnabledDatabases();
+            var mismatched = databases.Where(d => d.Value != requiredSize).ToList();
+            if (mismatched.Count == 0)
+                return true;
+
+            var list = new StringBuilder();
+            foreach (var db in mismatched)
+            {
+                string name = Path.GetFileName(db.Key.TrimEnd('\\', '/'));
+                list.AppendLine($"  {name}: database {db.Value}x{db.Value}, selected {requiredSize}x{requiredSize}");
+            }
+
+            var result = MessageBox.Show(this,
+                "Some enabled databases were built with a different image size than the current setting.\n" +
+                "They will produce empty results during this search.\n\n" +
+                list.ToString() +
+                "\nRebuild these databases with the current size (Database Manager -> Update).\n\n" +
+                "Continue anyway?",
+                "Database size mismatch", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            return result == DialogResult.Yes;
         }
 
         void TimerCallback(Object obj, EventArgs eventArgs)

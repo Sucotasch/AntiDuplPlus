@@ -114,6 +114,7 @@ namespace AntiDupl.NET.WinForms
             s.CoreOptionsForm_CollectThreadCountLabeledComboBox_Text = "Load thread count";
             s.CoreOptionsForm_CollectThreadCountLabeledComboBox_Description_0 = "Auto";
             s.CoreOptionsForm_ReducedImageSizeLabeledComboBox_Text = "Normalized image size";
+            s.CoreOptionsForm_ReducedImageSizeLabeledComboBox_Tooltip_Text = "Maximum database size (images) for one search (approx.):\n32x32: ~6M (8GB) / ~12M (16GB) / ~19M (24GB)\n64x64: ~1.6M / ~3.2M / ~4.8M\n128x128: ~400K / ~800K / ~1.2M\nDepends on free VRAM at search time.";
             s.CoreOptionsForm_UndoQueueSizeLabeledIntegerEdit_Text = "Queue size of undo";
             s.CoreOptionsForm_ResultCountMaxLabeledIntegerEdit_Text = "Maximal count of results";
             s.CoreOptionsForm_IgnoreFrameWidthLabeledComboBox_Text = "Width of ignored frame of image";

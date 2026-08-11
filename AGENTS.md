@@ -119,7 +119,7 @@ After ANY code change, run **`cmd\Deploy.cmd`** and verify it ends with `[OK] De
 
 ## Tests
 
-No automated test suite in the solution. CI only checks that the build succeeds. Root `benchmark_ssim.*` / `test_ssim.*` are **standalone** utilities, not part of `AntiDupl.sln`.
+No automated test suite in the solution. CI only checks that the build succeeds. Standalone comparison utilities were removed in this fork.
 
 ## Key files
 

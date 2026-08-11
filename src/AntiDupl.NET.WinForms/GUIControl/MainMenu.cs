@@ -610,13 +610,13 @@ namespace AntiDupl.NET.WinForms
                 inputPath = fbd.SelectedPath;
             }
 
-            string args = $"--input \"{inputPath}\" --output \"{dbRoot}\"";
+            string args = $"--input \"{inputPath}\" --output \"{dbRoot}\" --size {m_coreOptions.advancedOptions.reducedImageSize}";
             System.Diagnostics.Process.Start(exePath, args);
         }
 
         public void DbManagerAction(object sender, EventArgs e)
         {
-            var form = new Forms.DatabaseManagerForm();
+            var form = new Forms.DatabaseManagerForm(m_coreOptions.advancedOptions.reducedImageSize);
             form.ShowDialog(m_mainForm);
         }
 

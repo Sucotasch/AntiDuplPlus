@@ -114,6 +114,7 @@ namespace AntiDupl.NET.WinForms
             s.CoreOptionsForm_CollectThreadCountLabeledComboBox_Text = "Количество потоков загрузки";
             s.CoreOptionsForm_CollectThreadCountLabeledComboBox_Description_0 = "Авто";
             s.CoreOptionsForm_ReducedImageSizeLabeledComboBox_Text = "Отнормированный размер картинок";
+            s.CoreOptionsForm_ReducedImageSizeLabeledComboBox_Tooltip_Text = "Максимальный размер базы (изображений) за один поиск (прибл.):\n32x32: ~6М (8ГБ) / ~12М (16ГБ) / ~19М (24ГБ)\n64x64: ~1.6М / ~3.2М / ~4.8М\n128x128: ~400К / ~800К / ~1.2М\nЗависит от свободной видеопамяти при поиске.";
             s.CoreOptionsForm_UndoQueueSizeLabeledIntegerEdit_Text = "Размер очереди отмены";
             s.CoreOptionsForm_ResultCountMaxLabeledIntegerEdit_Text = "Максимальное количество результатов";
             s.CoreOptionsForm_IgnoreFrameWidthLabeledComboBox_Text = "Ширина игнорируемой рамки картинки";

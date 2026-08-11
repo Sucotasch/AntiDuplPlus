@@ -117,6 +117,7 @@ namespace AntiDupl.NET.WinForms
         public string CoreOptionsForm_CollectThreadCountLabeledComboBox_Text;
         public string CoreOptionsForm_CollectThreadCountLabeledComboBox_Description_0;
         public string CoreOptionsForm_ReducedImageSizeLabeledComboBox_Text;
+        public string CoreOptionsForm_ReducedImageSizeLabeledComboBox_Tooltip_Text;
         public string CoreOptionsForm_UndoQueueSizeLabeledIntegerEdit_Text;
         public string CoreOptionsForm_ResultCountMaxLabeledIntegerEdit_Text;
         public string CoreOptionsForm_IgnoreFrameWidthLabeledComboBox_Text;

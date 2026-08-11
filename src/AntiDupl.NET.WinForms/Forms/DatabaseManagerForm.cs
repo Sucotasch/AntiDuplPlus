@@ -47,12 +47,14 @@ namespace AntiDupl.NET.WinForms.Forms
         private const string PoolModeRegKey = @"Software\AntiDupl.NET\DatabaseManager";
         private List<DbEntry> m_allEntries = new List<DbEntry>();
         private bool m_dirty = false;
+        private int m_reducedImageSize = 32;
         private static int s_poolCompareMode = -1;
         private static int s_splitMainDistance = -1;
         private static int s_splitPoolsDistance = -1;
 
-        public DatabaseManagerForm()
+        public DatabaseManagerForm(int reducedImageSize = 32)
         {
+            m_reducedImageSize = reducedImageSize;
             InitializeComponent();
             if (s_poolCompareMode < 0)
                 s_poolCompareMode = LoadPoolMode();
@@ -185,6 +187,7 @@ namespace AntiDupl.NET.WinForms.Forms
             registryBtnPanel.Controls.Add(m_btnAssignPool1);
             registryBtnPanel.Controls.Add(m_btnAssignPool2);
             registryPanel.Controls.Add(registryBtnPanel);
+            AddPanelTitle(registryPanel, "Registry (All)");
 
             // Right: Pool1 + Pool2
             m_splitPools = new SplitContainer();
@@ -203,6 +206,7 @@ namespace AntiDupl.NET.WinForms.Forms
             m_btnRemovePool1 = CreateButton("← Remove", 5, (s, e) => RemoveFromPool(1));
             pool1BtnPanel.Controls.Add(m_btnRemovePool1);
             pool1Panel.Controls.Add(pool1BtnPanel);
+            AddPanelTitle(pool1Panel, "Pool1 (Reference)");
 
             // Pool2
             Panel pool2Panel = CreatePanel("Pool2 (Target)", Color.FromArgb(255, 245, 230));
@@ -216,6 +220,7 @@ namespace AntiDupl.NET.WinForms.Forms
             m_btnRemovePool2 = CreateButton("← Remove", 5, (s, e) => RemoveFromPool(2));
             pool2BtnPanel.Controls.Add(m_btnRemovePool2);
             pool2Panel.Controls.Add(pool2BtnPanel);
+            AddPanelTitle(pool2Panel, "Pool2 (Target)");
 
             m_splitPools.Panel1.Controls.Add(pool1Panel);
             m_splitPools.Panel2.Controls.Add(pool2Panel);
@@ -243,7 +248,15 @@ namespace AntiDupl.NET.WinForms.Forms
             Panel panel = new Panel();
             panel.Dock = DockStyle.Fill;
             panel.BackColor = bgColor;
+            return panel;
+        }
 
+        /// <summary>
+        /// Adds the panel title label LAST so WinForms docking reserves its top strip
+        /// before the Dock.Fill grid lays out, preventing the label from covering the grid.
+        /// </summary>
+        private void AddPanelTitle(Panel panel, string title)
+        {
             Label lbl = new Label();
             lbl.Text = title;
             lbl.Dock = DockStyle.Top;
@@ -252,8 +265,6 @@ namespace AntiDupl.NET.WinForms.Forms
             lbl.Padding = new Padding(5, 3, 5, 3);
             lbl.BackColor = Color.FromArgb(200, 200, 200);
             panel.Controls.Add(lbl);
-
-            return panel;
         }
 
         private DataGridView CreateGrid()
@@ -414,7 +425,7 @@ namespace AntiDupl.NET.WinForms.Forms
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = nvJpegPath,
-                    Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --update",
+                    Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --size {m_reducedImageSize} --update",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -440,6 +451,16 @@ namespace AntiDupl.NET.WinForms.Forms
                                 if (parts.Length >= 2 && int.TryParse(parts[parts.Length - 1].Trim().Split(' ')[0], out int c))
                                     newCount = c;
                             }
+                        }
+
+                        // Refresh from index.adi: after a full rebuild (thumbSize change) the
+                        // "[UPDATE] Final database:" line is absent and ThumbSize may have changed.
+                        int actualThumbSize, actualCount;
+                        ParseAdiInfo(Path.Combine(entry.Folder, "index.adi"), out actualThumbSize, out actualCount);
+                        if (actualCount > 0)
+                        {
+                            newCount = actualCount;
+                            entry.ThumbSize = actualThumbSize;
                         }
 
                         entry.ImageCount = newCount;
@@ -660,7 +681,7 @@ namespace AntiDupl.NET.WinForms.Forms
                     var psi = new System.Diagnostics.ProcessStartInfo
                     {
                         FileName = nvJpegPath,
-                        Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --update",
+                        Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --size {m_reducedImageSize} --update",
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
@@ -684,6 +705,17 @@ namespace AntiDupl.NET.WinForms.Forms
                                         newCount = c;
                                 }
                             }
+
+                            // Refresh from index.adi: after a full rebuild (thumbSize change) the
+                            // "[UPDATE] Final database:" line is absent and ThumbSize may have changed.
+                            int actualThumbSize, actualCount;
+                            ParseAdiInfo(Path.Combine(entry.Folder, "index.adi"), out actualThumbSize, out actualCount);
+                            if (actualCount > 0)
+                            {
+                                newCount = actualCount;
+                                entry.ThumbSize = actualThumbSize;
+                            }
+
                             entry.ImageCount = newCount;
                             entry.Status = "Ready";
                             successCount++;
@@ -1002,6 +1034,21 @@ namespace AntiDupl.NET.WinForms.Forms
             } catch { }
             
             return paths;
+        }
+
+        /// <summary>
+        /// Reads enabled, ready databases with their thumbnail size for the search pre-check.
+        /// </summary>
+        public static List<KeyValuePair<string, int>> GetEnabledDatabases()
+        {
+            var result = new List<KeyValuePair<string, int>>();
+            var entries = LoadRegistry("");
+            foreach (var entry in entries)
+            {
+                if (entry.Enabled && entry.Status == "Ready" && !string.IsNullOrEmpty(entry.Path))
+                    result.Add(new KeyValuePair<string, int>(entry.Path, entry.ThumbSize));
+            }
+            return result;
         }
 
         /// <summary>

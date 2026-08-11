@@ -111,6 +111,7 @@ namespace AntiDupl.NET.WinForms
         private LabeledComboBox m_compareThreadCountLabeledComboBox;
         private LabeledComboBox m_collectThreadCountLabeledComboBox;
         private LabeledComboBox m_reducedImageSizeLabeledComboBox;
+        private ToolTip m_reducedImageSizeToolTip;
         private LabeledIntegerEdit m_undoQueueSizeLabeledIntegerEdit;
         private LabeledIntegerEdit m_resultCountMaxLabeledIntegerEdit;
         private LabeledComboBox m_ignoreFrameWidthLabeledComboBox;
@@ -408,6 +409,9 @@ namespace AntiDupl.NET.WinForms
             m_reducedImageSizeLabeledComboBox.comboBox.Items.Add(new LabeledComboBox.Value(64, "64x64"));
             m_reducedImageSizeLabeledComboBox.comboBox.Items.Add(new LabeledComboBox.Value(128, "128x128"));
             advancedTableLayoutPanel.Controls.Add(m_reducedImageSizeLabeledComboBox, 0, 6);
+
+            m_reducedImageSizeToolTip = new ToolTip();
+            m_reducedImageSizeToolTip.ShowAlways = true;
 
             m_undoQueueSizeLabeledIntegerEdit = new LabeledIntegerEdit(COMBO_BOX_WIDTH, COMBO_BOX_HEIGHT, OnOptionChanged);
             m_undoQueueSizeLabeledIntegerEdit.Min = 0;
@@ -748,6 +752,7 @@ namespace AntiDupl.NET.WinForms
             m_collectThreadCountLabeledComboBox.Text = s.CoreOptionsForm_CollectThreadCountLabeledComboBox_Text;
             m_collectThreadCountLabeledComboBox.SetDescription(0, s.CoreOptionsForm_CollectThreadCountLabeledComboBox_Description_0);
             m_reducedImageSizeLabeledComboBox.Text = s.CoreOptionsForm_ReducedImageSizeLabeledComboBox_Text;
+            m_reducedImageSizeToolTip.SetToolTip(m_reducedImageSizeLabeledComboBox, s.CoreOptionsForm_ReducedImageSizeLabeledComboBox_Tooltip_Text);
             m_undoQueueSizeLabeledIntegerEdit.Text = s.CoreOptionsForm_UndoQueueSizeLabeledIntegerEdit_Text;
             m_resultCountMaxLabeledIntegerEdit.Text = s.CoreOptionsForm_ResultCountMaxLabeledIntegerEdit_Text;
             m_ignoreFrameWidthLabeledComboBox.Text = s.CoreOptionsForm_IgnoreFrameWidthLabeledComboBox_Text;

@@ -45,7 +45,7 @@ if errorlevel 1 (
 
 REM --- step 3: build WinForms GUI (C#, also builds AntiDupl.NET.Core) ---
 echo [4/5] Building AntiDupl.NET.WinForms ...
-dotnet build "%SRC_DIR%\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj" -c Release /p:SolutionDir="%SRC_DIR%\"
+dotnet build "%SRC_DIR%\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj" -c Release /p:Platform=x64 /p:SolutionDir="%SRC_DIR%\"
 if errorlevel 1 (
     echo [ERROR] WinForms build failed.
     exit /b 1

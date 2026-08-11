@@ -16,15 +16,14 @@
 |---|---|---|
 | JPEG decoding / Декодирование JPEG | CPU (libjpeg-turbo) | **GPU (nvJPEG)** — 5-10x faster |
 | Image comparison / Сравнение изображений | CPU (AllVsAll + OneVsList) | **GPU AllVsAll** (Squared Sum + SSIM) |
-| Database creation / Создание баз данных | N/A | **NvJpegCollector** — GPU decode + thumbnails |
-| Incremental update / Инкрементальное обновление | N/A | **`--update`** — add/remove changed files |
-| Database management / Управление базами | Search Paths (legacy) | **Database Manager** — create, update, delete, pools |
+| Databases / Базы данных | One built-in DB of normalized images | **Multiple pluggable DBs** created by **NvJpegCollector** (GPU decode + thumbnails), managed in **Database Manager** |
+| Database update / Обновление базы | Single built-in DB updated on search | **`--update`** — incremental add/remove of changed files per DB |
 | **Source folder remap** / **Смена папки-источника** | N/A | **Change Source Folder** — re-point a DB after its folder is moved |
 | Pool comparison / Сравнение пулов | N/A | **Pool1 vs Pool2** — cross-pool comparison |
 | Auto-Select / Автовыбор | Basic | **Extended** — time, size, quality, resolution, pools (AND-logic) |
 | Delete files / Удаление файлов | Recycle Bin only | **Recycle Bin + move** to a chosen folder |
-| Image quality / Качество изображений | Basic | **blockiness + blurring** computed at DB creation |
-| SSIM | No | **GPU SSIM** — full algorithm |
+| Image quality / Качество изображений | blockiness + blurring (CPU) | **Same algorithms, GPU/CPU** — computed at DB creation; temporarily lost during porting, then restored |
+| SSIM | CPU SSIM (full algorithm) | **GPU SSIM** — same algorithm, GPU-accelerated; temporarily disabled during porting, then re-enabled |
 
 ---
 

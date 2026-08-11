@@ -12,6 +12,9 @@ Log.txt
 # Tool artifacts
 skills-lock.json
 .qwen/
+.mimocode/
+ReviewPrompt.txt
+temp_db_query.py
 
 # User-specific files
 *.suo

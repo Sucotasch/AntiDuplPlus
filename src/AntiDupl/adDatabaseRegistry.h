@@ -33,6 +33,7 @@ namespace ad
         std::wstring Path;      // Search path (e.g. "D:\Photos\Sandy")
         std::wstring Folder;    // Database folder (e.g. "...user\images\32x32")
         std::wstring Name;      // Database name
+        std::wstring RemapFrom; // Original Path when folder was moved; empty = no remap
         int ThumbSize;
         size_t ImageCount;
         std::wstring Status; // Ready, Processing

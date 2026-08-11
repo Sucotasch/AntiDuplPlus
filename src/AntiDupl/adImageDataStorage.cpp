@@ -44,6 +44,27 @@ namespace ad
 
     //-------------------------------------------------------------------------
 
+    // Translate a path from an old prefix (remapFrom) to a new prefix (remapTo).
+    // Case-insensitive prefix match with a path-separator boundary, so that
+    // "D:\Photos\Sandy" does not match "D:\Photos\Sandy2".
+    static TString RemapPath(const TString& path, const TChar* remapFrom, const TChar* remapTo)
+    {
+        if(remapFrom == nullptr || remapTo == nullptr || remapFrom[0] == 0 || remapTo[0] == 0)
+            return path;
+
+        size_t fromLen = _tcslen(remapFrom);
+        if(path.size() < fromLen)
+            return path;
+
+        if(_tcsnicmp(path.c_str(), remapFrom, fromLen) != 0)
+            return path;
+
+        if(path.size() > fromLen && path[fromLen] != TEXT('\\') && path[fromLen] != TEXT('/'))
+            return path;
+
+        return TString(remapTo) + path.substr(fromLen);
+    }
+
 	TImageDataStorage::TImageDataStorage(TEngine *pEngine)
 		:m_pEngine(pEngine),
 		m_pStatus(pEngine->Status()),
@@ -157,7 +178,7 @@ namespace ad
 		return it->second;
 	}
 
-	adError TImageDataStorage::Load(const TChar *path, bool allLoad)
+	adError TImageDataStorage::Load(const TChar *path, bool allLoad, const TChar *remapFrom, const TChar *remapTo)
 	{
 		if(!IsDirectoryExists(path))
 			return AD_ERROR_DIRECTORY_IS_NOT_EXIST;
@@ -179,8 +200,8 @@ namespace ad
 		if (isDllNative) {
 			// DLL-native format: use existing LoadIndex flow
 			TIndex index;
-			if( LoadIndex(index, indexPath.c_str(), allLoad) || 
-				LoadIndex(index, CreatePath(path, TString(BACKUP_FILE_NAME) + FILE_EXTENSION).c_str(), allLoad))
+			if( LoadIndex(index, indexPath.c_str(), allLoad, remapFrom, remapTo) || 
+				LoadIndex(index, CreatePath(path, TString(BACKUP_FILE_NAME) + FILE_EXTENSION).c_str(), allLoad, remapFrom, remapTo))
 			{
 				size_t size = 0;
 				for(TIndex::iterator it = index.begin(); it != index.end(); ++it)
@@ -199,7 +220,7 @@ namespace ad
 
 					if(it->second.type == TData::Old)
 					{
-						if (!LoadData(it->second, path, it->second.key))
+						if (!LoadData(it->second, path, it->second.key, remapFrom, remapTo))
 							return AD_ERROR_UNKNOWN;
 						m_pStatus->SetProgress(i, size);
 						i += it->second.size;
@@ -213,7 +234,7 @@ namespace ad
 		else
 		{
 			// Collector-native format (NvJpegCollector): ThumbSize + raw data
-			return LoadCollectorNative(path, firstBytes, allLoad);
+			return LoadCollectorNative(path, firstBytes, allLoad, remapFrom, remapTo);
 		}
 	}
 
@@ -448,7 +469,7 @@ namespace ad
 		return true;
 	}
 
-	bool TImageDataStorage::LoadIndex(TIndex & index, const TChar *fileName, bool allLoad) const
+	bool TImageDataStorage::LoadIndex(TIndex & index, const TChar *fileName, bool allLoad, const TChar *remapFrom, const TChar *remapTo) const
 	{
 		try
 		{
@@ -465,6 +486,8 @@ namespace ad
 				inputFile.Load(data.first);
 				inputFile.Load(data.last);
 				inputFile.LoadSize(data.size);
+				data.first = RemapPath(data.first.Original(), remapFrom, remapTo);
+				data.last = RemapPath(data.last.Original(), remapFrom, remapTo);
 				index[data.key] = data;
 			}
 
@@ -479,7 +502,7 @@ namespace ad
 
 	// Load Collector-native format (NvJpegCollector): index.adi without "adid" header
 	// Format: thumbSize(u32) + groupCount(u64) + key(i16) + first(wstring) + last(wstring) + imgCount(u64)
-	adError TImageDataStorage::LoadCollectorNative(const TChar *path, uint32_t thumbSizeFromHeader, bool allLoad)
+	adError TImageDataStorage::LoadCollectorNative(const TChar *path, uint32_t thumbSizeFromHeader, bool allLoad, const TChar *remapFrom, const TChar *remapTo)
 	{
 		TString indexPath = CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION);
 		
@@ -523,12 +546,12 @@ namespace ad
 			// Load the data file (0000.adi, etc.)
 			TData data;
 			data.key = key;
-			data.first = firstPath;
-			data.last = lastPath;
+			data.first = RemapPath(firstPath, remapFrom, remapTo);
+			data.last = RemapPath(lastPath, remapFrom, remapTo);
 			data.size = imgCount;
 			data.type = TData::Old;
 
-			if (!LoadCollectorData(path, data, key))
+			if (!LoadCollectorData(path, data, key, remapFrom, remapTo))
 			{
 				fclose(f);
 				return AD_ERROR_UNKNOWN;
@@ -542,7 +565,7 @@ namespace ad
 
 	// Load Collector-native data file (0000.adi, etc.)
 	// Format: thumbSize(u32) + key(i16) + first(wstring) + last(wstring) + count(u64) + N records
-	bool TImageDataStorage::LoadCollectorData(const TChar *path, TData & data, short key)
+	bool TImageDataStorage::LoadCollectorData(const TChar *path, TData & data, short key, const TChar *remapFrom, const TChar *remapTo)
 	{
 		TString dataFileName = CreatePath(path, GetDataFileName(key));
 		FILE* f = _wfopen(dataFileName.c_str(), L"rb");
@@ -600,6 +623,8 @@ namespace ad
 			uint8_t filled = 0; fread(&filled, 1, 1, f);
 
 			// Set image info
+			std::wstring origPath = imgPath;
+			imgPath = RemapPath(imgPath, remapFrom, remapTo);
 			imageData.path = TPath(imgPath);
 			imageData.size = fileSize;
 			imageData.time = fileTime;
@@ -611,6 +636,8 @@ namespace ad
 			imageData.blurring = blurring;
 			imageData.crc32c = crc32c;
 			imageData.defect = (TDefectType)defect;
+			if(imgPath != origPath)
+				imageData.hash = imageData.path.GetCrc32();
 
 			// Read thumbnail data if filled
 			if (filled && fileThumbSize > 0)
@@ -645,7 +672,7 @@ namespace ad
 	}
 
 	//key - номер файла индекса 0001.adi - 1
-	bool TImageDataStorage::LoadData(TData & data, const TChar *path, short key)
+	bool TImageDataStorage::LoadData(TData & data, const TChar *path, short key, const TChar *remapFrom, const TChar *remapTo)
 	{
 		try
 		{
@@ -663,6 +690,12 @@ namespace ad
 			for(size_t i = 0; i < data.size; i++)
 			{
 				inputFile.Load(imageData);
+				TString remapped = RemapPath(imageData.path.Original(), remapFrom, remapTo);
+				if(remapped != imageData.path.Original())
+				{
+					imageData.path = remapped;
+					imageData.hash = imageData.path.GetCrc32();
+				}
 				if(Find(imageData) == m_storage.end())
 				{
 					if(IsFileExists(imageData.path.Original().c_str()))

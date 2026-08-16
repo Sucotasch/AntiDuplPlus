@@ -57,6 +57,18 @@ GPU-ускоренный поисковик дубликатов/похожих 
 - ⏳ **BUG-13 (hash=0) всё ещё открыт**: `info.hash = 0` в `ProcessGray` (`main.cpp:307`); `SimpleCRC32(path)` используется только для имени файла БД
 - Версия: `src/version.txt` = 2.5.3
 
+### Открытые дефекты из аудита 2026-08-16 (полный список — корневой `Audit.md`)
+
+P1 (портят данные/результаты прямо сейчас):
+- **C1**: `--update` коллектора пишет ДВЕ записи для изменённого файла (плейсхолдер не перезаписывается) → старое превью может жить вечно
+- **N2**: GPU-поиск игнорирует `checkOnEquality` → пары дубликатов в скане дефектов
+- **N3**: `CompareWithSetGPU` (CPU-путь с GPU-ассистом при `transformedImage=TRUE`) читает неинициализированную VRAM для картинок из БД; `UpdateGpuDatabase` — мёртвый код
+- **S1**: AutoSelect игнорирует критерии Time/Pool при включённом критерии качества → удаляется не тот файл
+- **S4**: дедлок пайпов при запуске коллектора из Database Manager (stdout/stderr последовательно)
+- **B1**: MakeBin.cmd пакует `nvjpeg64_12.dll` вместо `nvjpeg64_13.dll` → коллектор в релизном zip не запускается
+
+P2-контракты коллектор↔DLL (смешанные БД тихо несравнимы): **C5** CRC32c = CRC превью (DLL: CRC файла); **C6** превью одним Resize вместо 256+пирамиды 2x2; **N7/C7** DLL грузит thumbSize ≠ reducedImageSize (GPU отфильтрует, CPU-путь читает верхний левый квадрант → мусор).
+
 ### Отложено / закрыто
 - ⏭ **BUG-08 [P2]**: Match buffer truncation — пропущен (>5M пар, редкий случай)
 - ⏭ **BUG-10 [P2]**: GPU→CPU fallback — пропущен (не нужен, пользователь может использовать оригинальную версию)
@@ -137,7 +149,7 @@ NvJpegCollector.exe (C++/CUDA) — утилита создания баз
 - Result count + N * TResult (type, first_index, second_index, defect, difference, transform, group, groupSize, hint)
 
 ### Известная проблема: hash=0
-NvJpegCollector записывает `hash=0` для всех изображений (после rewrite — одно место: `info.hash = 0` в `ProcessGray`, `main.cpp`). При загрузке .adr файла `Actual()` проверяет path+size+time (hash исключён из проверки). Новые базы также будут с hash=0. `SimpleCRC32(path)` применяется только для генерации имени файла БД.
+NvJpegCollector записывает `hash=0` для всех изображений (после rewrite — одно место: `info.hash = 0` в `ProcessGray`, `main.cpp`). При загрузке .adr файла `Actual()` проверяет path+size+time (hash исключён из проверки). Новые базы также будут с hash=0. `SimpleCRC32(path)` применяется только для генерации имени файла БД. Следствие для перфа: `TImageDataStorage::Find` делает `lower_bound/upper_bound(0)` по всему multimap → O(N²) сравнений путей при загрузке DLL.
 
 ---
 
@@ -222,12 +234,12 @@ NvJpegCollector записывает `hash=0` для всех изображен
 2. Собрать C++ проекты: cmd\Deploy.cmd (или msbuild src\AntiDupl.sln /p:Configuration=Release /p:Platform=x64) — теперь exe/dll падают прямо в bin\Release, отдельно копировать не нужно
 3. Собрать C#: dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release
 4. Self-contained publish: dotnet publish src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj -c Release -r win-x64 --self-contained true -o out/publish
-5. Добавить native deps: скопировать AntiDupl.dll, nvjpeg64_13.dll, cudart64_13.dll, NvJpegCollector.exe, data/ в out/publish (nvjpeg64_12.dll более не требуется, т.к. collector линкуется против 13.x)
+5. Добавить native deps: скопировать AntiDupl.dll, cudart64_12.dll (нужна самому AntiDupl.dll), nvjpeg64_13.dll (нужна NvJpegCollector.exe), NvJpegCollector.exe, data/ в out/publish. Проверено по импортам бинарников (аудит B1): AntiDupl.dll → только cudart64_12; NvJpegCollector.exe → только nvjpeg64_13; nvjpeg64_12.dll и cudart64_13.dll НЕ требуются
 6. Zip: cd out/publish && 7za a -tzip ..\bin\AntiDupl.NET-{VER}.zip *
 7. GitHub: git tag + gh release create --repo Sucotasch/AntiDuplPlus
 
 ### Критические замечания
 - dotnet publish НЕ копирует native P/Invoke DLL (AntiDupl.dll) - копировать вручную
-- MakeBin.cmd устарел - не включает CUDA зависимости
+- MakeBin.cmd не просто устарел: он пакует nvjpeg64_12.dll и НЕ пакует nvjpeg64_13.dll → коллектор в CI-артефактах не запускается (Audit.md B1). Фикс: заменить nvjpeg64_12 → nvjpeg64_13 в списке копирования
 - zip должен содержать файлы в корне, не в поддиректории out/publish
 - gh release create требует --repo Sucotasch/AntiDuplPlus

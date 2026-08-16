@@ -5,7 +5,7 @@
 | **Created** | 2026-07-17 |
 | **Updated** | 2026-08-16 (после фиксов BUG-01…07, 09, 11 + WP-A filter parity; re-check кода) |
 | **Track** | Надёжность GPU-поиска, dual `.adi`, lifecycle результатов; дальше — UX без обязательной DB |
-| **Audit** | `Audit/FULL_AUDIT_2026-07-17.md` (исторический снимок; **код новее**) |
+| **Audit** | `Audit/FULL_AUDIT_2026-07-17.md` (исторический снимок; **код новее**) + корневой `Audit.md` (полный аудит 2026-08-16, актуальные P1: C1, N2, N3, S1, S4, B1) |
 | **Status source** | `PROJECT_CONTEXT.md` (18.07.2026) + re-check кода |
 | **Rules** | `AGENTS.md`, `.agents/skills/karpathy/SKILL.md` |
 | **Code in this doc** | **None** — только документация |
@@ -91,7 +91,7 @@ Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release.
 | BUG-05 | P1 | ✅ | `File.Move` + `MarkRemovedFirst/Second` |
 | BUG-06 | P1 | ✅ | shutdown timeout 10s (`MainForm`) |
 | BUG-07 | P2 | ✅ | `validCount < 2` → `return true` |
-| BUG-08 | P2 | ⏭ skipped | cap 5e6 matches, silent drop — редкость |
+| BUG-08 | P2→**P1** | ⏭ open | Обрезка 5M капов: лимит считается ДО метаданных-фильтров (кандидат-пар > 5M на больших корпусах), стриминговый цикл вычитки структурно мёртв (один проход), `bufferFullCount` не заполняется. План фикса — Audit.md N1 (полосы строк) |
 | BUG-09 | P2 | ✅ | `d_poolMask` free on MS error paths |
 | BUG-10 | P2 | ⏭ skipped | GPU→CPU fallback — сознательно не делали |
 | BUG-11 | P3 | ✅ | skip flag **до** `CollectManager::Start()` |
@@ -102,7 +102,7 @@ Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release.
 
 ### Известные остаточные дыры (не «всё зелёное»)
 
-1. **BUG-08 фактически мёртвое поле** — `ctx.bufferFullCount` (`adEngine.cpp`) инициализируется нулём и больше нигде не используется; ядро его не заполняет и warning не показывается.
+1. **BUG-08 — реальная тихая обрезка результатов (повышен до P1, аудит 16.08)** — лимит 5M считается по кандидат-парам ДО фильтров `MatchCallback` («стриминговый» цикл вычитки делает ровно один проход, т.е. мёртв); `ctx.bufferFullCount` не заполняется ядром. Фикс-план (полосы строк в ядре) — `Audit.md` N1.
 2. **BUG-03 fail-soft** — bad thumb: `fseek` + continue, load всё равно `true` (не OOB, но запись может быть «пустой»).
 3. **Shutdown 10s** — лучше, чем 2s; при очень большом `.adr` теоретически всё ещё race.
 4. **MarkRemoved** — после move путь в FS новый, в result storage пара снимается; image DB чистится `CheckImageData` (файл «пропал» со старого path). Не путать с true rename-in-DB.

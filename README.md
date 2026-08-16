@@ -92,7 +92,7 @@ If the source folder was moved, you don't need to rebuild the database:
 - Context menu → Delete First / Delete Second / Delete Both
 - Context menu → Move First → Second / Move Second → First
 - **Auto-Select**: Edit → Auto-Select → quick presets (Older, Newer, Smaller...)
-- **Auto-Select Advanced**: combined criteria (AND-logic)
+- **Auto-Select Advanced**: combined criteria (AND-logic) — known issue: time/pool criteria are ignored while a quality criterion is set (Audit.md S1)
 - Edit → Delete Selected / Move Selected to Folder
 - Manual: click **Target** column to switch 1st / 2nd / (empty)
 
@@ -103,6 +103,8 @@ When files in the source folder changed:
 ```
 NvJpegCollector.exe --input "D:\photos" --update
 ```
+
+Known issue: modified files currently get a duplicate record (stale + fresh) in the DB until re-run after fix (Audit.md C1) / Известная проблема: для изменённых файлов сейчас пишется дубликат записи — см. Audit.md C1.
 
 Or via **Database Manager → Update** button / или кнопка **Update** в Database Manager.
 

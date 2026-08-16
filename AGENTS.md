@@ -26,7 +26,7 @@ Solution: `src/AntiDupl.sln` (build dependency order matters):
 | `data/resources/` | Runtime strings/resources (copied post-build) |
 | `cmd/` | `CopyData.cmd`, packaging scripts |
 | `bin/<Config>/` | Shared build output |
-| `Audit/` | Audit reports (historical) |
+| `Audit/` | Audit reports (historical); root `Audit.md` = full review 2026-08-16 (open P1s) |
 | `.agents/skills/karpathy/` | Engineering discipline for agents |
 
 ## Build
@@ -145,5 +145,5 @@ No automated test suite in the solution. CI only checks that the build succeeds.
 - Long product status / known fixed issues: `PROJECT_CONTEXT.md` (verify against code).
 - Historical plans: `IMPLEMENTATION_PLAN.md`. Audits: `Audit/`.
 - Do not commit secrets, local DBs under `bin/`, or `vcpkg/` tree changes unless asked.
-- `dotnet publish` does **not** copy native P/Invoke DLLs (`AntiDupl.dll`, `nvjpeg64_12.dll`, `cudart64_12.dll`). Copy them manually after publish.
+- `dotnet publish` does **not** copy native P/Invoke DLLs. Copy manually: `AntiDupl.dll` + `cudart64_12.dll` (AntiDupl.dll imports only cudart64_12) and `nvjpeg64_13.dll` (NvJpegCollector.exe imports only nvjpeg64_13). `nvjpeg64_12.dll` / `cudart64_13.dll` are NOT needed (verified via binary imports — Audit.md §4/B1).
 - Release process: update `src/version.txt` → build C++ → copy DLL → build C# → `dotnet publish` → manual copy native deps → zip → `git tag` + `gh release create` (creates draft).

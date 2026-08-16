@@ -1,11 +1,11 @@
-# План развития AntiDuplPlus — Актуальное состояние (14.07.2026)
+# План развития AntiDuplPlus — Актуальное состояние (обновлено 16.08.2026)
 
 ## Архитектурный справочник
 
 ### Два формата .adi
-- **DLL-native**: `"adid"` заголовок + version. Записывается при сканировании файлов (CPU).
-- **Collector-native**: Без заголовков, raw fwrite. Записывается NvJpegCollector.
-- `LoadData()` читает DLL-native, `LoadDatabase()` читает Collector-native. Не путать.
+- **DLL-native**: index использует magic `"adii"` (`0x69696461`), data — `"adid"` + version. Записывается при сканировании файлов (CPU) / DLL save.
+- **Collector-native**: Без заголовков, raw fwrite (первый u32 = ThumbSize). Записывается NvJpegCollector. blockiness/blurring — f32.
+- `LoadData()` читает DLL-native, `Load()` авто-детектит формат → `LoadCollectorNative()`. Не путать.
 
 ### GPU режимы
 - `GpuCompareAllVsAll` — аллоцирует собственную VRAM через `cudaMalloc`. Глобальные буферы (`GpuCreateBuffer`/`GpuUploadThumbnail`) используются только в `OneVsList` (CPU fallback).
@@ -56,24 +56,35 @@
 
 ## 📋 Известные ограничения
 
-1. **hash=0 в NvJpegCollector**: Все изображения записывают `hash=0` (4 места в main.cpp). `Actual()` не проверяет hash — это нормально, но hash не несёт полезной информации.
+1. **hash=0 в NvJpegCollector**: Все изображения записывают `hash=0` (одно место после rewrite: `ProcessGray` в main.cpp; `SimpleCRC32` идёт только на имя файла БД). `Actual()` не проверяет hash — это нормально, но hash не несёт полезной информации.
 
-2. **WPF проект**: Target .NET 6.0, но ссылается на Core (target .NET 8.0). Pre-existing framework mismatch. B08 fix applied но не верифицирован сборкой.
+2. **vcpkg simd**: Заголовки/библиотеки simd не попадают в triplet-директорию. Workaround: ручное копирование + `/p:VcpkgManifestInstall=false`.
 
-3. **vcpkg simd**: Заголовки/библиотеки simd не попадают в triplet-директорию. Workaround: ручное копирование + `/p:VcpkgManifestInstall=false`.
+3. **Нет тестов**: CI только проверяет что сборка проходит. Нет unit-тестов, интеграционных тестов.
 
-4. **Нет тестов**: CI только проверяет что сборка проходит. Нет unit-тестов, интеграционных тестов.
+4. **BUG-08**: match buffer cap 5e6 — `ctx.bufferFullCount` не заполняется ядром и не проверяется (мёртвое поле).
+
+---
+
+## ✅ Закрыто с момента предыдущей ревизии плана
+
+- WPF framework mismatch — WPF переведён на `net8.0-windows`.
+- Инкрементальное обновление баз — реализовано (`--update` в NvJpegCollector + кнопка Update в Database Manager).
+- GPU filter parity (WP-A аудита) — ratio/min-max/transforms в `adEngine.cpp`.
+- DB source folder remap — `RemapFrom`, трансляция путей при загрузке.
+- C# output — общий `bin/<Config>/`.
 
 ---
 
 ## 🔮 Возможные направления развития
 
 ### Качество кода
-- Исправить `hash=0` в NvJpegCollector (вычислять `SimpleCRC32(path)`)
-- Исправить WPF framework mismatch (обновить target до .NET 8)
+- Исправить `hash=0` в NvJpegCollector (вычислять `SimpleCRC32(path)` при создании записи)
+- BUG-08: заполнение `bufferFullCount` в kernel + warning в UI
 - Добавить unit-тесты для критических модулей (adImageDataStorage, adResultStorage)
 
 ### Функциональность
-- Инкрементальное обновление баз (только новые файлы)
+- Batch cancel (WP-B аудита): CancellationToken в `AutoSelector.ExecuteBatch`
+- Сравнение без ручной DB / quick scan (WP-C аудита — согласовать подход с пользователем)
 - Кэширование загруженных баз в памяти
 - Расширенный Auto-Select (CloneSpy-style массовый выбор)

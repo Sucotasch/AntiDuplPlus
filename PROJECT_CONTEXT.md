@@ -2,7 +2,7 @@
 
 GPU-ускоренный поисковик дубликатов/похожих изображений. Fork [AntiDupl.NET](https://github.com/ermig1979/AntiDupl) с CUDA/nvJPEG ускорением.
 
-## Текущий статус (на 18.07.2026)
+## Текущий статус (на 16.08.2026)
 
 ### Рабочее
 - ✅ GPU поиск дубликатов (Mean Square + SSIM)
@@ -47,6 +47,16 @@ GPU-ускоренный поисковик дубликатов/похожих 
 - ✅ **BUG-09 [P2]**: d_poolMask VRAM leak при ошибках MS ядра. Добавлен cleanup в error paths (`adGPU.cu`)
 - ✅ **BUG-11 [P3]**: Skip flag устанавливался после CollectManager.Start(). Перемещён до Start() (`adEngine.cpp`)
 
+### Добавлено/исправлено после 18.07 (re-check 16.08)
+- ✅ **WP-A (GPU filter parity)**: ratio-фильтр в `MatchCallback`, min/max size при GPU pack, `transformedImage → CPU` (`adEngine.cpp`)
+- ✅ **DB source folder remap**: `RemapFrom` в registry + трансляция путей при загрузке, колонка `Moved` в Database Manager (`DatabaseManagerForm.cs`, `06378b2`)
+- ✅ **NvJpegCollector переписан**: Y-decode, async pipeline (single sequential reader + N decoder threads), Simd-детекторы, фикс hang на недекодируемых файлах, per-file stats + failed-file log (`4ddd1cd`…`f6aecaa`)
+- ✅ **GUI передаёт `--size` (= reducedImageSize) в collector** + VRAM hint и pre-check размера БД (`6618a3d`)
+- ✅ **WPF переведён на net8.0-windows** (framework mismatch устранён)
+- ✅ **C# output → общий `bin/<Config>/`** (csproj OutputPath `..\..\bin\`), Deploy.cmd передаёт `Platform=x64`
+- ⏳ **BUG-13 (hash=0) всё ещё открыт**: `info.hash = 0` в `ProcessGray` (`main.cpp:307`); `SimpleCRC32(path)` используется только для имени файла БД
+- Версия: `src/version.txt` = 2.5.3
+
 ### Отложено / закрыто
 - ⏭ **BUG-08 [P2]**: Match buffer truncation — пропущен (>5M пар, редкий случай)
 - ⏭ **BUG-10 [P2]**: GPU→CPU fallback — пропущен (не нужен, пользователь может использовать оригинальную версию)
@@ -82,7 +92,7 @@ dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj /p:SolutionD
 - **`adExternal.h`** (C++) и **`External.cs`** (C#) **генерируются автоматически** из `src/version.txt` pre-build скриптами. Не редактировать вручную.
 - **Post-build**: `cmd/CopyData.cmd` копирует `data/resources/` в папку вывода.
 - **vcpkg зависимости** устанавливаются в `src/vcpkg_installed/x64-windows-static/`. Первая сборка может быть долгой.
-- **C# build output** идёт в `src/AntiDupl.NET.WinForms/bin/Release/`, не в общий `bin/Release/`. Копировать вручную.
+- ~~C# build output идёт в src/...~~ (устарело): C# csproj теперь выводит в общий `bin/Release/` — см. «Заметки по сборке (09.08.2026)» ниже.
 
 ### vcpkg: проблема с simd
 Пакет `simd` устанавливает заголовки в `vcpkg_installed/x64-windows-static/include/`, но MSBuild ищет в `vcpkg_installed/x64-windows-static/x64-windows-static/include/`. **Workaround**: скопировать заголовки и .lib файлы вручную:
@@ -127,7 +137,7 @@ NvJpegCollector.exe (C++/CUDA) — утилита создания баз
 - Result count + N * TResult (type, first_index, second_index, defect, difference, transform, group, groupSize, hint)
 
 ### Известная проблема: hash=0
-NvJpegCollector записывает `hash=0` для всех изображений (4 места: строки 321, 518, 548, 752 main.cpp). При загрузке .adr файла `Actual()` проверяет path+size+time (hash исключён из проверки). Новые базы также будут с hash=0.
+NvJpegCollector записывает `hash=0` для всех изображений (после rewrite — одно место: `info.hash = 0` в `ProcessGray`, `main.cpp`). При загрузке .adr файла `Actual()` проверяет path+size+time (hash исключён из проверки). Новые базы также будут с hash=0. `SimpleCRC32(path)` применяется только для генерации имени файла БД.
 
 ---
 

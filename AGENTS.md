@@ -1,6 +1,6 @@
 # AntiDuplPlus
 
-GPU-accelerated duplicate/similar image finder (fork of AntiDupl.NET). **Windows x64 only.** Version from `src/version.txt` (currently 2.5.0).
+GPU-accelerated duplicate/similar image finder (fork of AntiDupl.NET). **Windows x64 only.** Version from `src/version.txt` (currently 2.5.3).
 
 Trust **code** over long notes in `PROJECT_CONTEXT.md` / `IMPLEMENTATION_PLAN.md` if they conflict.
 

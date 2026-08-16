@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Created** | 2026-07-17 |
-| **Updated** | 2026-07-18 (после фиксов BUG-01…07, 09, 11 + BUG-05) |
+| **Updated** | 2026-08-16 (после фиксов BUG-01…07, 09, 11 + WP-A filter parity; re-check кода) |
 | **Track** | Надёжность GPU-поиска, dual `.adi`, lifecycle результатов; дальше — UX без обязательной DB |
 | **Audit** | `Audit/FULL_AUDIT_2026-07-17.md` (исторический снимок; **код новее**) |
 | **Status source** | `PROJECT_CONTEXT.md` (18.07.2026) + re-check кода |
@@ -80,7 +80,7 @@ Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release.
 
 ## 2. Статус аудита (что уже сделано)
 
-Коммиты: `ae1e450` (8 bugs), `4c915df` (BUG-05 MarkRemoved), `c445e48` (docs).
+Коммиты: `ae1e450` (8 bugs), `4c915df` (BUG-05 MarkRemoved), `c445e48` (docs), `895c8d2` (native robustness/leaks/CI), плюс пост-аудит: WP-A filter parity, collector rewrite (`4ddd1cd`…`f6aecaa`), DB folder remap (`06378b2`), `--size`+VRAM (`6618a3d`).
 
 | ID | Sev | Статус | Где в коде (re-check 18.07) |
 |----|-----|--------|----------------------------|
@@ -96,17 +96,25 @@ Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release.
 | BUG-10 | P2 | ⏭ skipped | GPU→CPU fallback — сознательно не делали |
 | BUG-11 | P3 | ✅ | skip flag **до** `CollectManager::Start()` |
 | BUG-12 | P3 | ❌ closed | DB-only workflow — by design |
-| BUG-13 | P3 | open | collector `hash=0` (perf) |
+| BUG-13 | P3 | open | collector пишет `hash=0` для записей (`info.hash = 0` в `ProcessGray`, main.cpp; `SimpleCRC32` используется только для имени файла БД) |
 | BUG-14 | P3 | open | нет unit/smoke automated tests |
 | FIND-8 | — | open | Cancel не wired для batch flows |
 
 ### Известные остаточные дыры (не «всё зелёное»)
 
-1. **GPU filters incomplete vs CPU**  
-   CPU `IsDuplPair` ещё: `ratioControl`, и `CanCompare` min/max size; GPU pack не фильтрует min/max; transforms всегда `TURN_0`.  
-2. **BUG-03 fail-soft** — bad thumb: `fseek` + continue, load всё равно `true` (не OOB, но запись может быть «пустой»).  
-3. **Shutdown 10s** — лучше, чем 2s; при очень большом `.adr` теоретически всё ещё race.  
+1. **BUG-08 фактически мёртвое поле** — `ctx.bufferFullCount` (`adEngine.cpp`) инициализируется нулём и больше нигде не используется; ядро его не заполняет и warning не показывается.
+2. **BUG-03 fail-soft** — bad thumb: `fseek` + continue, load всё равно `true` (не OOB, но запись может быть «пустой»).
+3. **Shutdown 10s** — лучше, чем 2s; при очень большом `.adr` теоретически всё ещё race.
 4. **MarkRemoved** — после move путь в FS новый, в result storage пара снимается; image DB чистится `CheckImageData` (файл «пропал» со старого path). Не путать с true rename-in-DB.
+
+### Что появилось после аудита 17.07 (re-check 16.08)
+
+| Фича | Где |
+|------|-----|
+| **DB source folder remap** — БД «переезжает» за перемещённой папкой: `RemapFrom` пишется в registry, DLL транслирует пути при загрузке; позже `Update` переписывает пути | `DatabaseManagerForm.cs` (`RemapFrom`, col. `RemapIndicator`), `adDatabaseRegistry.cpp` / `adSearcher.cpp` |
+| **Collector переписан**: Y-decode, async pipeline с worker pool, Simd-детекторы, single sequential reader (anti HDD-thrash), фикс hang на недекодируемых файлах, per-file stats + failed-file log | `NvJpegCollector/main.cpp` (коммиты `4ddd1cd`…`f6aecaa`) |
+| **GUI передаёт `reducedImageSize` в collector (`--size`)** — thumb size DB синхронен с options; VRAM hint + pre-check размера БД | `MainMenu.cs` / `DatabaseManagerForm.cs`, `main.cpp` (`--size, -s`) |
+| Версия | `src/version.txt` = 2.5.3 |
 
 ---
 
@@ -156,21 +164,11 @@ Batch move
 
 ## 5. Work packages (что делать дальше)
 
-WP-0…2 из старого guide **закрыты**. Ниже — актуальный backlog.
+WP-0…2 из старого guide **закрыты**. WP-A (GPU filter parity) **тоже закрыт** (re-check 16.08: ratio — `adEngine.cpp` `MatchCallback`; min/max — pack loop; transforms → CPU через `transformedImage == FALSE` в условии `useGpu`). Ниже — актуальный backlog.
 
-### WP-A — Дожать GPU filter parity (малый, high ROI)
+### ~~WP-A — Дожать GPU filter parity~~ ✅ ЗАКРЫТ (16.08)
 
-| | |
-|--|--|
-| **Goal** | GPU MatchCallback / pack ≈ CPU filters |
-| **Gap** | `ratioControl`; min/max image size; опционально force-CPU if `transformedImage` |
-| **Files** | `adEngine.cpp` (`MatchCallback`, pack loop); ref `adImageComparer.cpp`, `adThreadManagement.cpp` |
-| **Sketch** | |
-| | В pack: skip if width/height outside `minimalImageSize`/`maximalImageSize` |
-| | В callback: ratio check как в `IsDuplPair` (`RATIO_THRESHOLD_DIFFERENCE`) |
-| | Если `transformedImage==TRUE`: либо document-only GPU off, либо `useGpu=false` в `Search()` |
-| **Tests** | Fixture: same-folder off, ratio on, min size; GPU vs CPU pair sets |
-| **Risk** | Меньше пар у тех, кто «пользовался» дырой | **Mitigation** | correct fewer FPs; release note |
+Реализовано в `adEngine.cpp`: ratio check в `MatchCallback`, min/max size при pack, `useGpu=false` при `transformedImage == TRUE`.
 
 ### WP-B — Batch cancel (FIND-8)
 
@@ -223,7 +221,7 @@ WP-0…2 из старого guide **закрыты**. Ниже — актуал
 ## 6. Порядок внедрения
 
 ```
-WP-A (filter parity)  →  WP-B (cancel)  →  WP-C (no-DB UX, с явным выбором A/B/C)  →  WP-D
+WP-B (cancel)  →  WP-C (no-DB UX, с явным выбором A/B/C)  →  WP-D
 ```
 
 Один WP ≈ один PR. Не смешивать MarkRemoved/interop с UI redesign.
@@ -258,20 +256,21 @@ WP-A (filter parity)  →  WP-B (cancel)  →  WP-C (no-DB UX, с явным в�
 
 ```
 adEngine.cpp
-  MatchCallback          ← WP-A filters
-  ExecuteGpuAllVsAll     ← pack side + min/max
-  Search()               ← useGpu / skip flag order (done)
+  MatchCallback          ← WP-A filters (done: ratio, type/size/folder/searchPath)
+  ExecuteGpuAllVsAll     ← pack side + min/max (done)
+  Search()               ← useGpu / skip flag order + transformedImage→CPU (done)
 adImageDataStorage.cpp
   Load / LoadCollectorData  ← magic + thumbBytes (done)
 adGPU.cu
-  poolMask cleanup (done); match cap (BUG-08 open)
+  poolMask cleanup (done); match cap (BUG-08 open — bufferFullCount не заполняется)
 adUndoRedoEngine.*
   MarkRemoved (done) — pattern for non-delete result updates
 AutoSelector.ExecuteBatch
   delete ApplyToResult; move File.Move+MarkRemoved (done)
-  ← WP-B cancel
+  ← WP-B cancel (не реализовано — нет CancellationToken)
 SearchExecuterForm / DatabaseManager
-  ← WP-C empty-state / quick scan
+  ← WP-C empty-state / quick scan (не реализовано)
+  + folder remap (RemapFrom) уже есть
 ```
 
 ### Interop checklist (любой новый LocalAction)
@@ -284,40 +283,13 @@ SearchExecuterForm / DatabaseManager
 
 ---
 
-## 9. Micro-patches (только открытые gaps)
+## 9. Micro-patches
 
-### A. Ratio filter in MatchCallback (WP-A)
+A (ratio), B (min/max), C (transforms→CPU) — **реализованы** в `adEngine.cpp` (см. §5).
 
-```cpp
-// after sizeControl block — mirror adImageComparer.cpp
-if (opts->compare.ratioControl == TRUE)
-{
-    if (Simd::Square(pImage1->ratio - pImage2->ratio) >
-        Simd::Square(RATIO_THRESHOLD_DIFFERENCE))
-        continue;
-}
-```
+### D. Match cap warning (WP-D) — единственный оставшийся
 
-### B. Min/max size at pack (WP-A)
-
-```cpp
-const auto& cmp = m_pOptions->compare;
-if (pImageData->width < (TUInt32)cmp.minimalImageSize ||
-    pImageData->width > (TUInt32)cmp.maximalImageSize ||
-    pImageData->height < (TUInt32)cmp.minimalImageSize ||
-    pImageData->height > (TUInt32)cmp.maximalImageSize)
-    continue;
-```
-
-### C. Force CPU when transforms requested (WP-A option)
-
-```cpp
-bool useGpu = ... && m_pOptions->compare.transformedImage == FALSE;
-```
-
-### D. Match cap warning (WP-D)
-
-После GPU success: if `ctx.bufferFullCount > 0` → status string / log, not only debug.
+Сейчас `ctx.bufferFullCount` не заполняется ядром и не проверяется. Нужно: счётчик в kernel → после GPU success `if (ctx.bufferFullCount > 0)` → status/log, не silent.
 
 ---
 
@@ -342,7 +314,7 @@ bool useGpu = ... && m_pOptions->compare.transformedImage == FALSE;
 | Metric | Target |
 |--------|--------|
 | P0/P1 из аудита 17.07 | ✅ closed (кроме intentional skips) |
-| GPU ratio/min-max | = CPU на fixture (WP-A) |
+| GPU ratio/min-max | ✅ = CPU-фильтры (WP-A closed) |
 | Batch cancel | Partial progress + no crash (WP-B) |
 | No-DB path | User can search folder without manual DB steps (WP-C) |
 | Collector DBs | Existing load unchanged |
@@ -369,29 +341,28 @@ bool useGpu = ... && m_pOptions->compare.transformedImage == FALSE;
 | Исторический bug list | `Audit/FULL_AUDIT_2026-07-17.md` |
 | Живой статус продукта | `PROJECT_CONTEXT.md` |
 | Build / invariants | `AGENTS.md` |
-| Этот guide | `docs/DEV_GUIDE_RELIABILITY_GPU_DB_2026-07-17.md` |
+| Этот guide | `Audit/DEV_GUIDE_RELIABILITY_GPU_DB_2026-07-17.md` |
 | Discipline | `.agents/skills/karpathy/SKILL.md` |
 
 ---
 
 ## 14. Summary for incoming agent
 
-Большая часть reliability-аудита **уже в master**. Не начинай с WP-0/magic/OOB — это сделано.
+Большая часть reliability-аудита **уже в master**, включая WP-A (GPU filter parity). Не начинай с WP-0/magic/OOB/ratio — это сделано. BUG-13 (hash=0) всё ещё открыт — `SimpleCRC32` в collector сейчас идёт только на имя файла, записи пишутся с `hash=0`.
 
 **Следующие осмысленные шаги:**
 
-1. **WP-A** — ratio + min/max (+ transforms policy) на GPU path.  
-2. **WP-B** — cancel для batch.  
-3. **WP-C** — «сравнение без ручной DB» (сначала согласовать A/B/C с человеком).  
-4. **WP-D** — warn on match cap, hash, tests — по остатку.
+1. **WP-B** — cancel для batch (в `AutoSelector.cs` нет отмены).  
+2. **WP-C** — «сравнение без ручной DB» (сначала согласовать A/B/C с человеком).  
+3. **WP-D** — BUG-08: `bufferFullCount` сейчас мёртвое поле (не заполняется ядром); tests — по остатку.
 
 Не redesign. Не ломать collector format. Маленькие патчи + smoke.
 
 **Suggested next user command:**  
-`implement WP-A only`  
+`implement WP-B only`  
 или  
 `design WP-C: quick scan vs classic SearchImages` (если нужен product direction).
 
 ---
 
-*End of dev guide — updated 2026-07-18*
+*End of dev guide — updated 2026-08-16*

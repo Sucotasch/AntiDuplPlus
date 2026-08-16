@@ -151,11 +151,13 @@ AntiDuplPlus/
 thumbSize(u32) + key(i16) + first(wstring) + last(wstring) + count(u64)
 + N records:
   path(wstring) + size(u64) + time(u64) + hash(u32) + type(u8)
-  + width(u32) + height(u32) + blockiness(f64) + blurring(f64)
+  + width(u32) + height(u32) + blockiness(f32) + blurring(f32)
   + defect(u8) + crc32c(u64) + filled(u8)
   + thumb_size(u64) + thumb_data(bytes)
   + average(f32) + varianceSquare(f32)
 ```
+
+Note: `hash` is currently written as `0` (not yet computed); `Actual()` validates by path+size+time.
 
 ---
 

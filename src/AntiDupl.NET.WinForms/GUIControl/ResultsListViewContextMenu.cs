@@ -179,12 +179,33 @@ namespace AntiDupl.NET.WinForms
                     Items.Add(new ToolStripSeparator());
                     Items.Add("Delete Selected", null, (s, e) =>
                     {
-                        var result = AutoSelector.ExecuteBatch(m_core, true);
-                        string msg = $"Deleted {result.Succeeded} images.";
-                        if (result.Failed > 0)
-                            msg += $"\n{result.Failed} files could not be deleted.";
-                        MessageBox.Show(msg, "Delete", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        m_mainSplitContainer.UpdateResults();
+                        int count = AutoSelector.CountMarked(m_core);
+                        if (count <= 0) return;
+
+                        bool longPaths = AutoSelector.HasLongPaths(m_core);
+                        string warning = longPaths
+                            ? "Some files have paths longer than 260 characters. These files cannot be moved " +
+                              "to Recycle Bin and will be permanently deleted.\n\n"
+                            : "";
+                        var confirm = MessageBox.Show(
+                            warning + $"Permanently delete {count} selected image(s)?",
+                            "Delete Selected", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                        if (confirm != DialogResult.Yes) return;
+
+                        System.Threading.Thread batchThread = new System.Threading.Thread(() =>
+                        {
+                            AutoSelector.BatchResult result = AutoSelector.ExecuteBatch(m_core, true);
+                            m_mainSplitContainer.BeginInvoke(new Action(() =>
+                            {
+                                string msg = $"Deleted {result.Succeeded} images.";
+                                if (result.Failed > 0)
+                                    msg += $"\n{result.Failed} files could not be deleted.";
+                                MessageBox.Show(msg, "Delete Selected",
+                                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                m_mainSplitContainer.UpdateResults();
+                            }));
+                        });
+                        batchThread.Start();
                     });
                     Items.Add("Move Selected to Folder...", null, OnMoveSelectedToFolder);
                 }

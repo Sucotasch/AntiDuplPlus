@@ -145,7 +145,7 @@ namespace AntiDupl.NET.WinForms
                     if (searchPath.Length > 0 && Directory.Exists(searchPath[0].path))
                         tmpSearch[0] = searchPath[0];
                     else
-                        tmpSearch[0].path = Application.StartupPath;
+                        tmpSearch[0] = new CorePathWithSubFolder { path = Application.StartupPath };
                     core.searchPath = tmpSearch;
                     core.ignorePath = tmpOther;
                     core.validPath = tmpOther;

@@ -54,6 +54,22 @@ namespace ad
         return tag.substr(start, end - start);
     }
 
+    // Escape XML attribute values (& < > " are the ones that corrupt the file)
+    static std::wstring EscapeXmlAttr(const std::wstring& s) {
+        std::wstring out;
+        out.reserve(s.size());
+        for (wchar_t c : s) {
+            switch (c) {
+            case L'&': out += L"&amp;"; break;
+            case L'<': out += L"&lt;"; break;
+            case L'>': out += L"&gt;"; break;
+            case L'"': out += L"&quot;"; break;
+            default: out += c; break;
+            }
+        }
+        return out;
+    }
+
     bool TDatabaseRegistry::Load(std::vector<TDatabaseInfo>& databases, const std::wstring& userPath) {
         databases.clear();
         std::wifstream file(GetRegistryFilePath(userPath));
@@ -95,22 +111,35 @@ namespace ad
     }
 
     bool TDatabaseRegistry::Save(const std::vector<TDatabaseInfo>& databases, const std::wstring& userPath) {
-        std::wofstream file(GetRegistryFilePath(userPath));
+        std::wstring filePath = GetRegistryFilePath(userPath);
+        std::wstring tmpPath = filePath + L".tmp";
+
+        std::wofstream file(tmpPath);
         if (!file.is_open()) return false;
 
         file << L"<DatabaseRegistry>\n";
         for (const auto& db : databases) {
-            file << L"  <Database Path=\"" << db.Path << L"\"";
-            if (!db.Folder.empty()) file << L" Folder=\"" << db.Folder << L"\"";
-            if (!db.Name.empty()) file << L" Name=\"" << db.Name << L"\"";
-            if (!db.RemapFrom.empty()) file << L" RemapFrom=\"" << db.RemapFrom << L"\"";
+            file << L"  <Database Path=\"" << EscapeXmlAttr(db.Path) << L"\"";
+            if (!db.Folder.empty()) file << L" Folder=\"" << EscapeXmlAttr(db.Folder) << L"\"";
+            if (!db.Name.empty()) file << L" Name=\"" << EscapeXmlAttr(db.Name) << L"\"";
+            if (!db.RemapFrom.empty()) file << L" RemapFrom=\"" << EscapeXmlAttr(db.RemapFrom) << L"\"";
             file << L" Enabled=\"" << (db.Enabled ? L"true" : L"false") << L"\"";
             file << L" ThumbSize=\"" << db.ThumbSize << L"\" Count=\"" << db.ImageCount
-                 << L"\" Status=\"" << db.Status << L"\"";
+                 << L"\" Status=\"" << EscapeXmlAttr(db.Status) << L"\"";
             if (db.Pool != 0) file << L" Pool=\"" << db.Pool << L"\"";
             file << L"/>\n";
         }
         file << L"</DatabaseRegistry>\n";
+        file.flush();
+        if (!file.good()) { file.close(); _wremove(tmpPath.c_str()); return false; }
+        file.close();
+
+        // Atomic replace: a concurrently-running collector or crash must never leave
+        // a truncated registry (both ends rewrite this file).
+        if (!MoveFileExW(tmpPath.c_str(), filePath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            _wremove(tmpPath.c_str());
+            return false;
+        }
         return true;
     }
 
@@ -182,7 +211,7 @@ namespace ad
             std::wstring dbPath = db.Path;
             std::transform(dbPath.begin(), dbPath.end(), dbPath.begin(), ::towlower);
 
-            if (searchPath.find(dbPath) == 0 || dbPath.find(searchPath) == 0) {
+            if (ad::PathStartsWith(searchPath, dbPath) || ad::PathStartsWith(dbPath, searchPath)) {
                 int newCount = (int)db.ImageCount + delta;
                 if (newCount < 0) newCount = 0;
                 db.ImageCount = (size_t)newCount;

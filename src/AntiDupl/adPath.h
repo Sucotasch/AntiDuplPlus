@@ -28,6 +28,18 @@
 
 namespace ad
 {
+    // Case-sensitive prefix match on a path with a directory-separator boundary.
+    // "C:\Foo" matches "C:\Foo\Bar.jpg" but NOT "C:\Foo2". Exact match also counts.
+    // Callers that need case-insensitivity must pre-normalize both strings.
+    inline bool PathStartsWith(const TString& str, const TString& prefix)
+    {
+        if (str.size() < prefix.size()) return false;
+        if (str.compare(0, prefix.size(), prefix) != 0) return false;
+        if (str.size() == prefix.size()) return true;
+        const TChar c = str[prefix.size()];
+        return c == TEXT('\\') || c == TEXT('/');
+    }
+
 	class TPath
 	{
 	private:

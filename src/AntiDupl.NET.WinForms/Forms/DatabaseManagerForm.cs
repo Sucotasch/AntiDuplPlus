@@ -407,83 +407,252 @@ namespace AntiDupl.NET.WinForms.Forms
                 return;
             }
 
-            string dbParent = Path.GetDirectoryName(entry.Folder);
-            string dbName = Path.GetFileName(entry.Folder);
+            int? forceSize = null;
 
-            var result = MessageBox.Show(
-                $"Update database \"{entry.Name}\"?\n\nSource: {entry.Path}\nDatabase: {entry.Folder}\n\nThis will add new files and remove deleted files from the database.",
-                "Update Database", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-
-            if (result != DialogResult.Yes) return;
-
-            entry.Status = "Updating...";
-            SaveDatabases();
-            RefreshAllGrids();
-
-            try
+            // If the database was built at a different size than the current option,
+            // ask the user what to do: rebuild at the option size (Yes) or stay on the
+            // DB's size and update incrementally (No).
+            if (entry.ThumbSize > 0 && entry.ThumbSize != m_reducedImageSize)
             {
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = nvJpegPath,
-                    Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --size {m_reducedImageSize} --update",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
+                var sizeResult = MessageBox.Show(
+                    $"Database \"{entry.Name}\" was built at {entry.ThumbSize}x{entry.ThumbSize}, " +
+                    $"but the current image size option is {m_reducedImageSize}x{m_reducedImageSize}.\n\n" +
+                    $"Yes - rebuild the database at {m_reducedImageSize}x{m_reducedImageSize} (full re-decode, slow)\n" +
+                    $"No - update incrementally, keep {entry.ThumbSize}x{entry.ThumbSize}\n" +
+                    $"Cancel - do not update",
+                    "Database size mismatch", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
 
-                using (var proc = System.Diagnostics.Process.Start(psi))
-                {
-                    string stdout = proc.StandardOutput.ReadToEnd();
-                    string stderr = proc.StandardError.ReadToEnd();
-                    proc.WaitForExit();
+                if (sizeResult == DialogResult.Cancel) return;
+                if (sizeResult == DialogResult.Yes) forceSize = m_reducedImageSize;
+            }
+            else
+            {
+                var result = MessageBox.Show(
+                    $"Update database \"{entry.Name}\"?\n\nSource: {entry.Path}\nDatabase: {entry.Folder}\n\nThis will add new files and remove deleted files from the database.",
+                    "Update Database", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
 
-                    if (proc.ExitCode == 0)
+                if (result != DialogResult.Yes) return;
+            }
+
+            UpdateDatabaseAsync(new[] { entry }, forceSize);
+        }
+
+        /// <summary>
+        /// Runs one or more database updates on a background thread so the UI stays
+        /// responsive, showing a text-only stage status in m_lblInfo. Stage status is
+        /// parsed from the collector's stdout (stage lines only - the \r progress lines
+        /// are ignored to avoid per-frame parsing overhead).
+        /// </summary>
+        private void UpdateDatabaseAsync(IEnumerable<DbEntry> entries, int? forceSize = null)
+        {
+            SetUpdateButtonsEnabled(false);
+
+            int successCount = 0, failCount = 0;
+            List<string> errors = new List<string>();
+            var items = entries.ToList();
+
+            System.Threading.Thread worker = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    foreach (var entry in items)
                     {
-                        // Parse count from output
-                        int newCount = entry.ImageCount;
-                        var lines = stdout.Split('\n');
-                        foreach (var line in lines)
+                        BeginInvokeIfNeeded(() =>
                         {
-                            if (line.Contains("[UPDATE] Final database:"))
+                            entry.Status = "Updating...";
+                            SaveDatabases();
+                            RefreshAllGrids();
+                        });
+
+                        bool ok = false;
+                        int newCount = entry.ImageCount;
+                        int newThumbSize = entry.ThumbSize;
+                        string error = "";
+
+                        string dbParent = Path.GetDirectoryName(entry.Folder);
+                        string dbName = Path.GetFileName(entry.Folder);
+                        // Use the database's own thumbnail size (from index.adi) so an
+                        // incremental update stays on the DB's size; fall back to the
+                        // global option only when the DB has no recorded size yet.
+                        // forceSize overrides this when the user asked to rebuild at the
+                        // current option size (full re-decode).
+                        int thumbSize = forceSize ?? (entry.ThumbSize > 0 ? entry.ThumbSize : m_reducedImageSize);
+
+                        string nvJpegPath = Path.Combine(GetExeDir(), "NvJpegCollector.exe");
+                        var psi = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = nvJpegPath,
+                            Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --size {thumbSize} --update",
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            CreateNoWindow = true
+                        };
+
+                        try
+                        {
+                            using (var proc = System.Diagnostics.Process.Start(psi))
                             {
-                                var parts = line.Split(':');
-                                if (parts.Length >= 2 && int.TryParse(parts[parts.Length - 1].Trim().Split(' ')[0], out int c))
-                                    newCount = c;
+                                // Drain stderr asynchronously to avoid pipe deadlock: the collector may
+                                // fill the stderr pipe buffer while stdout is still open.
+                                var stderrTask = proc.StandardError.ReadToEndAsync();
+
+                                // Read stdout line-by-line for stage status (no per-frame progress).
+                                string stdout = "";
+                                string line;
+                                while ((line = proc.StandardOutput.ReadLine()) != null)
+                                {
+                                    stdout += line + "\n";
+                                    string stage = ParseUpdateStage(line);
+                                    if (stage != null)
+                                    {
+                                        string s = stage;
+                                        BeginInvokeIfNeeded(() => ShowStage(entry, s));
+                                    }
+                                }
+                                string stderr = stderrTask.Result;
+                                proc.WaitForExit();
+
+                                if (proc.ExitCode != 0)
+                                {
+                                    ok = false;
+                                    error = $"exit code {proc.ExitCode}:\n{stderr}\n{stdout}";
+                                }
+                                else
+                                {
+                                    ok = true;
+
+                                    // Refresh from index.adi: after a full rebuild (thumbSize change) the
+                                    // "[UPDATE] Final database:" line is absent and ThumbSize may have changed.
+                                    int actualThumbSize, actualCount;
+                                    ParseAdiInfo(Path.Combine(entry.Folder, "index.adi"), out actualThumbSize, out actualCount);
+                                    if (actualCount > 0)
+                                    {
+                                        newCount = actualCount;
+                                        newThumbSize = actualThumbSize;
+                                    }
+                                }
                             }
                         }
-
-                        // Refresh from index.adi: after a full rebuild (thumbSize change) the
-                        // "[UPDATE] Final database:" line is absent and ThumbSize may have changed.
-                        int actualThumbSize, actualCount;
-                        ParseAdiInfo(Path.Combine(entry.Folder, "index.adi"), out actualThumbSize, out actualCount);
-                        if (actualCount > 0)
+                        catch (Exception ex)
                         {
-                            newCount = actualCount;
-                            entry.ThumbSize = actualThumbSize;
+                            ok = false;
+                            error = ex.Message;
                         }
 
-                        entry.ImageCount = newCount;
-                        entry.Status = "Ready";
-                        MessageBox.Show($"Database updated successfully.\n{newCount} images.", "Update Complete",
-                            MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    else
-                    {
-                        entry.Status = "Error";
-                        MessageBox.Show($"Update failed (exit code {proc.ExitCode}):\n{stderr}\n{stdout}", "Update Error",
-                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        if (ok)
+                        {
+                            successCount++;
+                            int count = newCount;
+                            int thumb = newThumbSize;
+                            BeginInvokeIfNeeded(() =>
+                            {
+                                entry.ImageCount = count;
+                                entry.ThumbSize = thumb;
+                                entry.Status = "Ready";
+                                RefreshAllGrids();
+                            });
+                        }
+                        else
+                        {
+                            failCount++;
+                            string e = error;
+                            BeginInvokeIfNeeded(() =>
+                            {
+                                entry.Status = "Error";
+                                RefreshAllGrids();
+                            });
+                            errors.Add($"\"{entry.Name}\": {error}");
+                        }
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                entry.Status = "Error";
-                MessageBox.Show($"Update failed: {ex.Message}", "Update Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+                finally
+                {
+                    BeginInvokeIfNeeded(() =>
+                    {
+                        SaveDatabases();
+                        RefreshAllGrids();
+                        SetUpdateButtonsEnabled(true);
 
-            SaveDatabases();
-            RefreshAllGrids();
+                        if (items.Count == 1)
+                        {
+                            var single = items[0];
+                            if (single.Status == "Ready")
+                                MessageBox.Show($"Database updated successfully.\n{single.ImageCount} images.", "Update Complete",
+                                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            else
+                                MessageBox.Show($"Update failed:\n{string.Join("\n", errors)}", "Update Error",
+                                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                        else
+                        {
+                            string detail = errors.Count > 0 ? $"\n\nErrors:\n{string.Join("\n", errors)}" : "";
+                            MessageBox.Show(
+                                $"Update complete.\n\nUpdated: {successCount}\nFailed: {failCount}{detail}",
+                                "Update All", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    });
+                }
+            });
+            worker.IsBackground = true;
+            worker.Start();
+        }
+
+        /// <summary>
+        /// Maps a collector stdout stage line to a short user-facing status. Returns null
+        /// for lines we don't want to show (progress ticks, stats, headers, blank lines).
+        /// </summary>
+        private static string ParseUpdateStage(string line)
+        {
+            if (string.IsNullOrEmpty(line)) return null;
+
+            if (line.Contains("[SCAN] Found"))
+                return "Scanning folder...";
+            if (line.Contains("[UPDATE] Loading existing database"))
+                return "Loading existing database...";
+            if (line.Contains("[UPDATE] No valid existing database"))
+                return "Rebuilding database from scratch...";
+            if (line.Contains("[UPDATE] Existing:"))
+                return "Comparing files...";
+            if (line.Contains("[UPDATE] Decoding"))
+                return "Decoding new/modified files...";
+            if (line.Contains("[UPDATE] No files to decode"))
+                return "No new files - rewriting...";
+            if (line.Contains("[UPDATE] Final database:") || line.Contains("[UPDATE] Saved"))
+                return "Saving database...";
+            if (line.Contains("[GPU]") && line.Contains("Decoding"))
+                return "Decoding images (GPU)...";
+            if (line.Contains("[WIC]"))
+                return "Decoding images (CPU)...";
+            if (line.Contains("[SAVE]"))
+                return "Saving database...";
+
+            return null;
+        }
+
+        private void ShowStage(DbEntry entry, string stage)
+        {
+            m_lblInfo.Text = $"Updating \"{entry.Name}\": {stage}";
+        }
+
+        private void SetUpdateButtonsEnabled(bool enabled)
+        {
+            m_btnUpdateAll.Enabled = enabled;
+            m_btnRefresh.Enabled = enabled;
+            m_btnOpenFolder.Enabled = enabled;
+        }
+
+        private void BeginInvokeIfNeeded(Action action)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke(action);
+            }
+            catch (InvalidOperationException)
+            {
+                // Form is closing/closed - drop the UI update.
+            }
         }
 
         /// <summary>
@@ -665,80 +834,7 @@ namespace AntiDupl.NET.WinForms.Forms
 
             if (confirm != DialogResult.Yes) return;
 
-            int successCount = 0, failCount = 0;
-            foreach (var entry in entriesToUpdate)
-            {
-                entry.Status = "Updating...";
-                SaveDatabases();
-                RefreshAllGrids();
-                Application.DoEvents();
-
-                try
-                {
-                    string dbParent = Path.GetDirectoryName(entry.Folder);
-                    string dbName = Path.GetFileName(entry.Folder);
-
-                    var psi = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = nvJpegPath,
-                        Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --size {m_reducedImageSize} --update",
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
-                    };
-
-                    using (var proc = System.Diagnostics.Process.Start(psi))
-                    {
-                        string stdout = proc.StandardOutput.ReadToEnd();
-                        proc.WaitForExit();
-
-                        if (proc.ExitCode == 0)
-                        {
-                            int newCount = entry.ImageCount;
-                            foreach (var line in stdout.Split('\n'))
-                            {
-                                if (line.Contains("[UPDATE] Final database:"))
-                                {
-                                    var parts = line.Split(':');
-                                    if (parts.Length >= 2 && int.TryParse(parts[parts.Length - 1].Trim().Split(' ')[0], out int c))
-                                        newCount = c;
-                                }
-                            }
-
-                            // Refresh from index.adi: after a full rebuild (thumbSize change) the
-                            // "[UPDATE] Final database:" line is absent and ThumbSize may have changed.
-                            int actualThumbSize, actualCount;
-                            ParseAdiInfo(Path.Combine(entry.Folder, "index.adi"), out actualThumbSize, out actualCount);
-                            if (actualCount > 0)
-                            {
-                                newCount = actualCount;
-                                entry.ThumbSize = actualThumbSize;
-                            }
-
-                            entry.ImageCount = newCount;
-                            entry.Status = "Ready";
-                            successCount++;
-                        }
-                        else
-                        {
-                            entry.Status = "Error";
-                            failCount++;
-                        }
-                    }
-                }
-                catch
-                {
-                    entry.Status = "Error";
-                    failCount++;
-                }
-            }
-
-            SaveDatabases();
-            RefreshAllGrids();
-            MessageBox.Show(
-                $"Update complete.\n\nUpdated: {successCount}\nFailed: {failCount}",
-                "Update All", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            UpdateDatabaseAsync(entriesToUpdate);
         }
 
         private void RefreshAllGrids()

@@ -31,6 +31,7 @@
 #include "adThreadManagement.h"
 #include "adResult.h"
 #include "adResultStorage.h"
+#include "adGPUManager.h"
 #include "adPerformance.h"
 #include <windows.h>
 
@@ -76,6 +77,12 @@ namespace ad
             m_pQueue->pop();
             if(data.data) data.data->FreeGlobal();
         }
+    }
+
+    size_t TThreadQueue::Size() const
+    {
+        TCriticalSection::TLocker locker(m_pCS);
+        return m_pQueue->size();
     }
 
     TThreadQueue::TPop TThreadQueue::Pop(TImageData **ppImageData)
@@ -381,6 +388,22 @@ namespace ad
             
             AD_DEBUG("TCollectManager::Add: Calling FillOther\n");
             pImageData->FillOther(m_pOptions);
+            
+            // Images loaded from the DB never pass through TDataCollector::FillPixelData,
+            // so their thumbnails are not in the global VRAM buffer. Upload them here so
+            // CompareWithSetGPU (CPU path with GPU assist) reads valid pixels, not garbage.
+            if (!m_pEngine->SkipComparisonDuringCollection() &&
+                pImageData->data && pImageData->data->filled)
+            {
+                TGpuManager* pGpu = m_pEngine->GpuManager();
+                const size_t thumbSize = Simd::Square(m_pOptions->advanced.reducedImageSize);
+                if (pGpu && pGpu->IsAvailable() &&
+                    pImageData->data->side == m_pOptions->advanced.reducedImageSize &&
+                    pGpu->EnsureCapacity(pImageData->globalIdx + 1, thumbSize))
+                {
+                    pGpu->UploadThumbnail(pImageData->globalIdx, pImageData->data->main);
+                }
+            }
             
             // Skip comparison if GPU AllVsAll mode is enabled
             if (m_pEngine->SkipComparisonDuringCollection())

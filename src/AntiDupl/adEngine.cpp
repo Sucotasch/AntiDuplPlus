@@ -435,7 +435,7 @@ namespace ad
                 int bestPool = 0;
                 size_t bestLen = 0;
                 for (const auto& dp : precalcDbPaths) {
-                    if (lowerImgPath.find(dp.first) == 0 && dp.first.length() > bestLen) {
+                    if (ad::PathStartsWith(lowerImgPath, dp.first) && dp.first.length() > bestLen) {
                         bestPool = dp.second;
                         bestLen = dp.first.length();
                     }
@@ -626,7 +626,8 @@ namespace ad
                        (m_pOptions->compare.algorithmComparing == AD_COMPARING_SQUARED_SUM ||
                         m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM) &&
                        m_pOptions->advanced.ignoreFrameWidth == 0 &&
-                       m_pOptions->compare.transformedImage == FALSE);
+                       m_pOptions->compare.transformedImage == FALSE &&
+                       m_pOptions->compare.checkOnEquality == TRUE);
 
         if (useGpu)
         {

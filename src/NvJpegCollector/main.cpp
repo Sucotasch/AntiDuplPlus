@@ -163,6 +163,10 @@ Arguments ParseArguments(int argc, wchar_t* argv[]) {
         else if (arg==L"--update"||arg==L"-u") args.update=true;
         else if (arg==L"--help"||arg==L"-h") args.help=true;
     }
+    // C13: keep thumbSize within the DLL-supported range [REDUCED_IMAGE_SIZE_MIN=16 ..
+    // INITIAL_REDUCED_IMAGE_SIZE/2=128]; a DB outside it is rejected by the DLL loader.
+    if (args.thumbSize < 16) args.thumbSize = 16;
+    if (args.thumbSize > 128) args.thumbSize = 128;
     return args;
 }
 
@@ -251,51 +255,64 @@ static bool LoadExistingDatabase(const std::wstring& dbFolder, int expectedThumb
     FILE* f = nullptr; _wfopen_s(&f, dataPath.c_str(), L"rb");
     if (!f) return false;
 
+    bool bad = false;
+    // Reads a length-prefixed wstring. On truncation/oversized length it sets
+    // `bad` and returns empty. NOTE: never fclose() here - caller owns the handle.
     auto readStr = [&](FILE* fp) -> std::wstring {
-        uint64_t len = 0; fread(&len, 8, 1, fp);
-        if (len > 10000) { fclose(fp); return L""; } // sanity check
+        uint64_t len = 0;
+        if (fread(&len, 8, 1, fp) != 1) { bad = true; return L""; }
+        if (len > 10000) { bad = true; return L""; } // sanity check
         std::wstring s(len, L'\0');
-        if (len > 0) fread(&s[0], sizeof(wchar_t), len, fp);
+        if (len > 0 && fread(&s[0], sizeof(wchar_t), len, fp) != len) { bad = true; return L""; }
         return s;
     };
+    auto readFail = [&](bool ok) {
+        if (!ok) bad = true;
+        return !ok;
+    };
 
-    uint32_t fileThumbSize = 0; fread(&fileThumbSize, 4, 1, f);
-    if (fileThumbSize != (uint32_t)expectedThumbSize) {
+    uint32_t fileThumbSize = 0; readFail(fread(&fileThumbSize, 4, 1, f) == 1);
+    if (!bad && fileThumbSize != (uint32_t)expectedThumbSize) {
         std::wcout << L"[UPDATE] Warning: thumbSize mismatch (DB=" << fileThumbSize << L", expected=" << expectedThumbSize << L")" << std::endl;
         fclose(f);
         return false;
     }
 
-    int16_t key = 0; fread(&key, 2, 1, f);
+    int16_t key = 0; readFail(fread(&key, 2, 1, f) == 1);
     std::wstring firstPath = readStr(f);
     std::wstring lastPath = readStr(f);
-    uint64_t count = 0; fread(&count, 8, 1, f);
+    uint64_t count = 0; readFail(fread(&count, 8, 1, f) == 1);
 
-    for (uint64_t i = 0; i < count; i++) {
+    for (uint64_t i = 0; i < count && !bad; i++) {
         ImageInfo img;
         img.path = readStr(f);
-        fread(&img.size, 8, 1, f);
-        fread(&img.time, 8, 1, f);
-        fread(&img.hash, 4, 1, f);
-        fread(&img.type, 1, 1, f);
-        fread(&img.width, 4, 1, f);
-        fread(&img.height, 4, 1, f);
-        fread(&img.blockiness, 4, 1, f);
-        fread(&img.blurring, 4, 1, f);
-        uint8_t defect = 0; fread(&defect, 1, 1, f);
-        fread(&img.crc32c, 8, 1, f);
-        uint8_t filled = 0; fread(&filled, 1, 1, f);
+        if (readFail(fread(&img.size, 8, 1, f) == 1)) break;
+        if (readFail(fread(&img.time, 8, 1, f) == 1)) break;
+        if (readFail(fread(&img.hash, 4, 1, f) == 1)) break;
+        if (readFail(fread(&img.type, 1, 1, f) == 1)) break;
+        if (readFail(fread(&img.width, 4, 1, f) == 1)) break;
+        if (readFail(fread(&img.height, 4, 1, f) == 1)) break;
+        if (readFail(fread(&img.blockiness, 4, 1, f) == 1)) break;
+        if (readFail(fread(&img.blurring, 4, 1, f) == 1)) break;
+        uint8_t defect = 0; if (readFail(fread(&defect, 1, 1, f) == 1)) break;
+        if (readFail(fread(&img.crc32c, 8, 1, f) == 1)) break;
+        uint8_t filled = 0; if (readFail(fread(&filled, 1, 1, f) == 1)) break;
         if (filled) {
-            uint64_t thumbSizeVal = 0; fread(&thumbSizeVal, 8, 1, f);
+            uint64_t thumbSizeVal = 0;
+            if (readFail(fread(&thumbSizeVal, 8, 1, f) == 1)) break;
+            // C10: reject inconsistent thumb data size instead of blindly resizing
+            uint64_t expectedBytes = (uint64_t)fileThumbSize * (uint64_t)fileThumbSize;
+            if (thumbSizeVal != expectedBytes) { bad = true; break; }
             img.thumbnail.resize((size_t)thumbSizeVal);
-            if (!img.thumbnail.empty()) fread(img.thumbnail.data(), 1, img.thumbnail.size(), f);
-            fread(&img.average, 4, 1, f);
-            fread(&img.varianceSquare, 4, 1, f);
+            if (!img.thumbnail.empty() && fread(img.thumbnail.data(), 1, img.thumbnail.size(), f) != img.thumbnail.size()) { bad = true; break; }
+            if (readFail(fread(&img.average, 4, 1, f) == 1)) break;
+            if (readFail(fread(&img.varianceSquare, 4, 1, f) == 1)) break;
         }
         if (!img.path.empty())
             existing[img.path] = img;
     }
     fclose(f);
+    if (bad) { existing.clear(); return false; }
     return true;
 }
 
@@ -303,7 +320,9 @@ static bool LoadExistingDatabase(const std::wstring& dbFolder, int expectedThumb
 static ImageInfo ProcessGray(const uint8_t* gray, int w, int h, const fs::path& path, int thumbSize) {
     ImageInfo info;
     info.path = path.wstring();
-    info.size = (uint64_t)fs::file_size(path);
+    std::error_code ec;
+    info.size = (uint64_t)fs::file_size(path, ec);
+    if (ec) info.size = 0;
     info.time = GetFileTime(path); info.hash = 0;
     info.type = GetImageType(path.extension().wstring());
     info.width = w; info.height = h;
@@ -525,13 +544,16 @@ static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files
 
                     nvjpegStatus_t decS = nvjpegDecodeBatched(g_nvjpegHandle, state, &pData, &pDataSize, &outImg, stream);
                     if (decS != NVJPEG_STATUS_SUCCESS) { logFail(fp, 4, (long)decS); continue; }
-                    cudaMemcpy2DAsync(slot.gray.data(), srcW, slot.gpu, (int)imgPitch, srcW, srcH, cudaMemcpyDeviceToHost, stream);
-                    cudaEventRecord(slot.done, stream);
+                    cudaError_t copyErr = cudaMemcpy2DAsync(slot.gray.data(), srcW, slot.gpu, (int)imgPitch, srcW, srcH, cudaMemcpyDeviceToHost, stream);
+                    if (copyErr != cudaSuccess) { logFail(fp, 4, (long)copyErr); continue; }
+                    cudaError_t recErr = cudaEventRecord(slot.done, stream);
+                    if (recErr != cudaSuccess) { logFail(fp, 4, (long)recErr); continue; }
                     pt.decodeLaunch += nowUs() - t2;
 
                     uint64_t tw0 = nowUs();
-                    cudaEventSynchronize(slot.done);
+                    cudaError_t syncErr = cudaEventSynchronize(slot.done);
                     uint64_t tw1 = nowUs(); pt.waitEvent += tw1 - tw0;
+                    if (syncErr != cudaSuccess) { logFail(fp, 4, (long)syncErr); continue; }
                     ImageInfo info = ProcessGray(slot.gray.data(), slot.w, slot.h, slot.path, thumbSize);
                     pt.processGray += nowUs() - tw1;
                     pt.n++;
@@ -690,15 +712,18 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                     deleted++;
                 } else {
                     // File exists - check if modified
-                    uint64_t curSize = (uint64_t)fs::file_size(it->second);
+                    std::error_code ec;
+                    uint64_t curSize = (uint64_t)fs::file_size(it->second, ec);
+                    if (ec) curSize = 0;
                     uint64_t curTime = GetFileTime(it->second);
                     if (curSize == existingImg.size && curTime == existingImg.time) {
                         // UNCHANGED: keep existing record (no re-decode needed)
                         images.push_back(existingImg);
                         unchanged++;
                     } else {
-                        // MODIFIED: need to re-decode
-                        images.push_back(existingImg); // placeholder, will be overwritten after decode
+                        // MODIFIED: need to re-decode. Do NOT push the stale record here:
+                        // the decoded replacement is appended below only on success, so a
+                        // file that can no longer be decoded drops out of the database.
                         toDecode.push_back(it->second);
                         modified++;
                     }
@@ -773,15 +798,20 @@ int wmain_impl(int argc, wchar_t* argv[]) {
 
             std::wcout << L"[UPDATE] Final database: " << images.size() << L" records" << std::endl;
 
-            // Write updated database (reuse save logic)
+            // Write updated database (reuse save logic). Written even when `images` is
+            // empty (all files deleted): a valid count=0 database prevents the stale
+            // old DB from surviving in the folder.
             auto writeStrUpd = [&](FILE* f, const std::wstring& s) {
                 uint64_t len = s.size(); fwrite(&len, 8, 1, f);
                 fwrite(s.c_str(), sizeof(wchar_t), len, f);
             };
 
-            if (!images.empty()) {
+            {
                 // Sort by path for consistent first/last
                 std::sort(images.begin(), images.end(), [](const ImageInfo& a, const ImageInfo& b) { return a.path < b.path; });
+
+                std::wstring firstPath = images.empty() ? L"" : images.front().path;
+                std::wstring lastPath = images.empty() ? L"" : images.back().path;
 
                 std::wstring indexPath = dbFolder + L"\\index.adi";
                 FILE* idxFile = nullptr; _wfopen_s(&idxFile, indexPath.c_str(), L"wb");
@@ -790,8 +820,8 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                     fwrite(&ts32, 4, 1, idxFile);
                     uint64_t groupCount = 1; fwrite(&groupCount, 8, 1, idxFile);
                     int16_t key = 0; fwrite(&key, 2, 1, idxFile);
-                    writeStrUpd(idxFile, images.front().path);
-                    writeStrUpd(idxFile, images.back().path);
+                    writeStrUpd(idxFile, firstPath);
+                    writeStrUpd(idxFile, lastPath);
                     uint64_t imgCount = images.size(); fwrite(&imgCount, 8, 1, idxFile);
                     fclose(idxFile);
                 }
@@ -802,8 +832,8 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                     uint32_t ts32 = (uint32_t)args.thumbSize;
                     fwrite(&ts32, 4, 1, dataFile);
                     int16_t key = 0; fwrite(&key, 2, 1, dataFile);
-                    writeStrUpd(dataFile, images.front().path);
-                    writeStrUpd(dataFile, images.back().path);
+                    writeStrUpd(dataFile, firstPath);
+                    writeStrUpd(dataFile, lastPath);
                     uint64_t imgCount = images.size(); fwrite(&imgCount, 8, 1, dataFile);
                     for (const auto& img : images) {
                         writeStrUpd(dataFile, img.path);

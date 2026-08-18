@@ -52,9 +52,11 @@ namespace AntiDupl.NET.WinForms
             SetHint,
             SaveImages,
             Stopped,
-            Finish
+            Finish,
+            Error
         }
         volatile State m_state = State.Start;
+        private string m_errorMessage;
 
         private CoreLib m_core;
         private Options m_options;
@@ -148,56 +150,66 @@ namespace AntiDupl.NET.WinForms
         private void CoreThreadTask()
         {
             m_startDateTime = DateTime.Now;
+            try
+            {
+                // Database Manager is the single source of truth for search paths
+                var dbPaths = Forms.DatabaseManagerForm.GetEnabledDatabasePaths();
+                m_coreOptions.searchPath = dbPaths.Select(p =>
+                    new CorePathWithSubFolder(p, true)).ToArray();
 
-            // Database Manager is the single source of truth for search paths
-            var dbPaths = Forms.DatabaseManagerForm.GetEnabledDatabasePaths();
-            m_coreOptions.searchPath = dbPaths.Select(p => 
-                new CorePathWithSubFolder(p, true)).ToArray();
+                // [C#1] Log search paths
+                try {
+                    string logPath = System.IO.Path.Combine(
+                        System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                        "trace.log");
+                    using (var sw = new System.IO.StreamWriter(logPath, false))
+                    {
+                        sw.WriteLine($"[C#1] SearchExecuter: searchPath.Length={m_coreOptions.searchPath.Length}");
+                        for (int i = 0; i < Math.Min(m_coreOptions.searchPath.Length, 3); i++)
+                            sw.WriteLine($"  [{i}] {m_coreOptions.searchPath[i].path}");
+                        if (m_coreOptions.searchPath.Length > 3)
+                            sw.WriteLine($"  ... and {m_coreOptions.searchPath.Length - 3} more");
+                    }
+                } catch { }
 
-            // [C#1] Log search paths
-            try {
-                string logPath = System.IO.Path.Combine(
-                    System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
-                    "trace.log");
-                using (var sw = new System.IO.StreamWriter(logPath, false))
+                // Set pool comparison mode from Database Manager
+                m_coreOptions.compareOptions.poolCompareMode =
+                    (AntiDupl.NET.Core.Enums.PoolCompareMode)Forms.DatabaseManagerForm.GetPoolCompareMode();
+
+                m_coreOptions.Set(m_core, m_options.onePath);
+                m_state = State.ClearResults;
+                m_core.Clear(CoreDll.FileType.Result);
+                m_state = State.ClearTemporary;
+                m_core.Clear(CoreDll.FileType.Temporary);
+                if (m_options.useImageDataBase)
                 {
-                    sw.WriteLine($"[C#1] SearchExecuter: searchPath.Length={m_coreOptions.searchPath.Length}");
-                    for (int i = 0; i < Math.Min(m_coreOptions.searchPath.Length, 3); i++)
-                        sw.WriteLine($"  [{i}] {m_coreOptions.searchPath[i].path}");
-                    if (m_coreOptions.searchPath.Length > 3)
-                        sw.WriteLine($"  ... and {m_coreOptions.searchPath.Length - 3} more");
+                    m_state = State.LoadImages;
+                    m_core.Load(CoreDll.FileType.ImageDataBase, m_coreOptions.GetImageDataBasePath(), false);
                 }
-            } catch { }
-
-            // Set pool comparison mode from Database Manager
-            m_coreOptions.compareOptions.poolCompareMode = 
-                (AntiDupl.NET.Core.Enums.PoolCompareMode)Forms.DatabaseManagerForm.GetPoolCompareMode();
-
-            m_coreOptions.Set(m_core, m_options.onePath);
-            m_state = State.ClearResults;
-            m_core.Clear(CoreDll.FileType.Result);
-            m_state = State.ClearTemporary;
-            m_core.Clear(CoreDll.FileType.Temporary);
-            if (m_options.useImageDataBase)
-            {
-                m_state = State.LoadImages;
-                m_core.Load(CoreDll.FileType.ImageDataBase, m_coreOptions.GetImageDataBasePath(), false);
+                m_state = State.Search;
+                m_core.Search();
+                m_state = State.SetGroup;
+                m_core.ApplyToResult(CoreDll.GlobalActionType.SetGroup);
+                m_state = State.SetHint;
+                m_core.ApplyToResult(CoreDll.GlobalActionType.SetHint);
+                if (m_options.useImageDataBase)
+                {
+                    m_state = State.SaveImages;
+                    m_core.Save(CoreDll.FileType.ImageDataBase, m_coreOptions.GetImageDataBasePath());
+                }
+                m_core.Clear(CoreDll.FileType.ImageDataBase);
+                m_core.SortResult((CoreDll.SortType)m_options.resultsOptions.sortTypeDefault, m_options.resultsOptions.increasingDefault);
+                m_state = State.Finish;
+                LogPerformance(DateTime.Now - m_startDateTime, m_core.GetStatistic());
             }
-            m_state = State.Search;
-            m_core.Search();
-            m_state = State.SetGroup;
-            m_core.ApplyToResult(CoreDll.GlobalActionType.SetGroup);
-            m_state = State.SetHint;
-            m_core.ApplyToResult(CoreDll.GlobalActionType.SetHint);
-            if (m_options.useImageDataBase)
+            catch (Exception ex)
             {
-                m_state = State.SaveImages;
-                m_core.Save(CoreDll.FileType.ImageDataBase, m_coreOptions.GetImageDataBasePath());
+                // Without this, an exception in the worker thread kills the thread silently:
+                // the timer never sees State.Finish and the modal dialog stays open forever
+                // with Stop/Cancel disabled.
+                m_state = State.Error;
+                m_errorMessage = ex.Message;
             }
-            m_core.Clear(CoreDll.FileType.ImageDataBase);
-            m_core.SortResult((CoreDll.SortType)m_options.resultsOptions.sortTypeDefault, m_options.resultsOptions.increasingDefault);
-            m_state = State.Finish;
-            LogPerformance(DateTime.Now - m_startDateTime, m_core.GetStatistic());
         }
 
         public void Execute()
@@ -235,9 +247,11 @@ namespace AntiDupl.NET.WinForms
 
             var result = MessageBox.Show(this,
                 "Some enabled databases were built with a different image size than the current setting.\n" +
-                "They will produce empty results during this search.\n\n" +
+                "They will be skipped during this search.\n\n" +
                 list.ToString() +
-                "\nRebuild these databases with the current size (Database Manager -> Update).\n\n" +
+                "\nTo use them, rebuild these databases at the current size\n" +
+                "(Database Manager -> Update) or change the\n" +
+                "'Normalized image size' option to match.\n\n" +
                 "Continue anyway?",
                 "Database size mismatch", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             return result == DialogResult.Yes;
@@ -256,6 +270,20 @@ namespace AntiDupl.NET.WinForms
                 m_mainForm.UpdateCaption();
                 m_mainForm.Activate();
                 m_mainSplitContainer.UpdateResults();
+            }
+            else if (m_state == State.Error)
+            {
+                if(m_notifyIcon.Visible)
+                    OnNotifyIconDoubleClick(null, null);
+                m_timer.Stop();
+                MessageBox.Show(
+                    "Search failed: " + m_errorMessage,
+                    "Search Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Close();
+                m_mainForm.Resize -= new EventHandler(OnMainFormResize);
+                m_mainForm.WindowState = m_mainFormWindowState;
+                m_mainForm.UpdateCaption();
+                m_mainForm.Activate();
             }
             else
             {
@@ -486,6 +514,12 @@ namespace AntiDupl.NET.WinForms
             writer.WriteLine("---------------------------------------------------------------");
             writer.WriteLine(string.Format("Search start time: {0}", m_startDateTime.ToString()));
             writer.WriteLine(string.Format("Elapsed time: {0}", time.ToString()));
+            if (statistic == null)
+            {
+                writer.WriteLine("Statistics unavailable (native call failed).");
+                writer.Close();
+                return;
+            }
             writer.WriteLine(string.Format("Found {0} of {1} images in {2} folders.", MemoryString(statistic.searchedImageSize), statistic.searchedImageNumber, statistic.scanedFolderNumber));
             writer.WriteLine(string.Format("Processed {0} images.", statistic.comparedImageNumber));
             writer.WriteLine(string.Format("Found {0} defects and {1} duples.", statistic.defectImageNumber, statistic.duplImagePairNumber));

@@ -11,6 +11,8 @@
 
 **Кратко:** 0×P0, 12×P1, ~20×P2, ~40×P3. Самое важное: (1) `--update` коллектора пишет дубликаты записей для изменённых файлов; (2) GPU-ассист CPU-пути читает неинициализированную VRAM для изображений из БД; (3) авто-выбор игнорирует критерий времени при включённом критерии качества; (4) релизный zip не содержит `nvjpeg64_13.dll`; (5) межмодульный контракт коллектор↔DLL нарушен в трёх местах (CRC, алгоритм превью, thumbSize).
 
+**Статус исправлений 2026-08-18:** закрыты C1, C2, C4, C8, C9, C10, C13, N2–N7, N11, N18, N19, S1–S5, S13, S14, B1, B3, B6 (маркеры ✅ в тексте). Остаются открытыми: N1 (banded-ядро, требует верификации GPU), C3 (атомарная запись), C5/C6 (контракт CRC/превью), N8–N10, N12, B2 и P3-чистки — см. §7.
+
 ---
 
 ## §1. Нативное ядро (`src/AntiDupl`) — 5×P1, 7×P2, 9×P3
@@ -49,7 +51,7 @@ for (size_t i0 = 0; i0 < count; i0 += BAND) {
 
 Полоса убирает саму возможность обрезки; лог делает остаточный дроп видимым.
 
-### N2 [P1] GPU-путь игнорирует `compare.checkOnEquality`
+### N2 [P1] ✅ Исправлено 2026-08-18 — GPU-путь игнорирует `compare.checkOnEquality`
 `adEngine.cpp:625-629` (условие `useGpu`) против `adThreadManagement.cpp:324` (`CanCompare`)
 
 CPU-путь сравнивает только при `checkOnEquality == TRUE`; гейт GPU это условие опускает. При `checkOnEquality == FALSE` + включённой опции дефекта (тогда превью всё равно заполняются) GPU прогоняет полный AllVsAll и **впрыскивает пары дубликатов** в скан, который по настройкам CPU должен был дать только дефекты. Перепроверено вручную: `checkOnEquality` в `useGpu`-гейте отсутствует.
@@ -63,7 +65,7 @@ bool useGpu = (m_pGpuManager && m_pGpuManager->IsAvailable() &&
                m_pOptions->compare.transformedImage == FALSE);
 ```
 
-### N3 [P1] `CompareWithSetGPU` сравнивает с неинициализированной VRAM для картинок из БД
+### N3 [P1] ✅ Исправлено 2026-08-18 — `CompareWithSetGPU` сравнивает с неинициализированной VRAM для картинок из БД
 `adThreadManagement.cpp:376-396` (кэш-ветка `TCollectManager::Add`) + `adImageComparer.cpp:125-134`; `TEngine::UpdateGpuDatabase` (`adEngine.cpp:174`) — **ноль вызывавших** (проверено grep'ом)
 
 Сценарий: `transformedImage == TRUE` + SQSUM + GPU → `useGpu == false` → работает CPU `CompareManager`, который диспетчеризуется в `CompareWithSetGPU`, читая глобальный VRAM-буфер по `globalIdx`. В глобальный буфер загружаются только изображения, прошедшие `TDataCollector::FillPixelData` (`adDataCollector.cpp:155-178`). Изображения, взятые из БД по кэш-ветке (`FillOther` + `CompareManager->Add` без загрузки), никогда не загружены; `GpuCreateBuffer` не делает `cudaMemset` — в слотах мусор/чужие пиксели → тихо неверные разности. Функция, которая должна была заполнять буфер (`UpdateGpuDatabase`), мёртвая.
@@ -89,7 +91,7 @@ else {
 
 (Альтернатива: вызвать `UpdateGpuDatabase()` после загрузки БД в `Search()` и снять с неё флаг мёртвого кода. Выбрать один вариант.)
 
-### N4 [P1] `.adr` крашится на выходе индекса за границы
+### N4 [P1] ✅ Исправлено 2026-08-18 — `.adr` крашится на выходе индекса за границы
 `adResultStorage.cpp:341-345, 359-363` + `adImageInfoStorage.cpp:50-53`, `adFileStream.cpp:165-166`
 
 `TImageInfoStorage::Get` возвращает `NULL` для индекса ≥ размера; индекс читается из файла без проверки. Обрезанный/битый `.adr` → `NULL->Actual()` → краш хоста вместо ошибки.
@@ -103,7 +105,7 @@ if(result.first == NULL || (result.type == AD_RESULT_DUPL_IMAGE_PAIR && result.s
 
 (в обеих ветках `TResultStorage::Load`.)
 
-### N5 [P1] Префикс-матчинг путей без границы разделителя: `C:\Foo` ловит `C:\Foo2`
+### N5 [P1] ✅ Исправлено 2026-08-18 — Префикс-матчинг путей без границы разделителя: `C:\Foo` ловит `C:\Foo2`
 `adEngine.cpp:431-444` (пулы в движке) и `adResultStorage.cpp:493-500` (`FilterByPool`); та же ошибка в C# — см. S14; и в реестре БД — см. N11
 
 Класс ровно тот, от которого защищает `RemapPath` (`adImageDataStorage.cpp:59-63`), но назначение пулов не защищено: БД, зарегистрированная на `C:\Foo`, захватывает изображения `C:\Foo2\...` → режимы пулов 1–4 включают/исключают не те пары. Две копии логики ещё и разъехались. **Фикс — один общий хелпер** (`adPath.h`), используемый всеми тремя местами:
@@ -119,7 +121,7 @@ inline bool PathStartsWith(const std::wstring& path, const std::wstring& prefix)
 }
 ```
 
-### N6 [P2] `LoadCollectorData`: состояние записи не сбрасывается + все `fread` без проверки
+### N6 [P2] ✅ Исправлено 2026-08-18 — `LoadCollectorData`: состояние записи не сбрасывается + все `fread` без проверки
 `adImageDataStorage.cpp:602-667`
 
 Два дефекта: (a) `imageData` переиспользуется между итерациями, но `data->filled`/`average`/`varianceSquare` только пишутся в `true`/значения — запись с `filled == 0` после записи с `filled == 1` вставляется с превью предыдущей записи, помеченным заполненным. Сейчас латентно (коллектор всегда пишет `filled=1`, проверено), но формат это допускает. (b) Все метаданные-`fread` (строки 613–623, 646, 655, 659–660) игнорируют результат: гнилой хвост → нули, запись тихо пропускается, функция возвращает `true` → `Load` возвращает `AD_OK`.
@@ -138,7 +140,7 @@ for (uint64_t i = 0; i < count; i++) {
     ...
 ```
 
-### N7 [P2] `LoadCollectorData` принимает thumbSize из файла, не равный `reducedImageSize`
+### N7 [P2] ✅ Исправлено 2026-08-18 — `LoadCollectorData` принимает thumbSize из файла, не равный `reducedImageSize`
 `adImageDataStorage.cpp:602, 643-657`; параметр `thumbSizeFromHeader` (`:505`) читается в `Load()` и не используется; `allLoad` тоже игнорируется
 
 DLL-native загрузчик строг (`adFileStream.cpp:141-143` — исключение при несовпадении стороны), collector-native — нет: БД с `--size 64` при опции 32 грузится с `filled=true`, GPU-pack их отфильтрует (известный фикс), но **CPU**-компаратор (`IsDuplPair`, `m_mainSize` = опция², `adImageComparer.cpp:56/275`) читает первые `m_mainSize` байт из большего буфера — сравнивает верхний левый квадрант → мусорные разности. Плюс `fileThumbSize` без верхней границы: битый заголовок кормит `new TPixelData(side)` без try/catch → `bad_alloc` вылетает из экспорта DLL.
@@ -191,7 +193,7 @@ for(...deletedImages...) {
 
 Реальный restore (IFileOperation из корзины) — см. §7 (не автоматизируется безопасно).
 
-### N11 [P2] `TDatabaseRegistry::UpdateCount`: префикс-коллизия в обе стороны + неатомарная незакавыченная запись XML
+### N11 [P2] ✅ Исправлено 2026-08-18 — `TDatabaseRegistry::UpdateCount`: префикс-коллизия в обе стороны + неатомарная незакавыченная запись XML
 `adDatabaseRegistry.cpp:185-194`, `97-115`
 
 (a) `searchPath.find(dbPath) == 0 || dbPath.find(searchPath) == 0` без границы разделителя — `C:\Foo` обновляет счётчик БД `C:\Foo2`, первый матч выигрывает. (b) `Save()` пишет `ad_database.xml` усечением на месте, без экранирования `Name` (`&`, `<`, `"` калечат файл) и без temp+rename — краш или параллельно работающий коллектор (он переписывает тот же файл, `main.cpp:1051`) теряет записи. Фикс: хелпер N5 + запись через `ad_database.xml.tmp` + `MoveFileEx(REPLACE_EXISTING)` + экранирование атрибутов.
@@ -216,8 +218,8 @@ for (size_t i = 0; i < databases.size() && i < capacity; i++) { ... }
 | N15 | `adEngine.cpp:253-294` | `MatchCallback` нет гейта `type > AD_IMAGE_NONE` (есть в `CanCompare`); прогресс = «найденные пары», а не «сравнённые» → бар стоит на 0% и прыгает | добавить gate; кормить прогресс числом обработанных кандидатов |
 | N16 | `adImageData.h:44` + `main.cpp:324` + `adDataCollector.cpp:229` | crc32c: u32 против u64 на диске; коллектор считает CRC **превью**, DLL — **файла** → штраф `ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32` ведёт себя по-разному для БД-кэш и свежих картинок | см. C5 — унифицировать на CRC файла |
 | N17 | — | Мёртвый код: `UpdateGpuDatabase` (до N3), `GpuCompareOneVsMany`/`CompareOneVsMany`, фейковый стриминговый цикл (N1), экспорты N12; дубль-парсинг заголовков `LoadCollectorNative` vs `LoadCollectorData` (`:521-544` vs `:578-599`) | удалить; извлечь `ReadCollectorString(FILE*)` |
-| N18 | `adThreadManagement.h:68` | `TThreadQueue::Size()` читает `m_pQueue->size()` без CS — формальная гонка | обернуть в `TCriticalSection::TLocker` |
-| N19 | `adEngine.h:64` | `m_skipComparisonDuringCollection` — обычный `bool` через потоки | `std::atomic<bool>` |
+| N18 | `adThreadManagement.h:68` | ✅ 2026-08-18: `TThreadQueue::Size()` читает `m_pQueue->size()` без CS — формальная гонка | обернуть в `TCriticalSection::TLocker` |
+| N19 | `adEngine.h:64` | ✅ 2026-08-18: `m_skipComparisonDuringCollection` — обычный `bool` через потоки | `std::atomic<bool>` |
 | N20 | `adFileStream.cpp:145-149` | legacy (v≤3) DLL-БД: average/variance не читаются и не пересчитываются → SSIM деградирует тихо | пересчитывать при `filled && average==0 && varianceSquare==0` |
 | N21 | `adSearcher.cpp:217-229` | эвристика `globalIdx >= prevCount` для «новых» записей связывает счётчик вставок с размером вектора — хрупко | помечать вставленные записи явно |
 
@@ -228,7 +230,7 @@ for (size_t i = 0; i < databases.size() && i < capacity; i++) { ... }
 
 ## §2. NvJpegCollector (`src/NvJpegCollector/main.cpp`) — 2×P1, 8×P2, 17×P3
 
-### C1 [P1] `--update`: для ИЗМЕНЁННЫХ файлов пишутся ОБЕ записи — старая и новая
+### C1 [P1] ✅ Исправлено 2026-08-18 — `--update`: для ИЗМЕНЁННЫХ файлов пишутся ОБЕ записи — старая и новая
 `main.cpp:699-704` (плейсхолдер) vs `main.cpp:746-747` (вставка декодированных)
 
 ```cpp
@@ -252,7 +254,7 @@ images.insert(images.end(), updJpegImages.begin(), updJpegImages.end());   // т
 
 (Если декод упал — записи нет вообще; файл и так битый и попадает в failed.log.)
 
-### C2 [P1] `LoadExistingDatabase`: use-after-close / двойной fclose на битой БД (UB, вероятен краш)
+### C2 [P1] ✅ Исправлено 2026-08-18 — `LoadExistingDatabase`: use-after-close / двойной fclose на битой БД (UB, вероятен краш)
 `main.cpp:254-260`, `:298`
 
 ```cpp
@@ -282,7 +284,7 @@ auto readStr = [&](FILE* fp) -> std::wstring {
 
 **Фикс:** писать `0000.adi.tmp` → `fflush` → `MoveFileExW(tmp, ..., MOVEFILE_REPLACE_EXISTING)`; data-файл первым, index последним (коммит-точка); проверять `fwrite(...) == 1`.
 
-### C4 [P2] Update при полном удалении файлов не пишет ничего — старая БД выживает
+### C4 [P2] ✅ Исправлено 2026-08-18 — Update при полном удалении файлов не пишет ничего — старая БД выживает
 `main.cpp:782`: `if (!images.empty()) {...}` — если все файлы источника удалены, записи и реестр не обновляются, DLL продолжает грузить призраки. Фикс: писать count=0 (или удалить папку БД + запись реестра).
 
 ### C5 [P2] Контракт: crc32c коллектора — CRC превью; DLL — CRC файла
@@ -304,7 +306,7 @@ info.crc32c = SimdCrc32c(item.raw.data(), (size_t)item.raw.size());  // вмес
 ### C7 [P2] DLL доверяет thumbSize файла и игнорирует свой `reducedImageSize` — следствие N7
 (полное описание в N7; здесь — сторона контракта: оба конца должны отвергать несовпадение, включая `--size` коллектора — см. C13.)
 
-### C8 [P2] Непроверенные CUDA-результаты: буфер предыдущей картинки записывается как данные текущей
+### C8 [P2] ✅ Исправлено 2026-08-18 — Непроверенные CUDA-результаты: буфер предыдущей картинки записывается как данные текущей
 `main.cpp:528, 533`
 
 При device-lost/async-ошибке `cudaEventSynchronize` вернёт ошибку, но `slot.gray` всё ещё держит пиксели **предыдущего** изображения — `ProcessGray` захеширует их и запишет под путём текущего → у двух разных картинок идентичные превью/CRC → гарантированный ложный дубликат в БД.
@@ -315,7 +317,7 @@ if (cudaEventSynchronize(slot.done) != cudaSuccess) { logFail(fp, 6, (long)cudaG
 
 (+ проверять код постановки `cudaMemcpy2DAsync`.)
 
-### C9 [P2] `fs::file_size()` бросает на исчезнувшем файле → весь прогон падает
+### C9 [P2] ✅ Исправлено 2026-08-18 — `fs::file_size()` бросает на исчезнувшем файле → весь прогон падает
 `main.cpp:693` (классификация update) и `ProcessGray` `:306` из WIC-циклов `:762`, `:918`
 
 Незакрытые `filesystem_error` долетают до обработчика `wmain` → «FATAL ERROR», exit 2, вся декодированная работа теряется. В `ProcessJpegList` внутри try/catch — только там безопасно.
@@ -324,7 +326,7 @@ if (cudaEventSynchronize(slot.done) != cudaSuccess) { logFail(fp, 6, (long)cudaG
 std::error_code ec; uint64_t sz = fs::file_size(path, ec); if (ec) { /* log + skip */ }
 ```
 
-### C10 [P2] `thumbSizeVal` из файла без валидации → `resize(0x7FFF...)` → необработанный `length_error`
+### C10 [P2] ✅ Исправлено 2026-08-18 — `thumbSizeVal` из файла без валидации → `resize(0x7FFF...)` → необработанный `length_error`
 `main.cpp:289-291` — в отличие от DLL-ридера (`:647-651`), собственный загрузчик доверяет полю длины: `img.thumbnail.resize((size_t)thumbSizeVal);`. Фикс: `if (thumbSizeVal != (uint64_t)ts*ts) { fclose(f); return false; }`.
 
 ### C11-C17 [P3] — коллектор
@@ -333,7 +335,7 @@ std::error_code ec; uint64_t sz = fs::file_size(path, ec); if (ec) { /* log + sk
 |---|------|----------|------|
 | C11 | `main.cpp:55-74, 380-386, 146/161` | Мёртвое: `GenerateAdiFileName`, `ResolveWorkers` (help обещает «cores−1», фактически `DetectPhysicalCores()`), `--batch` парсится и не используется (batch захардкожен 1) | удалить/синхронизировать help |
 | C12 | `main.cpp:193-199` | Глобальные nvJPEG state+stream инициализируются и никогда не используются (каждый декодер создаёт свои) | удалить |
-| C13 | `main.cpp:160` | `--size` без валидации: 0 → десинк ридера DLL; 50000 → UB переполнения `int` | clamp 8..256, степень двойки |
+| C13 | `main.cpp:160` | ✅ 2026-08-18 (clamp 16..128): `--size` без валидации: 0 → десинк ридера DLL; 50000 → UB переполнения `int` | clamp 8..256, степень двойки |
 | C14 | `main.cpp:476-478` | `threads.emplace_back` может бросить после старта reader'а → деструктор joinable thread → terminate | try/catch + join что есть |
 | C15 | `main.cpp:134-142` | `GetImageType` — только точный регистр: `.Jpg`/`.Tiff` → 0 → файл тихо не собирается (даже не failed) | `_wcsicmp` |
 | C16 | `main.cpp:777-829 vs 931-979` | Дубль save-кода (update vs full) и реестр-XML блока | извлечь `SaveDatabase(...)` |
@@ -348,7 +350,7 @@ std::error_code ec; uint64_t sz = fs::file_size(path, ec); if (ec) { /* log + sk
 
 ## §3. C# слой (Core + WinForms + WPF) — 5×P1, 13×P2, 16×P3
 
-### S1 [P1] AutoSelector: критерии Time и Pool молча игнорируются при включённом критерии качества
+### S1 [P1] ✅ Исправлено 2026-08-18 — AutoSelector: критерии Time и Pool молча игнорируются при включённом критерии качества
 `AutoSelector.cs:243-299`
 
 Диалог (`AutoSelectDialog.cs:49-101`) позволяет одновременно «выбрать старый файл» И «выбрать меньший файл», но `DetermineSide` при любом активном критерии качества возвращается из каждой ветки каскада — Time/Pool недостижимы. Решение ведёт удаление → **удаляется не тот файл**.
@@ -364,12 +366,12 @@ if (hasQualityCriterion) { /* существующий каскад */ }
 
 (Альтернатива — блокировать конфликтующие группы в диалоге; выбрать одно.)
 
-### S2 [P1] Массовое удаление без подтверждения, на UI-потоке, без длинных путей
+### S2 [P1] ✅ Исправлено 2026-08-18 — Массовое удаление без подтверждения, на UI-потоке, без длинных путей
 `MainMenu.cs:391-400`, `ResultsListViewContextMenu.cs:180-188`
 
 Классический путь (`ResultsListView.MakeAction`) предупреждает о безвозвратном удалении длинных путей и работает через фон `ProgressForm`; новый батч-путь вызывает `AutoSelector.ExecuteBatch(m_core, true)` синхронно: ноль подтверждений (безвозвратно при выключенной корзине или пути >260 — проверка `HasLongPaths` не выполняется), фриз UI на весь батч, без отмены. Фикс: `MessageBox.Show(...YesNo)` + обёртка в фоновое выполнение как в классическом пути.
 
-### S3 [P1] `CoreOptions.Set`: NRE в fallback-ветке, проглоченный логом → поиск идёт не по тем папкам
+### S3 [P1] ✅ Исправлено 2026-08-18 — `CoreOptions.Set`: NRE в fallback-ветке, проглоченный логом → поиск идёт не по тем папкам
 `CoreOptions.cs:143-148`
 
 ```csharp
@@ -386,7 +388,7 @@ NRE ловится внешним catch (`:162`) и пишется только 
 tmpSearch[0] = new CorePathWithSubFolder { path = Application.StartupPath };
 ```
 
-### S4 [P1] Запуск коллектора из DatabaseManagerForm: классический дедлок пайпов
+### S4 [P1] ✅ Исправлено 2026-08-18 — Запуск коллектора из DatabaseManagerForm: классический дедлок пайпов
 `DatabaseManagerForm.cs:425-439` (Update) и `:681-694` (Update All)
 
 Последовательный `ReadToEnd` на stdout, потом stderr: если коллектор пишет в stderr больше ёмкости пайпа, пока stdout открыт — взаимоблокировка. `UpdateAllDatabases` вообще не дренит stderr. Плюс `WaitForExit()` блокирует UI-поток.
@@ -398,7 +400,7 @@ string stderr = stderrTask.Result;
 proc.WaitForExit();
 ```
 
-### S5 [P1] Рабочие потоки без обработки исключений оставляют модальные диалоги навсегда
+### S5 [P1] ✅ Исправлено 2026-08-18 — Рабочие потоки без обработки исключений оставляют модальные диалоги навсегда
 `SearchExecuterForm.cs:148-201`, `ProgressForm.cs:222-313`, `StartFinishForm.cs:108-143`, WPF `SearchDllCommand.cs:156-174`
 
 `CoreThreadTask` ставит `State.Finish` только на успехе; любое исключение убивает поток молча — таймер никогда не видит Finish, неклозабельный диалог висит, Stop/Cancel заблокированы. Конкретные триггеры: `LogPerformance` (`:482-497`) разыменовывает `statistic.searchedImageSize`, когда `CoreLib.GetStatistic()` вернул null (`CoreLib.cs:165-190`); null-делегаты DynamicModule (S7). Фикс: try/catch вокруг тела `CoreThreadTask` → состояние `Error` → закрытие с сообщением; null-check `statistic`.
@@ -429,8 +431,8 @@ fixed (byte* pBuf = buffer) {
 | S10 | `ResultsPreviewDuplPair.cs:352-371` | событие подсветки стреляет дважды — второй раз со ВСЕМИ прямоугольниками, `MaxFragmentsForHighlight` затирается; `_highlightStop` не volatile; проверка `ThreadState == Running` пропускает `Unstarted/WaitSleepJoin` → два потока подсветки | `else` вокруг второго вызова; volatile; generation-токен |
 | S11 | `DatabaseManagerForm.cs:961-965` | `int.Parse(GetAttr(...))` без try/catch в `LoadRegistry` — битый атрибут валит конструктор формы И рабочий поток поиска (`GetEnabledDatabasePaths` зовётся из `SearchExecuterForm.cs:153`) | `int.TryParse` + skip + log |
 | S12 | `DatabaseManagerForm.cs:1026`, `SearchExecuterForm.cs:157`, `CoreOptions.cs:124`, `CoreLib.cs:605`, `AntiDupl.cpp:389` | Дебажные логи в папке exe в проде: `cs_debug.log` (необрезаемый), `trace.log`, `path_debug.log` — под Program Files тихо падают, на writable — растут вечно | удалить или гейт `#DEBUG`/настройкой |
-| S13 | `AutoSelector.cs:169-229` | Учёт батча: неудачи delete не попадают в `FailedPaths`; исчезнувший файл считается failed, но строка в результатах не снимается (`MarkRemoved*` не зовётся) — вечный stale-ряд; `s_sideCache.Clear()` стирает разметку и при частичной неудаче | дополнять FailedPaths; MarkRemoved для отсутствующих; чистить только успешные ключи |
-| S14 | `AutoSelector.cs:368-376` | Префикс-матчинг пула без разделителя (та же болезнь, что N5) — `C:\Photos` ловит `C:\Photos2` → автовыбор удаляет не с той стороны | `StartsWith(..., OrdinalIgnoreCase) && (len==dbPath.Length \|\| imgPath[dbPath.Length]=='\\')` |
+| S13 | `AutoSelector.cs:169-229` | ✅ 2026-08-18: Учёт батча: неудачи delete не попадают в `FailedPaths`; исчезнувший файл считается failed, но строка в результатах не снимается (`MarkRemoved*` не зовётся) — вечный stale-ряд; `s_sideCache.Clear()` стирает разметку и при частичной неудаче | дополнять FailedPaths; MarkRemoved для отсутствующих; чистить только успешные ключи |
+| S14 | `AutoSelector.cs:368-376` | ✅ 2026-08-18: Префикс-матчинг пула без разделителя (та же болезнь, что N5) — `C:\Photos` ловит `C:\Photos2` → автовыбор удаляет не с той стороны | `StartsWith(..., OrdinalIgnoreCase) && (len==dbPath.Length \|\| imgPath[dbPath.Length]=='\\')` |
 | S15 | `MainMenu.cs:427-438` + 2 копии | `IsSafeMoveTarget` блокирует только System32; `C:\Windows`, Program Files, корни дисков проходят; сообщение врёт про тест записи; три копии кода | блокировать `%SystemRoot%`, `%ProgramFiles%`, корни; probe записью temp-файла; одна общая копия |
 | S16 | `CoreOptions.cs:104-107` | `Get(onePath)` индексирует `core.searchPath[0]` без проверки длины | length guard |
 | S17 | `MainForm.cs:111-112` | После таймаута `WaitForWorker(10000)` `m_core.Dispose()` зовёт `adRelease`, пока finish-воркер может быть внутри `adSaveW` на освобождённом движке → нативный краш на выходе | при таймауте утечь core (`GC.SuppressFinalize`, не Dispose) вместо release |
@@ -449,7 +451,7 @@ fixed (byte* pBuf = buffer) {
 
 ## §4. Сборка / CI / упаковка — 1×P1, 7×P2/P3
 
-### B1 [P1] MakeBin.cmd пакует НЕ ту nvjpeg: релизный zip без `nvjpeg64_13.dll`
+### B1 [P1] ✅ Исправлено 2026-08-18 — MakeBin.cmd пакует НЕ ту nvjpeg: релизный zip без `nvjpeg64_13.dll`
 `cmd/MakeBin.cmd:44-46`
 
 NvJpegCollector линкуется против CUDA 13.1 (`nvjpeg.lib` → `nvjpeg64_13.dll` + `cudart64_13.dll`; подтверждено содержимым `bin/Release`). MakeBin копирует `nvjpeg64_12.dll` (устаревшую) и опционально `cudart64_12.dll`, **не копируя** `nvjpeg64_13.dll`/`cudart64_13.dll` — `xcopy` молча проваливается (нет проверки errorlevel), CI собирает артефакт, и коллектор в дистрибутиве не запускается.
@@ -466,7 +468,7 @@ if exist %RELEASE_DIR%\cudart64_12.dll xcopy %RELEASE_DIR%\cudart64_12.dll %TMP_
 ### B2 [P2] CI ставит CUDA 12.8, локальная сборка — 13.1
 `.github/workflows/AntiDupl_CI.yml:40-44` — collector на CI линкуется против 12.8-версии nvjpeg, локально против 13.1: одна и та же ветка производит бинарники против разных мажор-версий nvJPEG. Зафиксировать 13.1 в CI (`JimVer/cuda-toolkit-action` с `cuda: '13.1.x'`) или перевести локальную сборку на 12.8.
 
-### B3 [P2] Deploy.cmd: шаг коллектора без `/p:VcpkgManifestInstall=false`
+### B3 [P2] ✅ Исправлено 2026-08-18 — Deploy.cmd: шаг коллектора без `/p:VcpkgManifestInstall=false`
 `cmd/Deploy.cmd:40` против `:32` — несогласованность с шагом AntiDupl: одиночный запуск может триггернуть полную vcpkg manifest-установку (долго, ловит simd-quirk). Добавить флаг.
 
 ### B4 [P3] Deploy.cmd: хардкод пути `v12.8` относительно CUDA 13
@@ -475,7 +477,7 @@ if exist %RELEASE_DIR%\cudart64_12.dll xcopy %RELEASE_DIR%\cudart64_12.dll %TMP_
 ### B5 [P3] CI без `timeout-minutes` и `concurrency`
 Отсутствуют оба — зависший билд жрёт раннер 6 часов (дефолт), параллельные пуши не отменяются. Добавить `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }` и `timeout-minutes: 90`.
 
-### B6 [P3] Сгенерированные `External.cs`/`adExternal.h` закоммичены
+### B6 [P3] ✅ Исправлено 2026-08-18 — Сгенерированные `External.cs`/`adExternal.h` закоммичены
 `git ls-files`: оба файла в репо, при том что pre-build перегенерирует их из `version.txt`. Дрейф при смене версии без билда + вечные диффы. Удалить из индекса и добавить в `.gitignore` (pre-build создаёт их до компиляции — сборке не мешает).
 
 ### B7 [P3] `nuget restore` на решении без NuGet-пакетов
@@ -497,14 +499,14 @@ if exist %RELEASE_DIR%\cudart64_12.dll xcopy %RELEASE_DIR%\cudart64_12.dll %TMP_
 
 | PR | Состав | Почему сначала |
 |----|--------|----------------|
-| 1 | C1, C2, C4, C10 (корректность update + UB загрузчика) | Портит данные пользователей прямо сейчас |
-| 2 | N4, N6, N7/C7, C13 (валидация форматов при загрузке) | Краш/мусор на битых входных, обе стороны контракта |
-| 3 | N2, N3, S1, S3 (неверные результаты: GPU-гейт, VRAM-слоты, AutoSelector, CoreOptions) | Тихо неверные результаты — худший класс |
-| 4 | S2, S4, S5, S13 (UI-безопасность батчей и потоков) | Данные под угрозой от одного клика |
-| 5 | N5+S14+N11, C5, C6 (сквозные контракты: префиксы, CRC, превью) | Классовые фиксы, требуют Smoke на GPU+CPU |
-| 6 | B1, B3 (упаковка/деплой) | Дистрибутив с неработающим коллектором |
-| 7 | N8-N12, C3, C8, C9, S6-S12, S15-S18, B2, B5 (робастность) | Вторая волна |
-| 8 | P3-чистка (N13-N21, C11-C17, S19-S34, B4, B6, B7) + удаление мёртвого кода | После стабилизации |
+| 1 | ✅ C1, C2, C4, C10 (корректность update + UB загрузчика) | Портит данные пользователей прямо сейчас |
+| 2 | ✅ N4, N6, N7/C7, C13 (валидация форматов при загрузке) | Краш/мусор на битых входных, обе стороны контракта |
+| 3 | ✅ N2, N3, S1, S3 (неверные результаты: GPU-гейт, VRAM-слоты, AutoSelector, CoreOptions) | Тихо неверные результаты — худший класс |
+| 4 | ✅ S2, S4, S5, S13 (UI-безопасность батчей и потоков) | Данные под угрозой от одного клика |
+| 5 | ◐ N5+S14+N11 ✅; C5, C6 ⏭ отложены (сквозные контракты: префиксы, CRC, превью) | Классовые фиксы, требуют Smoke на GPU+CPU |
+| 6 | ✅ B1, B3 (упаковка/деплой) | Дистрибутив с неработающим коллектором |
+| 7 | ⏭ N8-N12, C3, C8, C9 ✅, S6-S12, S15-S18, B2, B5 (робастность) | Вторая волна |
+| 8 | ⏭ P3-чистка (N13-N21, C11-C17, S19-S34, B4, B6 ✅, B7) + удаление мёртвого кода | После стабилизации |
 
 После каждого PR: `cmd\Deploy.cmd` до `[OK] Deploy complete.` + Smoke из DEV_GUIDE §1 (коллектор → поиск SqSum и SSIM → delete pair → рестарт).
 
@@ -521,6 +523,7 @@ if exist %RELEASE_DIR%\cudart64_12.dll xcopy %RELEASE_DIR%\cudart64_12.dll %TMP_
 ## §8. Валидация
 
 - `cmd\Deploy.cmd`: **пройден** — `[OK] Deploy complete.` (exit 0); C++ (AntiDupl.dll, NvJpegCollector.exe) и C# (WinForms + Core) собрались, CUDA-депенденси и ресурсы на месте, все артефакты верифицированы (16.08.2026, коммит `04d9495`).
+- Перепроверка после фиксов 2026-08-18: **`cmd\Deploy.cmd` пройден** (`[OK] Deploy complete.`); одиночные MSBuild-сборки AntiDupl.dll / NvJpegCollector.exe / WinForms — 0 ошибок; запуск `bin\Release\AntiDupl.NET.WinForms.exe` — стартует, процесс жив, закрывается штатно. Полный GUI Smoke (коллектор → поиск → delete → auto-select → restart) требует ручного прогона — см. DEV_GUIDE §1.
 - Автотестов в решении нет — CI проверяет только сборку (см. §7.7).
 - Lint/typecheck: не настроены (C# — /warnasdefault; C++ — W3). Рекомендация: включить `/W4` + `TreatWarningAsError` на новый код — не в этом аудите.
 
@@ -535,3 +538,5 @@ if exist %RELEASE_DIR%\cudart64_12.dll xcopy %RELEASE_DIR%\cudart64_12.dll %TMP_
 ---
 
 *Аудит подготовлен ZCode (read-only ревью, 2026-08-16). Код приложения не изменялся; все патчи — предложения, готовые к применению PR-батчами §6.*
+
+*Применение фиксов 2026-08-18: закрыты C1-C2, C4, C8-C10, C13, N2-N7, N11, N18-N19, S1-S5, S13-S14, B1, B3, B6 (маркеры ✅). Отложены (не фиксить без согласования): N1, C3, C5-C6, N8-N10, N12, B2, B4-B5, B7 и P3-чистки.*

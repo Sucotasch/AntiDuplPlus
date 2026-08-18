@@ -152,6 +152,45 @@ namespace AntiDupl.NET.WinForms
         }
 
         /// <summary>
+        /// <summary>
+        /// Number of results currently marked for action.
+        /// </summary>
+        public static int CountMarked(CoreLib core)
+        {
+            var results = core.GetResult(0, 1000000);
+            if (results == null || results.Length == 0) return 0;
+            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int count = 0;
+            for (int i = 0; i < results.Length; i++)
+            {
+                var r = results[i];
+                if (r.type != CoreDll.ResultType.DuplImagePair) continue;
+                string targetPath;
+                if (!s_sideCache.TryGetValue(GetKey(r), out targetPath)) continue;
+                if (processed.Add(targetPath)) count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// True if any marked target has a path longer than MAX_PATH (260).
+        /// </summary>
+        public static bool HasLongPaths(CoreLib core)
+        {
+            const int MAX_PATH = 260;
+            var results = core.GetResult(0, 1000000);
+            if (results == null || results.Length == 0) return false;
+            for (int i = 0; i < results.Length; i++)
+            {
+                var r = results[i];
+                if (r.type != CoreDll.ResultType.DuplImagePair) continue;
+                string targetPath;
+                if (!s_sideCache.TryGetValue(GetKey(r), out targetPath)) continue;
+                if (targetPath != null && targetPath.Length > MAX_PATH) return true;
+            }
+            return false;
+        }
+
         /// Execute actions on all marked results (delete or move the targeted side).
         /// For delete: removes the targeted image.
         /// For move: moves the targeted image to the specified folder.
@@ -165,6 +204,7 @@ namespace AntiDupl.NET.WinForms
             int succeeded = 0, failed = 0;
             var failedPaths = new List<string>();
             var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var succeededKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             for (int i = results.Length - 1; i >= 0; i--)
             {
@@ -184,6 +224,19 @@ namespace AntiDupl.NET.WinForms
                         ok = core.ApplyToResult(CoreDll.LocalActionType.DeleteFirst, CoreDll.TargetType.Current);
                     else
                         ok = core.ApplyToResult(CoreDll.LocalActionType.DeleteSecond, CoreDll.TargetType.Current);
+                    if (!ok)
+                    {
+                        failedPaths.Add(targetPath);
+                        // If the file simply no longer exists, mark the result as removed
+                        // so the stale row does not persist in the list.
+                        if (!System.IO.File.Exists(targetPath))
+                        {
+                            if (string.Equals(targetPath, r.first?.path, StringComparison.OrdinalIgnoreCase))
+                                core.ApplyToResult(CoreDll.LocalActionType.MarkRemovedFirst, CoreDll.TargetType.Current);
+                            else
+                                core.ApplyToResult(CoreDll.LocalActionType.MarkRemovedSecond, CoreDll.TargetType.Current);
+                        }
+                    }
                 }
                 else if (!string.IsNullOrEmpty(targetFolder))
                 {
@@ -215,10 +268,13 @@ namespace AntiDupl.NET.WinForms
                     }
                 }
 
-                if (ok) succeeded++; else failed++;
+                if (ok) { succeeded++; succeededKeys.Add(key); } else { failed++; }
             }
 
-            s_sideCache.Clear();
+            // Remove only the keys that were successfully acted upon, so that a partial
+            // failure keeps the marking for the remaining rows (S13).
+            foreach (var key in succeededKeys)
+                s_sideCache.Remove(key);
 
             if (succeeded > 0)
             {
@@ -361,14 +417,17 @@ namespace AntiDupl.NET.WinForms
         {
             if (image == null || string.IsNullOrEmpty(image.path)) return 0;
 
-            string imgPath = image.path.ToLowerInvariant();
+            string imgPath = image.path;
             int bestPool = 0;
             int bestLen = 0;
 
             foreach (var kv in poolMap)
             {
-                string dbPath = kv.Key.ToLowerInvariant();
-                if (imgPath.StartsWith(dbPath) && dbPath.Length > bestLen)
+                string dbPath = kv.Key;
+                if (dbPath.Length > bestLen &&
+                    imgPath.StartsWith(dbPath, StringComparison.OrdinalIgnoreCase) &&
+                    (imgPath.Length == dbPath.Length || imgPath[dbPath.Length] == System.IO.Path.DirectorySeparatorChar ||
+                     imgPath[dbPath.Length] == System.IO.Path.AltDirectorySeparatorChar))
                 {
                     bestPool = kv.Value;
                     bestLen = dbPath.Length;

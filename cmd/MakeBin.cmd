@@ -40,7 +40,7 @@ xcopy %RELEASE_DIR%\AntiDupl.NET.Core.dll %TMP_DIR%\* /y /i
 xcopy %RELEASE_DIR%\AntiDupl.dll %TMP_DIR%\* /y /i
 
 REM === CUDA / nvJPEG runtime ===
-xcopy %RELEASE_DIR%\nvjpeg64_12.dll %TMP_DIR%\* /y /i
+xcopy %RELEASE_DIR%\nvjpeg64_13.dll %TMP_DIR%\* /y /i
 if exist %RELEASE_DIR%\cudart64_12.dll xcopy %RELEASE_DIR%\cudart64_12.dll %TMP_DIR%\* /y /i
 
 REM === GPU collector utility ===

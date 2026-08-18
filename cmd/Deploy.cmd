@@ -37,7 +37,7 @@ if errorlevel 1 (
 
 REM --- step 2: build NvJpegCollector.exe (C++) ---
 echo [3/5] Building NvJpegCollector.exe ...
-"%MSBUILD%" "%SRC_DIR%\NvJpegCollector\NvJpegCollector.vcxproj" /p:Configuration=Release /p:Platform=x64 /m:1 /v:minimal /nologo
+"%MSBUILD%" "%SRC_DIR%\NvJpegCollector\NvJpegCollector.vcxproj" /p:Configuration=Release /p:Platform=x64 /m:1 /v:minimal /nologo /p:VcpkgManifestInstall=false
 if errorlevel 1 (
     echo [ERROR] NvJpegCollector build failed.
     exit /b 1

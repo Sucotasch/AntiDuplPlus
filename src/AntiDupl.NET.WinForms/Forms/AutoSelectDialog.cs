@@ -28,6 +28,8 @@ namespace AntiDupl.NET.WinForms
 
         public AutoSelectCriteria ResultCriteria { get; private set; }
 
+        private bool m_updating;
+
         public AutoSelectDialog()
         {
             InitializeComponent();
@@ -124,6 +126,63 @@ namespace AntiDupl.NET.WinForms
 
             this.AcceptButton = btnMark;
             this.CancelButton = btnCancel;
+
+            // S1: Time and Pool are standalone modes; combining them with any quality
+            // criterion silently ignores them (AutoSelector.DetermineSide returns from
+            // the quality cascade first). Block such combinations: activating a standalone
+            // option resets the quality groups to "Don't care" and vice versa.
+            WireGroup(m_timeOlder, m_timeNewer, m_poolPool1, m_poolPool2);
+            WireGroup(m_sizeSmaller, m_sizeLarger, m_qualityWorse, m_qualityBetter, m_resLower, m_resHigher);
+        }
+
+        private void WireGroup(params RadioButton[] activeRadios)
+        {
+            foreach (var radio in activeRadios)
+                radio.CheckedChanged += (s, e) => { if (((RadioButton)s).Checked) OnActiveGroupChanged(); };
+        }
+
+        private void OnActiveGroupChanged()
+        {
+            if (m_updating) return;
+            m_updating = true;
+            try
+            {
+                bool standaloneActive =
+                    m_timeOlder.Checked || m_timeNewer.Checked || m_poolPool1.Checked || m_poolPool2.Checked;
+                bool qualityActive =
+                    m_sizeSmaller.Checked || m_sizeLarger.Checked || m_qualityWorse.Checked ||
+                    m_qualityBetter.Checked || m_resLower.Checked || m_resHigher.Checked;
+
+                if (standaloneActive && qualityActive)
+                {
+                    // A standalone (Time/Pool) option was just checked while a quality
+                    // criterion was active (or vice versa) — determine which side fired.
+                    if (m_timeOlder.Checked || m_timeNewer.Checked || m_poolPool1.Checked || m_poolPool2.Checked)
+                    {
+                        // Standalone fired last: reset quality groups.
+                        ResetGroup(m_sizeDonTCare, m_sizeSmaller, m_sizeLarger);
+                        ResetGroup(m_qualityDonTCare, m_qualityWorse, m_qualityBetter);
+                        ResetGroup(m_resDonTCare, m_resLower, m_resHigher);
+                    }
+                    else
+                    {
+                        // Quality fired last: reset standalone groups.
+                        ResetGroup(m_timeDonTCare, m_timeOlder, m_timeNewer);
+                        ResetGroup(m_poolDonTCare, m_poolPool1, m_poolPool2);
+                    }
+                }
+            }
+            finally
+            {
+                m_updating = false;
+            }
+        }
+
+        private void ResetGroup(RadioButton dontCare, params RadioButton[] activeRadios)
+        {
+            foreach (var radio in activeRadios)
+                radio.Checked = false;
+            dontCare.Checked = true;
         }
 
         private RadioButton AddRadio(Control parent, string text, int y, bool isChecked = false)

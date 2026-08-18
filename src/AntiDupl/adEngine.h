@@ -25,6 +25,7 @@
 #define __adEngine_h__
 
 #include "adStrings.h"
+#include <atomic>
 
 namespace ad
 {
@@ -61,8 +62,8 @@ namespace ad
         bool ExecuteGpuAllVsAllComparison();  // Возвращает true при успехе
 
         // Flag to skip comparison during collection (for GPU AllVsAll mode)
-        bool m_skipComparisonDuringCollection;
-        bool SkipComparisonDuringCollection() const { return m_skipComparisonDuringCollection; }
+        std::atomic<bool> m_skipComparisonDuringCollection;
+        bool SkipComparisonDuringCollection() const { return m_skipComparisonDuringCollection.load(); }
 
         const TString & UserPath() const { return _userPath; }
         TStatus* Status() {return m_pStatus;}

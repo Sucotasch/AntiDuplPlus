@@ -574,6 +574,15 @@ namespace ad
 		// Read thumbSize (u32)
 		uint32_t fileThumbSize = 0;
 		if (fread(&fileThumbSize, 4, 1, f) != 1) { fclose(f); return false; }
+		// N7: reject a DB whose thumb size differs from the configured reduced size.
+		// The CPU comparator assumes data->main holds exactly reducedImageSize^2 bytes;
+		// loading a bigger buffer would compare the wrong quadrant -> garbage differences.
+		if (fileThumbSize == 0 || fileThumbSize > 1024 ||
+			fileThumbSize != (uint32_t)m_pOptions->advanced.reducedImageSize)
+		{
+			fclose(f);
+			return false;
+		}
 
 		// Read key (i16)
 		short fileKey = 0;
@@ -610,17 +619,19 @@ namespace ad
 			if (pathLen > 0 && fread(&imgPath[0], 2, pathLen, f) != pathLen) { fclose(f); return false; }
 			
 			// Read metadata
-			uint64_t fileSize = 0; fread(&fileSize, 8, 1, f);
-			uint64_t fileTime = 0; fread(&fileTime, 8, 1, f);
-			uint32_t hash = 0; fread(&hash, 4, 1, f);
-			uint8_t type = 0; fread(&type, 1, 1, f);
-			uint32_t width = 0; fread(&width, 4, 1, f);
-			uint32_t height = 0; fread(&height, 4, 1, f);
-			float blockiness = 0; fread(&blockiness, 4, 1, f);
-			float blurring = 0; fread(&blurring, 4, 1, f);
-			uint8_t defect = 0; fread(&defect, 1, 1, f);
-			uint64_t crc32c = 0; fread(&crc32c, 8, 1, f);
-			uint8_t filled = 0; fread(&filled, 1, 1, f);
+			uint64_t fileSize = 0; uint64_t fileTime = 0; uint32_t hash = 0; uint8_t type = 0;
+			uint32_t width = 0; uint32_t height = 0; float blockiness = 0; float blurring = 0;
+			uint8_t defect = 0; uint64_t crc32c = 0; uint8_t filled = 0;
+			if (fread(&fileSize, 8, 1, f) != 1 || fread(&fileTime, 8, 1, f) != 1 ||
+				fread(&hash, 4, 1, f) != 1 || fread(&type, 1, 1, f) != 1 ||
+				fread(&width, 4, 1, f) != 1 || fread(&height, 4, 1, f) != 1 ||
+				fread(&blockiness, 4, 1, f) != 1 || fread(&blurring, 4, 1, f) != 1 ||
+				fread(&defect, 1, 1, f) != 1 || fread(&crc32c, 8, 1, f) != 1 ||
+				fread(&filled, 1, 1, f) != 1)
+			{
+				fclose(f);
+				return false;
+			}
 
 			// Set image info
 			std::wstring origPath = imgPath;
@@ -640,24 +651,34 @@ namespace ad
 				imageData.hash = imageData.path.GetCrc32();
 
 			// Read thumbnail data if filled
+			// Reset per-record state so a record with filled==0 never inherits the
+			// previous record's thumbnail/flags (the reused TImageData instance).
+			imageData.data->filled = false;
+			imageData.data->average = 0;
+			imageData.data->varianceSquare = 0;
 			if (filled && fileThumbSize > 0)
 			{
 				uint64_t thumbSizeVal = 0;
-				fread(&thumbSizeVal, 8, 1, f);
+				if (fread(&thumbSizeVal, 8, 1, f) != 1) { fclose(f); return false; }
 				size_t thumbBytes = (size_t)thumbSizeVal;
 				size_t expected = (size_t)fileThumbSize * (size_t)fileThumbSize;
 				if (thumbBytes != expected || !imageData.data || imageData.data->side != (int)fileThumbSize)
 				{
-					fseek(f, thumbBytes, SEEK_CUR);
+					if (thumbBytes > (size_t)1 << 30) { fclose(f); return false; } // sanity bound before seek
+					fseek(f, (long)thumbBytes, SEEK_CUR);
 				}
 				else
 				{
-					fread(imageData.data->main, 1, thumbBytes, f);
+					if (fread(imageData.data->main, 1, thumbBytes, f) != thumbBytes) { fclose(f); return false; }
 					imageData.data->filled = true;
 				}
 				// NvJpegCollector writes average(f32) + varianceSquare(f32) after thumb data
-				fread(&imageData.data->average, 4, 1, f);
-				fread(&imageData.data->varianceSquare, 4, 1, f);
+				if (fread(&imageData.data->average, 4, 1, f) != 1 ||
+					fread(&imageData.data->varianceSquare, 4, 1, f) != 1)
+				{
+					fclose(f);
+					return false;
+				}
 			}
 
 			if (Find(imageData) == m_storage.end())

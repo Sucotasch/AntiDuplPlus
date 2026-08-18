@@ -342,7 +342,7 @@ namespace ad
 				{
 					result.first = m_pImageInfoStorage->Get((size_t)result.first);
 					result.second = m_pImageInfoStorage->GetStub();
-					if(!check || result.first->Actual())
+					if(result.first != NULL && (!check || result.first->Actual()))
 					{
 						if(m_pOptions->advanced.mistakeDataBase == FALSE ||
 							!m_pMistakeStorage->IsHas(result.first))
@@ -360,7 +360,8 @@ namespace ad
 				{
 					result.first = m_pImageInfoStorage->Get((size_t)result.first);
 					result.second = m_pImageInfoStorage->Get((size_t)result.second);
-					if(!check || (result.first->Actual() && result.second->Actual()))
+					if(result.first != NULL && result.second != NULL &&
+						(!check || (result.first->Actual() && result.second->Actual())))
 					{
 						if(m_pOptions->advanced.mistakeDataBase == FALSE ||
 							!m_pMistakeStorage->IsHas(result.first, result.second))
@@ -493,7 +494,7 @@ namespace ad
             for (auto& kv : dbPoolMap) {
                 std::wstring lowerKey = kv.first;
                 std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(), ::towlower);
-                if (lowerImgPath.find(lowerKey) == 0 && lowerKey.length() > bestLen) {
+                if (ad::PathStartsWith(lowerImgPath, lowerKey) && lowerKey.length() > bestLen) {
                     bestPool = kv.second;
                     bestLen = lowerKey.length();
                 }

@@ -65,7 +65,7 @@ namespace ad
         TPop Pop(TImageData **ppImageData);
 
         size_t Id() const {return m_threadId;}
-        size_t Size() const {return m_pQueue->size();}
+        size_t Size() const;
 
     private:
         volatile size_t m_threadId;

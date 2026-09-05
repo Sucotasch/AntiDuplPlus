@@ -52,7 +52,7 @@
 	</ItemGroup>
 
   <Target Name="GenerateSources" BeforeTargets="BeforeBuild">
-    <Exec Command="$(MSBuildProjectDirectory)\External.cmd &quot;$(ProjectDir)&quot;" />
+    <Exec Command="&quot;$(MSBuildProjectDirectory)\External.cmd&quot; &quot;$(ProjectDir)&quot;" />
     <ItemGroup>
        <Compile Include="$(MSBuildProjectDirectory)\External.cs" />
     </ItemGroup>

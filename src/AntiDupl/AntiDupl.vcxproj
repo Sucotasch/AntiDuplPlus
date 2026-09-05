@@ -69,7 +69,7 @@
       <CodeGeneration>compute_89,sm_89;compute_86,sm_86;compute_75,sm_75</CodeGeneration>
     </CudaCompile>
     <PreBuildEvent>
-      <Command>"$(ProjectDir)".\adExternal.cmd</Command>
+      <Command>"$(ProjectDir)adExternal.cmd"</Command>
     </PreBuildEvent>
     <BuildLog>
       <Path>$(ProjectDir)..\..\obj\$(Configuration)\$(ProjectName)\Build.log</Path>

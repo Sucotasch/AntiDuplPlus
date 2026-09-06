@@ -284,7 +284,7 @@ namespace AntiDupl.NET.WinForms
                 return new CoreOptions(core);
         }
 
-        public void Save(string fileName)
+        public bool Save(string fileName)
         {
             TextWriter writer = null;
             try
@@ -292,12 +292,20 @@ namespace AntiDupl.NET.WinForms
                 writer = new StreamWriter(fileName);
                 XmlSerializer xmlSerializer = new XmlSerializer(typeof(CoreOptions));
                 xmlSerializer.Serialize(writer, this);
+                return true;
             }
             catch
             {
+                // Silent-failure hazard (user-observed): when this save fails quietly the
+                // profile is lost between sessions with no indication. Callers now show
+                // an error when this returns false.
+                return false;
             }
-            if (writer != null)
-                writer.Close();
+            finally
+            {
+                if (writer != null)
+                    writer.Close();
+            }
         }
 
         public string GetImageDataBasePath()

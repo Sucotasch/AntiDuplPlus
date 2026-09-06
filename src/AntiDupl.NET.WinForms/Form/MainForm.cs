@@ -55,8 +55,20 @@ namespace AntiDupl.NET.WinForms
         {
             m_core = new CoreLib(Resources.UserPath);
             m_options = Options.Load();
+            // Relocation heal: options.xml stores the profile path ABSOLUTELY, so after
+            // moving the program folder the saved path points to a location that no longer
+            // exists. CoreOptions.Load then silently falls back to DLL defaults (32x32!)
+            // and every save writes into a dead directory - the user sees "options are not
+            // saved" and "rebuild the database at 32x32". Reset to the default profile
+            // path whenever the stored one is missing; options.xml gets rewritten with the
+            // corrected path on the next close. Custom saved profiles keep working while
+            // their file exists.
             if (m_options.loadProfileOnLoading)
+            {
+                if (!File.Exists(m_options.coreOptionsFileName))
+                    m_options.coreOptionsFileName = Options.GetDefaultCoreOptionsFileName();
                 m_coreOptions = CoreOptions.Load(m_options.coreOptionsFileName, m_core, m_options.onePath);
+            }
             else
             {
                 m_options.coreOptionsFileName = Options.GetDefaultCoreOptionsFileName();
@@ -100,7 +112,15 @@ namespace AntiDupl.NET.WinForms
         private void OnFormClosed(object sender, FormClosedEventArgs e)
         {
             if (m_options.saveProfileOnClosing)
-                m_coreOptions.Save(m_options.coreOptionsFileName);
+            {
+                // Loud failure (user-observed "settings are not saved"): a quiet false
+                // here used to mean the profile silently vanished between sessions.
+                if (!m_coreOptions.Save(m_options.coreOptionsFileName))
+                    MessageBox.Show(this,
+                        string.Format("Failed to save the search profile:\n{0}\n\n" +
+                            "Options were not saved for the next session.", m_options.coreOptionsFileName),
+                        "Save profile", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
 
             m_mainSplitContainer.ClearResults();
             GetSavedViewOptions();

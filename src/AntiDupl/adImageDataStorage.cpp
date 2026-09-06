@@ -649,6 +649,11 @@ namespace ad
 			imageData.defect = (TDefectType)defect;
 			if(imgPath != origPath)
 				imageData.hash = imageData.path.GetCrc32();
+			else if(imageData.hash == 0)
+				// P2-10: pre-fix collector databases stored hash=0 for every record,
+				// collapsing the whole DB into multimap bucket 0 (O(N^2) Find on load,
+				// no real key). Heal at load time so legacy DBs work without rebuild.
+				imageData.hash = imageData.path.GetCrc32();
 
 			// Read thumbnail data if filled
 			// Reset per-record state so a record with filled==0 never inherits the
@@ -717,6 +722,9 @@ namespace ad
 					imageData.path = remapped;
 					imageData.hash = imageData.path.GetCrc32();
 				}
+				else if(imageData.hash == 0)
+					// P2-10: heal legacy hash=0 records at load (see LoadCollectorNative).
+					imageData.hash = imageData.path.GetCrc32();
 				if(Find(imageData) == m_storage.end())
 				{
 					if(IsFileExists(imageData.path.Original().c_str()))

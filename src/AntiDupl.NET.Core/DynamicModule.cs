@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -54,25 +54,29 @@ namespace AntiDupl.NET.Core
                 for (int i = 0; i < fields.Length; ++i)
                 {
                     FieldInfo field = fields[i];
-                    try
+
+                    object[] attributes = field.GetCustomAttributes(typeof(DynamicModuleApiAttribute), false);
+                    if (attributes.Length > 0)
                     {
-                        object[] attributes = field.GetCustomAttributes(typeof(DynamicModuleApiAttribute), false);
-                        if (attributes.Length > 0)
-                        {
-                            IntPtr address = GetProcAddress(m_module, field.Name);
-                            Delegate delegate_ = Marshal.GetDelegateForFunctionPointer(address, field.FieldType);
-                            field.SetValue(this, delegate_);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Trace.TraceError(ex.ToString());
+                        IntPtr address = GetProcAddress(m_module, field.Name);
+                        if (address == IntPtr.Zero)
+                            // P2-7: a null export must abort loading instead of leaving a null
+                            // delegate that NREs far from the cause (silent failure previously
+                            // swallowed by the inner catch). Export missing = the DLL is from a
+                            // different build/version than the managed assembly.
+                            throw new Exception(string.Format(
+                                "Cannot find export '{0}' in {1} - library/module version mismatch!",
+                                field.Name, m_fileName));
+                        Delegate delegate_ = Marshal.GetDelegateForFunctionPointer(address, field.FieldType);
+                        field.SetValue(this, delegate_);
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                throw new Exception(string.Format("Can't load {0} dynamic library!", m_fileName));
+                // P2-7: keep the cause (missing export name) in the message instead of
+                // flattening every failure to a generic "Can't load" text.
+                throw new Exception(string.Format("Can't load {0} dynamic library! ({1})", m_fileName, ex.Message));
             }
         }
 

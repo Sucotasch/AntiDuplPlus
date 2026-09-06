@@ -20,6 +20,7 @@
 #include <limits>
 #include <shlobj.h>
 #include <windows.h>
+#include <tchar.h>
 #include <wincodec.h>
 #include <nvjpeg.h>
 #include <cuda_runtime.h>
@@ -51,6 +52,18 @@ static uint32_t SimpleCRC32(const std::wstring& s) {
         }
     }
     return crc ^ 0xFFFFFFFF;
+}
+
+// P2-10: the DLL's TPath::GetCrc32() = SimdCrc32c over the UPPERCASED full path
+// (wide chars, bytes = len*2). The collector used to store hash=0, which put every
+// record into the DLL's multimap bucket 0 (O(N^2) dedup on load, no real key).
+// This reproduces the DLL computation byte-for-byte: _tcsupr_s is the same CRT call
+// ad::TString::ToUpper() uses (C locale, identical in both binaries — same static
+// vcpkg CRT), and SimdCrc32c is the exact function the DLL calls (Simd/SimdLib.hpp).
+static uint32_t PathHashDllCompatible(const std::wstring& path) {
+    std::wstring upper(path);
+    _tcsupr_s(&upper[0], upper.size() + 1);
+    return SimdCrc32c(upper.c_str(), upper.size() * sizeof(wchar_t));
 }
 
 static std::wstring GenerateAdiFileName(const std::wstring& path, int thumbSize) {
@@ -177,7 +190,7 @@ static uint8_t GetImageType(const std::wstring& ext) {
 
 struct Arguments {
     std::wstring inputPath, outputPath, databaseName;
-    int thumbSize=32, batchSize=64, workers=0; bool help=false, update=false;
+    int thumbSize=32, batchSize=64, workers=0; bool help=false, update=false, noPause=false;
 };
 
 Arguments ParseArguments(int argc, wchar_t* argv[]) {
@@ -195,6 +208,7 @@ Arguments ParseArguments(int argc, wchar_t* argv[]) {
         else if ((arg==L"--batch"||arg==L"-b")&&i+1<argc) args.batchSize=parseInt(argv[++i], args.batchSize);
         else if ((arg==L"--workers"||arg==L"-w")&&i+1<argc) args.workers=parseInt(argv[++i], 0);
         else if (arg==L"--update"||arg==L"-u") args.update=true;
+        else if (arg==L"--no-pause") args.noPause=true;
         else if (arg==L"--help"||arg==L"-h") args.help=true;
     }
     // C13: keep thumbSize within the DLL-supported range [REDUCED_IMAGE_SIZE_MIN=16 ..
@@ -214,6 +228,8 @@ void PrintHelp() {
     std::wcout << L"  --batch, -b       Batch size for nvJPEG (default: 64)\n";
     std::wcout << L"  --workers, -w     CPU worker threads for analysis (default: auto = physical cores - 1)\n";
     std::wcout << L"  --update, -u      Update existing database (incremental: add new, remove deleted)\n";
+    std::wcout << L"  --no-pause        Non-interactive mode: never show message boxes, log to stdout/stderr\n";
+    std::wcout << L"                    (used by the GUI which launches this tool with redirected pipes)\n";
     std::wcout << L"\nSupported: JPEG/JPG/JFIF (GPU), PNG, BMP, TIFF, WebP, GIF (CPU via WIC)\n";
 }
 
@@ -244,20 +260,44 @@ void CleanupNvJpeg() {
     if (g_nvjpegHandle) nvjpegDestroy(g_nvjpegHandle);
 }
 
+// P2-9: interactive pause only when a human runs the tool from a console. The GUI
+// launches this tool with CreateNoWindow + redirected pipes: a MessageBox there can
+// never be clicked and hangs the GUI's WaitForExit forever. With --no-pause (set by
+// the GUI) every completion/failure path only writes a final marker line to the log.
+static bool g_noPause = false;
+
 static void PauseAndExit() {
+    if (g_noPause) return;
     MessageBoxW(NULL, L"Processing complete. Press OK to exit.", L"NvJpegCollector", MB_ICONINFORMATION | MB_OK);
     CoUninitialize();
 }
 
+static void FatalExit(const wchar_t* message, int exitCode) {
+    // P2-9: machine-readable failure marker for piped callers (GUI). stderr is drained
+    // by the GUI and shown in the update error dialog; MessageBox only in interactive mode.
+    std::wcerr << L"[FATAL] " << message << std::endl;
+    if (!g_noPause)
+        MessageBoxW(NULL, message, L"NvJpegCollector Fatal Error", MB_ICONERROR | MB_OK);
+}
+
 static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* ep) {
     wchar_t msg[200]; swprintf_s(msg, L"CRASH at 0x%p! Code: 0x%X", ep->ExceptionRecord->ExceptionAddress, ep->ExceptionRecord->ExceptionCode);
-    MessageBoxW(NULL, msg, L"NvJpegCollector Crash", MB_ICONERROR | MB_OK);
+    // P2-9: even on a hard crash a piped run must not hang: print the marker, and only
+    // show a dialog in interactive mode. EXCEPTION_EXECUTE_HANDLER then terminates.
+    std::wcerr << L"[FATAL] " << msg << std::endl;
+    if (!g_noPause)
+        MessageBoxW(NULL, msg, L"NvJpegCollector Crash", MB_ICONERROR | MB_OK);
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
 int wmain_impl(int argc, wchar_t* argv[]);
 
 int wmain(int argc, wchar_t* argv[]) {
+    // P2-9: parse --no-pause before anything else so every early-exit path (help,
+    // dialog cancel, scan error) respects it; ParseArguments is called again in
+    // wmain_impl — parsing is idempotent and cheap.
+    for (int i = 1; i < argc; i++)
+        if (wcscmp(argv[i], L"--no-pause") == 0) { g_noPause = true; break; }
     SetUnhandledExceptionFilter(CrashHandler);
     SetConsoleOutputCP(CP_UTF8);
     CoInitialize(NULL);
@@ -265,10 +305,10 @@ int wmain(int argc, wchar_t* argv[]) {
     catch (const std::exception& e) {
         std::string what(e.what(), e.what()+strlen(e.what()));
         std::wstring msg(what.begin(), what.end());
-        MessageBoxW(NULL, msg.c_str(), L"NvJpegCollector FATAL ERROR", MB_ICONERROR | MB_OK);
+        FatalExit(msg.c_str(), 2);
         CoUninitialize(); return 2;
     } catch (...) {
-        MessageBoxW(NULL, L"Unknown exception", L"NvJpegCollector FATAL ERROR", MB_ICONERROR | MB_OK);
+        FatalExit(L"Unknown exception", 2);
         CoUninitialize(); return 2;
     }
 }
@@ -394,7 +434,7 @@ static ImageInfo ProcessGray(const uint8_t* gray, int w, int h, const fs::path& 
     std::error_code ec;
     info.size = (uint64_t)fs::file_size(path, ec);
     if (ec) info.size = 0;
-    info.time = GetFileTime(path); info.hash = 0;
+    info.time = GetFileTime(path); info.hash = PathHashDllCompatible(info.path);
     info.type = GetImageType(path.extension().wstring());
     info.width = w; info.height = h;
     // Compute blockiness/blurring on full-resolution grayscale
@@ -788,7 +828,11 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                     if (ec) curSize = 0;
                     uint64_t curTime = GetFileTime(it->second);
                     if (curSize == existingImg.size && curTime == existingImg.time) {
-                        // UNCHANGED: keep existing record (no re-decode needed)
+                        // UNCHANGED: keep existing record (no re-decode needed).
+                        // P2-10: records from pre-fix databases carry hash=0 — recompute
+                        // while carrying over so an incremental update heals the DB.
+                        if (existingImg.hash == 0)
+                            existingImg.hash = PathHashDllCompatible(existingImg.path);
                         images.push_back(existingImg);
                         unchanged++;
                     } else {

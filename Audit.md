@@ -133,30 +133,30 @@ GPU-ускоренный поиск дубликатов изображений 
 
 **Фикс (внедрён):** оба readback-сайта (MS и SSIM AllVsAll) проверяют код возврата; ошибка → fail-ветка `return false`/`goto ssim_cleanup` — дисциплина едина с остальными проверками функции.
 
-### P2-7 [cs-interop] `DynamicModule` глотает отсутствие экспорта → NRE в делегатах
-`src/AntiDupl.NET.Core/DynamicModule.cs:57-70` — `GetProcAddress` вернул NULL → обёртка создаётся с null-полем; вызов делегата = NRE без указания причины. Плюс `CoreLib`-ctor не проверяет `adCreateW == NULL`.
+### P2-7 [cs-interop] `DynamicModule` глотает отсутствие экспорта → NRE в делегатах — **ИСПРАВЛЕНО 2026-09-06 (этап 4)**
+`src/AntiDupl.NET.Core/DynamicModule.cs` — `GetProcAddress` вернул NULL → обёртка создаётся с null-полем; вызов делегата = NRE без указания причины. Плюс `CoreLib`-ctor не проверяет `adCreateW == NULL`.
 
-**Фикс:** бросать осмысленное исключение «DLL <name> отсутствует экспорт <X> (несовместимая версия?)».
+**Фикс (внедрён):** `address == IntPtr.Zero` → явный throw «Cannot find export '<field>' in <lib> - library/module version mismatch!»; внутренний catch убран, внешний сохраняет сообщение-причину. `CoreLib`: после `adCreateW` проверка нулевого handle → «Core library failed to initialize (adCreateW returned null)!».
 
 ### P2-8 [cs-interop] `AutoSelector` fetches `GetResult(0, 1000000)` × 5 сайтов — 138KB/строку маршаллинг
 `src/AntiDupl.NET.WinForms/AutoSelector.cs:69,118,160,181,200` — пять полных выгрузок всех результатов ради счётчиков/меток; на 100k результатов это сотни МБ аллокаций и секундные паузы.
 
 **Фикс:** вернуть из Core managed-счётчики (отдельная лёгкая экспорт-функция) или ленивый enumerator.
 
-### P2-9 [nvjpeg-collector] CrashHandler + `catch(...)` MessageBox: для GUI-запуска это вечное зависание
-`src/NvJpegCollector/main.cpp:218-239` — модальный MessageBox в невидимой консоли; GUI ждёт EOF из stdout коллектора (`src/AntiDupl.NET.WinForms/Forms/DatabaseManagerForm.cs:496-513`) — вечно.
+### P2-9 [nvjpeg-collector] CrashHandler + `catch(...)` MessageBox: для GUI-запуска это вечное зависание — **ИСПРАВЛЕНО 2026-09-06 (этап 4)**
+`src/NvJpegCollector/main.cpp` — модальный MessageBox в невидимой консоли; GUI ждёт EOF из stdout коллектора (`DatabaseManagerForm.UpdateDatabaseAsync`) — вечно.
 
-**Фикс:** при `--update` не показывать MessageBox; писать `[FATAL]` в stdout + ненулевой exit; MessageBox оставить только интерактивному запуску.
+**Фикс (внедрён):** флаг `--no-pause` + глобальный `g_noPause`; все пути завершения (PauseAndExit/FatalExit/CrashHandler) пишут `[FATAL]`/`[ERROR]` в stderr и показывают MessageBox только интерактивно; `wmain` сканирует флаг до `SetUnhandledExceptionFilter`. GUI (`UpdateDatabaseAsync`) всегда передаёт `--no-pause`. Проверено: фатальный инпут с redirect-пайпами завершается сам, ExitCode=1, без зависания.
 
-### P2-10 [nvjpeg-collector] `hash=0` для новых записей при update
-`src/NvJpegCollector/main.cpp:326` — все ProcessGray-записи получают hash 0 → в DLL-мульти-мап все новые записи в одной корзине, `Find()` деградирует до линейной на каждой вставке при загрузке (`src/AntiDupl/adImageDataStorage.cpp:684`).
+### P2-10 [nvjpeg-collector] `hash=0` для новых записей при update — **ИСПРАВЛЕНО 2026-09-06 (этап 4)**
+`src/NvJpegCollector/main.cpp` — все ProcessGray-записи получали hash 0 → в DLL-мульти-мап все записи в одной корзине, `Find()` деградирует до линейной на каждой вставке при загрузке.
 
-**Фикс:** `info.hash = SimpleCRC32(info.path)` (функция уже есть, `src/NvJpegCollector/main.cpp:43-53`).
+**Фикс (внедрён):** `PathHashDllCompatible(path)` = `SimdCrc32c(_tcsupr_s(UPPER(path)), len*2)` — байт-в-байт как DLL `TPath::GetCrc32()` (тот же static vcpkg CRT, C-локаль). Три уровня: (1) новые записи несут настоящий хэш; (2) UNCHANGED-carryover при `--update` пересчитывает hash==0 → инкрементальный апдейт ЛЕЧИТ старые БД; (3) оба DLL-загрузчика при hash==0 пересчитывают `path.GetCrc32()` → старые БД корректны и без пересборки. Доказано: свежие БД HASH OK (16/16, ASCII+кириллица), негатив-контроль пре-фиксной БД честно FAIL (3721 нулей), heal через update: «Unchanged: 3721» → HASH OK; DLL heal-on-load: zero-hash копия грузится, пары/тумбнейлы корректны.
 
-### P2-11 [winforms-gui] `MoveSelectedAction` выполняет весь батч в UI-потоке
-`src/AntiDupl.NET.WinForms/GUIControl/MainMenu.cs:438` — в отличие от delete (`:407-421` с потоком), move синхронно: сотни файлов = минуты замороженного окна.
+### P2-11 [winforms-gui] `MoveSelectedAction` выполняет весь батч в UI-потоке — **ИСПРАВЛЕНО 2026-09-06 (этап 4)**
+`src/AntiDupl.NET.WinForms/GUIControl/MainMenu.cs` — в отличие от delete, move синхронно: сотни файлов = минуты замороженного окна.
 
-**Фикс:** тот же паттерн фон+BeginInvoke, что у delete.
+**Фикс (внедрён):** паттерн фон+BeginInvoke (зеркально delete) + общий `s_batchRunning` re-entry guard для delete/move: тулбарные кнопки вызывают те же экшны, гейт одного пункта меню не останавливал второй клик по кнопке во время батча.
 
 ### P2-12 [winforms-gui] Ниточная гигиена: `ThreadState.Running`-гвард, non-volatile abort-флаги, статический Dictionary без синхронизации
 `src/AntiDupl.NET.WinForms/GUIControl/ResultsPreviewDuplPair.cs:301-306` (ThreadState.Running ненадёжен, Join пропускается), `:295` (`_highlightStop` не volatile), `src/AntiDupl.NET.WinForms/GUIControl/ThumbnailGroupTable.cs:355-366` (`m_abortUpdateThumbnailsThread` не volatile + Join без тайм-аута), `src/AntiDupl.NET.WinForms/AutoSelector.cs` (`s_sideCache` статический Dictionary между UI- и batch-потоком).
@@ -200,6 +200,13 @@ GPU-ускоренный поиск дубликатов изображений 
 **Важно:** в `bin/Release/databases/` лежат **локальные тестовые БД пользователя** — их не трогать; чистки касаются только кэшей/билд-артефактов.
 
 ## Remaining concerns
+
+0. **Новые наблюдения этапа 4 (2026-09-06, из практической верификации; правились смежные зоны — эти оставлены для обсуждения):**
+   - `adEngine.cpp:559` — если загружена хоть одна БД, live-scan полностью пропускается (короткое замыкание `dbLoaded`). Продуктовое поведение (P2-3), но оно же объясняет, почему смешение бакетов hash=0/live-CRC в одном запуске никогда не проявлялось. При будущих правках поиска — держать в голове.
+   - `wcout` в cp1251-консоли: кириллический аргумент (имя БД «МиниRU») ставит failbit — весь дальнейший вывод коллектора глушится, хотя сам прогон завершается корректно и БД пишется. GUI-путь не страдает (SetConsoleOutputCP(CP_UTF8) + redirect-пайпы в UTF-8), но интерактивный запуск с русским именем выглядит «зависшим без логов». Кандидат на следующий этап.
+   - `LoadRegistry` (DatabaseManagerForm): `int.Parse` без TryParse на Count/ThumbSize — кривой атрибут в XML роняет форму. Мелочь, вне скоупа этапа 4.
+   - Copy-Item 16-МБ файла в temp без `-Force` тихо продырявился при подготовке теста (файл не существовал) — ошибка тестовой инфраструктуры, не продукта; задокументирована, чтобы не списывать на читатель БД (читатель доказан корректным на всех усечениях вплоть до 3721 записей).
+   - Тулбарные кнопки Move/Delete остаются Enabled во время фонового батча (гейт — только пункт меню + s_batchRunning-гвард от реентерабельности). Двойной клик теперь безвреден (гвард), но кнопка не даёт визуального отклика «занято». Отмечено как UX-наблюдение, не фиксовано умышленно (surgical rule; тот же precedent у delete-кнопки).
 
 1. **Паритет JPEG-путей после фиксов R/B:** CPU-путь (libjpeg-turbo RGBA→gray) и GPU-путь (nvJPEG Y-plane) даже после исправления каналов дают слегка разные luma (BT.601 vs BT.709-веса) — кросс-путевые сравнения сохранят малое систематическое смещение. Проверить на реальном корпусе после фиксов.
 2. Файлы `src/AntiDupl/adPsd.cpp`, `src/AntiDupl/adDds.cpp`, `src/AntiDupl/adTga.cpp`, `src/AntiDupl/adImageExif.cpp` не читались этим аудитом (вне шести листов) — отдельный мини-ревью при случае.

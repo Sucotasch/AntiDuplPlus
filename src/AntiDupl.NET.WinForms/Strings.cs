@@ -305,9 +305,6 @@ namespace AntiDupl.NET.WinForms
         public string MainMenu_Help_AboutProgramMenuItem_Text;
         public string MainMenu_Help_CheckingForUpdatesMenuItem_Text;
 
-        public string MainMenu_NewVersionMenuItem_Text;
-        public string MainMenu_NewVersionMenuItem_Tooltip;
-
         public string SelectHotKeysForm_InvalidHotKeyToolTipText;
 
         public string LanguageMenuItem_Text;

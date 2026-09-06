@@ -83,13 +83,21 @@ namespace AntiDupl.NET.WinForms
         private ToolStripMenuItem m_helpMenuItem;
         private ToolStripMenuItem m_help_helpMenuItem;
         private ToolStripMenuItem m_help_aboutProgramMenuItem;
-        private ToolStripMenuItem m_help_checkingForUpdatesMenuItem;
+        // P2 (update check): this Help item is a NewVersionMenuItem now — it opens the
+        // fork's releases page on click (no version comparison, no background download).
+        private NewVersionMenuItem m_help_checkingForUpdatesMenuItem;
 
         private ToolStripMenuItem m_toolsMenuItem;
         private ToolStripMenuItem m_tools_gpuCollectorMenuItem;
         private ToolStripMenuItem m_tools_dbManagerMenuItem;
 
         private NewVersionMenuItem m_newVersionMenuItem;
+
+        // P2-11: shared re-entry guard for the long batch actions (delete/move). The
+        // toolbar buttons invoke the same action handlers as the menu items, so a plain
+        // menu-item disable does not stop a second click on the toolbar button while
+        // a batch is already running in the background.
+        private static bool s_batchRunning = false;
 
         public MainMenu(CoreLib core, Options options, CoreOptions coreOptions, MainForm mainForm, MainSplitContainer mainSplitContainer)
         {
@@ -228,7 +236,10 @@ namespace AntiDupl.NET.WinForms
 
             m_help_helpMenuItem = InitFactory.MenuItem.Create("HelpMenu", null, HelpAction);
             m_help_aboutProgramMenuItem = InitFactory.MenuItem.Create(null, null, AboutProgramAction);
-            m_help_checkingForUpdatesMenuItem = InitFactory.MenuItem.Create(null, null, OnCheckingForUpdatesClick, m_options.checkingForUpdates);
+            // P2 (update check): a plain click item now — the old checkbox toggle silently
+            // created an orphan NewVersionMenuItem (never added to a menu) plus a timer leak.
+            // The item itself opens the fork's GitHub releases page.
+            m_help_checkingForUpdatesMenuItem = new NewVersionMenuItem();
 
             m_helpMenuItem = new ToolStripMenuItem();
             m_helpMenuItem.DropDownItems.Add(m_help_helpMenuItem);
@@ -236,7 +247,7 @@ namespace AntiDupl.NET.WinForms
             m_helpMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_helpMenuItem.DropDownItems.Add(m_help_checkingForUpdatesMenuItem);
 
-            m_newVersionMenuItem = new NewVersionMenuItem(m_options);
+            m_newVersionMenuItem = m_help_checkingForUpdatesMenuItem;
 
             Items.Add(m_fileMenuItem);
             Items.Add(m_editMenuItem);
@@ -244,7 +255,9 @@ namespace AntiDupl.NET.WinForms
             Items.Add(m_searchMenuItem);
             Items.Add(m_toolsMenuItem);
             Items.Add(m_helpMenuItem);
-            Items.Add(m_newVersionMenuItem);
+            // P2 (update check): the standalone red "New Version" top-level item is gone;
+            // m_newVersionMenuItem aliases the Help item (kept for the field's other
+            // references) and opens the fork's releases page.
         }
 
         private void UpdateStrings()
@@ -392,6 +405,7 @@ namespace AntiDupl.NET.WinForms
         {
             int count = AutoSelector.CountMarked(m_core);
             if (count <= 0) return;
+            if (s_batchRunning) return; // P2-11: a batch is already running
 
             bool longPaths = AutoSelector.HasLongPaths(m_core);
             string warning = longPaths
@@ -403,20 +417,30 @@ namespace AntiDupl.NET.WinForms
                 "Delete Selected", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) return;
 
+            s_batchRunning = true;
             m_edit_deleteSelectedMenuItem.Enabled = false;
             System.Threading.Thread batchThread = new System.Threading.Thread(() =>
             {
-                AutoSelector.BatchResult result = AutoSelector.ExecuteBatch(m_core, true);
-                m_mainSplitContainer.BeginInvoke(new Action(() =>
+                AutoSelector.BatchResult result = null;
+                try
                 {
-                    string msg = $"Deleted {result.Succeeded} images.";
-                    if (result.Failed > 0)
-                        msg += $"\n{result.Failed} files could not be deleted.";
-                    MessageBox.Show(msg, "Delete Selected",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    m_edit_deleteSelectedMenuItem.Enabled = true;
-                    m_mainSplitContainer.UpdateResults();
-                }));
+                    result = AutoSelector.ExecuteBatch(m_core, true);
+                }
+                finally
+                {
+                    s_batchRunning = false;
+                    m_mainSplitContainer.BeginInvoke(new Action(() =>
+                    {
+                        m_edit_deleteSelectedMenuItem.Enabled = true;
+                        if (result == null) return;
+                        string msg = $"Deleted {result.Succeeded} images.";
+                        if (result.Failed > 0)
+                            msg += $"\n{result.Failed} files could not be deleted.";
+                        MessageBox.Show(msg, "Delete Selected",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        m_mainSplitContainer.UpdateResults();
+                    }));
+                }
             });
             batchThread.Start();
         }
@@ -427,22 +451,47 @@ namespace AntiDupl.NET.WinForms
             {
                 dialog.Description = "Select folder to move marked images";
                 dialog.ShowNewFolderButton = true;
-                if (dialog.ShowDialog() == DialogResult.OK)
+                if (dialog.ShowDialog() != DialogResult.OK)
+                    return;
+                if (!IsSafeMoveTarget(dialog.SelectedPath))
                 {
-                    if (!IsSafeMoveTarget(dialog.SelectedPath))
-                    {
-                        MessageBox.Show("Selected folder is not writable or is a system folder.",
-                            "Invalid Destination", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return;
-                    }
-                    var result = AutoSelector.ExecuteBatch(m_core, false, dialog.SelectedPath);
-                    string msg = $"Moved {result.Succeeded} images to:\n{dialog.SelectedPath}";
-                    if (result.Failed > 0)
-                        msg += $"\n{result.Failed} files could not be moved.";
-                    MessageBox.Show(msg, "Move Selected",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    m_mainSplitContainer.UpdateResults();
+                    MessageBox.Show("Selected folder is not writable or is a system folder.",
+                        "Invalid Destination", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
+
+                // P2-11: ExecuteBatch can run for minutes on big moves — it ran on the UI
+                // thread and froze the whole GUI. Mirror DeleteSelectedAction: disable the
+                // entry points, run the batch on a background thread, marshal the result
+                // back with BeginInvoke and refresh/re-enable there.
+                if (s_batchRunning) return; // a delete/move batch is already running
+                s_batchRunning = true;
+                m_edit_moveSelectedMenuItem.Enabled = false;
+                string targetPath = dialog.SelectedPath;
+                System.Threading.Thread batchThread = new System.Threading.Thread(() =>
+                {
+                    AutoSelector.BatchResult result = null;
+                    try
+                    {
+                        result = AutoSelector.ExecuteBatch(m_core, false, targetPath);
+                    }
+                    finally
+                    {
+                        s_batchRunning = false;
+                        m_mainSplitContainer.BeginInvoke(new Action(() =>
+                        {
+                            m_edit_moveSelectedMenuItem.Enabled = true;
+                            if (result == null) return;
+                            string msg = $"Moved {result.Succeeded} images to:\n{targetPath}";
+                            if (result.Failed > 0)
+                                msg += $"\n{result.Failed} files could not be moved.";
+                            MessageBox.Show(msg, "Move Selected",
+                                MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            m_mainSplitContainer.UpdateResults();
+                        }));
+                    }
+                });
+                batchThread.Start();
             }
         }
 
@@ -595,14 +644,8 @@ namespace AntiDupl.NET.WinForms
             aboutProgramForm.ShowDialog();
         }
 
-        private void OnCheckingForUpdatesClick(object sender, EventArgs e)
-        {
-            m_options.checkingForUpdates = m_help_checkingForUpdatesMenuItem.Checked;
-            if(m_options.checkingForUpdates)
-            {
-                m_newVersionMenuItem = new NewVersionMenuItem(m_options);
-            }
-        }
+        // P2 (update check): OnCheckingForUpdatesClick removed — the Help menu item IS a
+        // NewVersionMenuItem now and opens the releases page through its own Click handler.
 
         public void GpuCollectorAction(object sender, EventArgs e)
         {

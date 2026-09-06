@@ -34,6 +34,7 @@ namespace AntiDupl.NET.WinForms.Forms
         private Button m_btnOpenFolder;
         private Button m_btnRefresh;
         private Button m_btnUpdateAll;
+        private Button m_btnScanOrphans;
         private Button m_btnClose;
 
         // Pool mode
@@ -162,11 +163,15 @@ namespace AntiDupl.NET.WinForms.Forms
             m_btnOpenFolder = CreateButton("Attach Database...", 10, BtnAttachDatabase_Click);
             m_btnRefresh = CreateButton("Refresh", 140, (s, e) => LoadDatabases());
             m_btnUpdateAll = CreateButton("Update All", 270, (s, e) => UpdateAllDatabases());
-            m_btnClose = CreateButton("Close", 400, (s, e) => this.Close());
+            // P2 (orphan scanner): find database folders on disk that no registry
+            // entry references anymore (left behind by pre-fix deletes).
+            m_btnScanOrphans = CreateButton("Find Orphaned Folders...", 400, BtnScanOrphans_Click);
+            m_btnClose = CreateButton("Close", 600, (s, e) => this.Close());
 
             btnPanel.Controls.Add(m_btnOpenFolder);
             btnPanel.Controls.Add(m_btnRefresh);
             btnPanel.Controls.Add(m_btnUpdateAll);
+            btnPanel.Controls.Add(m_btnScanOrphans);
             btnPanel.Controls.Add(m_btnClose);
 
             // Center: 3-panel split
@@ -483,7 +488,10 @@ namespace AntiDupl.NET.WinForms.Forms
                         var psi = new System.Diagnostics.ProcessStartInfo
                         {
                             FileName = nvJpegPath,
-                            Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --size {thumbSize} --update",
+                            // --no-pause (P2-9): the collector must never show a MessageBox
+                            // when launched with redirected pipes — an unclickable dialog
+                            // would hang this update thread's WaitForExit forever.
+                            Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --size {thumbSize} --update --no-pause",
                             UseShellExecute = false,
                             RedirectStandardOutput = true,
                             RedirectStandardError = true,
@@ -777,25 +785,36 @@ namespace AntiDupl.NET.WinForms.Forms
 
         private void DeleteDatabase(DbEntry entry)
         {
-            var result = MessageBox.Show(
-                $"Delete database \"{entry.Name}\"?\n\nFolder: {entry.Folder}\n\nThe database folder will be moved to the Recycle Bin.",
-                "Delete Database", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            // P2 (honest delete): distinguish "folder recycled" from "registry entry
+            // removed only" — the old code silently skipped disk deletion when the
+            // Folder attribute was empty or the folder did not exist, then claimed
+            // "moved to Recycle Bin" anyway (user-observed with old-format entries).
+            string resolvedFolder = string.IsNullOrEmpty(entry.Folder) ? "" : ResolvePath(entry.Folder);
+            bool folderOnDisk = !string.IsNullOrEmpty(resolvedFolder) && Directory.Exists(resolvedFolder);
 
+            string question = folderOnDisk
+                ? $"Delete database \"{entry.Name}\"?\n\nFolder: {resolvedFolder}\n\nThe database folder will be moved to the Recycle Bin."
+                : $"Delete database \"{entry.Name}\"?\n\nRegistered folder: " +
+                  (string.IsNullOrEmpty(resolvedFolder) ? "(not set)" : resolvedFolder) +
+                  "\nThe folder does not exist on disk.\nOnly the registry entry will be removed.";
+            var result = MessageBox.Show(question, "Delete Database",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (result != DialogResult.Yes) return;
 
             try
             {
-                if (!string.IsNullOrEmpty(entry.Folder) && Directory.Exists(entry.Folder))
+                if (folderOnDisk)
                 {
                     var shf = new SHFILEOPSTRUCT();
                     shf.wFunc = FO_DELETE;
-                    shf.pFrom = entry.Folder + "\0\0";
+                    shf.pFrom = resolvedFolder + "\0\0";
                     shf.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT;
                     int ret = SHFileOperation(ref shf);
 
                     if (ret != 0)
                     {
-                        MessageBox.Show($"Failed to move to Recycle Bin (error {ret}).", "Delete Error",
+                        MessageBox.Show($"Failed to move to Recycle Bin (error {ret}).\n" +
+                            "The registry entry was NOT removed.", "Delete Error",
                             MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
@@ -804,13 +823,116 @@ namespace AntiDupl.NET.WinForms.Forms
                 m_allEntries.Remove(entry);
                 SaveDatabases();
                 RefreshAllGrids();
-                MessageBox.Show($"Database \"{entry.Name}\" moved to Recycle Bin.", "Deleted",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                if (folderOnDisk)
+                {
+                    MessageBox.Show($"Database \"{entry.Name}\" moved to Recycle Bin.", "Deleted",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    // Honest report: nothing was on disk, so nothing was recycled.
+                    MessageBox.Show($"Registry entry for \"{entry.Name}\" removed.\n" +
+                        "No database folder was found on disk, so nothing was moved to the Recycle Bin.",
+                        "Deleted", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Delete failed: {ex.Message}", "Delete Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        /// <summary>
+        /// P2 (orphan scanner): finds database folders on disk that are NOT referenced by
+        /// any registry entry. Pre-fix DeleteDatabase removed the registry entry but could
+        /// leave the folder on disk when the Folder attribute was empty/invalid — those
+        /// folders linger invisibly. The scanner lists them and offers Recycle-Bin deletion;
+        /// nothing is deleted without an explicit per-run confirmation.
+        /// </summary>
+        private void BtnScanOrphans_Click(object sender, EventArgs e)
+        {
+            string dbRoot = Path.Combine(GetExeDir(), "databases");
+            if (!Directory.Exists(dbRoot))
+            {
+                MessageBox.Show("No databases folder exists next to the program.", "Find Orphaned Folders",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Registry-referenced folders (resolved, case-insensitive compare).
+            var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in m_allEntries)
+            {
+                if (!string.IsNullOrEmpty(entry.Folder))
+                {
+                    string resolved = ResolvePath(entry.Folder);
+                    try { referenced.Add(Path.GetFullPath(resolved).TrimEnd('\\', '/')); }
+                    catch { }
+                }
+            }
+
+            var orphans = new List<string>();
+            foreach (var dir in Directory.GetDirectories(dbRoot))
+            {
+                string full;
+                try { full = Path.GetFullPath(dir).TrimEnd('\\', '/'); }
+                catch { continue; }
+                if (referenced.Contains(full)) continue;
+
+                // A database folder is recognized by its index.adi; empty folders count
+                // too (broken/aborted collections are also orphans worth surfacing).
+                bool hasIndex = File.Exists(Path.Combine(dir, "index.adi"));
+                bool empty = false;
+                try { empty = !Directory.EnumerateFileSystemEntries(dir).Any(); } catch { }
+                if (hasIndex || empty)
+                    orphans.Add(full);
+            }
+
+            if (orphans.Count == 0)
+            {
+                MessageBox.Show("No orphaned database folders found.", "Find Orphaned Folders",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var listing = new StringBuilder();
+            foreach (var orph in orphans)
+                listing.AppendLine(orph);
+
+            var confirm = MessageBox.Show(
+                $"Found {orphans.Count} orphaned database folder(s) on disk that are not in the registry:\n\n" +
+                listing + "\nMove them to the Recycle Bin?",
+                "Find Orphaned Folders", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (confirm != DialogResult.Yes) return;
+
+            int moved = 0;
+            var failed = new List<string>();
+            foreach (var orph in orphans)
+            {
+                try
+                {
+                    var shf = new SHFILEOPSTRUCT();
+                    shf.wFunc = FO_DELETE;
+                    shf.pFrom = orph + "\0\0";
+                    shf.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT;
+                    int ret = SHFileOperation(ref shf);
+                    if (ret == 0) moved++;
+                    else failed.Add($"{orph} (error {ret})");
+                }
+                catch (Exception ex)
+                {
+                    failed.Add($"{orph} ({ex.Message})");
+                }
+            }
+
+            string report = moved > 0
+                ? $"Moved {moved} folder(s) to the Recycle Bin."
+                : "Nothing was moved.";
+            if (failed.Count > 0)
+                report += "\n\nFailed:\n" + string.Join("\n", failed);
+            MessageBox.Show(report, "Find Orphaned Folders",
+                MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
 
         private void UpdateAllDatabases()

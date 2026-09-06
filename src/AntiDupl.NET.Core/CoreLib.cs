@@ -49,14 +49,18 @@ namespace AntiDupl.NET.Core
             {
                 m_dll = new CoreDll();
             }
-            catch
+            catch (Exception ex)
             {
-                throw new Exception("Can't load core library!");
+                throw new Exception("Can't load core library! " + ex.Message);
             }
 
             if (Version.Compatible(GetVersion(CoreDll.VersionType.AntiDupl)))
             {
                 m_handle = m_dll.adCreateW(userPath);
+                if (m_handle == IntPtr.Zero)
+                    // Leaf-3: adCreateW must never hand back a zero handle silently —
+                    // every later P/Invoke with it would crash the process.
+                    throw new Exception("Core library failed to initialize (adCreateW returned null)!");
             }
             else
                 throw new Exception("Incompatible core library version!");

@@ -332,10 +332,13 @@ namespace AntiDupl.NET.WinForms
 
         static public class WebLinks
         {
+            // P2 (update check): the fork's own releases page replaced the original
+            // project's version.xml auto-check and website links.
+            public const string AntiDuplPlusReleases = "https://github.com/Sucotasch/AntiDuplPlus/releases";
+
             public const string GithubComAntidupl = "http://ermig1979.github.io/AntiDupl";
             public const string GithubComAntiduplEnglish = "http://ermig1979.github.io/AntiDupl/english/index.html";
             public const string GithubComAntiduplRussian = "http://ermig1979.github.io/AntiDupl/russian/index.html";
-            public const string Version = "http://ermig1979.github.io/AntiDupl/version.xml";
 
             public const string Simd = "http://ermig1979.github.io/Simd";
             public const string OpenJpeg = "http://www.openjpeg.org";
@@ -344,18 +347,6 @@ namespace AntiDupl.NET.WinForms
             public const string LibHeif = "http://www.libheif.org";
             public const string LibAvif = "https://github.com/AOMediaCodec/libavif";
             public const string LibJxl = "https://github.com/libjxl/libjxl";
-
-
-            public static string GithubComAntiduplCurrent
-            {
-                get
-                {
-                    if (Strings.IsCurrentRussianFamily())
-                        return GithubComAntiduplRussian;
-                    else
-                        return GithubComAntiduplEnglish;
-                }
-            }
         }
 
         static public class Help

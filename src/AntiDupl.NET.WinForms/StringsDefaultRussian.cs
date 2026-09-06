@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -296,10 +296,7 @@ namespace AntiDupl.NET.WinForms
             s.MainMenu_HelpMenuItem_Text = "Справка";
             s.MainMenu_Help_HelpMenuItem_Text = "Справка";
             s.MainMenu_Help_AboutProgramMenuItem_Text = "О программе...";
-            s.MainMenu_Help_CheckingForUpdatesMenuItem_Text = "Проверять наличие обновлений";
-
-            s.MainMenu_NewVersionMenuItem_Text = "Новая версия";
-            s.MainMenu_NewVersionMenuItem_Tooltip = "AntiDupl.NET-{0} доступна на сайте!";
+            s.MainMenu_Help_CheckingForUpdatesMenuItem_Text = "Проверить обновления";
 
             s.SelectHotKeysForm_InvalidHotKeyToolTipText = "Эта комбинация клавиш уже используется для других целей.";
             

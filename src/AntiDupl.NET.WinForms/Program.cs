@@ -57,7 +57,16 @@ namespace AntiDupl.NET.WinForms
 #if !PUBLISH
             else if (MessageBox.Show("You need .NET 8 Desktop Runtime to run this program. Download it?",
                         "Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
-                System.Diagnostics.Process.Start("https://dotnet.microsoft.com/download/dotnet/8.0");
+            {
+                // Same .NET 8 fix as the Help menu: UseShellExecute=true opens the URL
+                // in the default browser instead of failing to "run" it as an exe.
+                System.Diagnostics.ProcessStartInfo info = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "https://dotnet.microsoft.com/download/dotnet/8.0",
+                    UseShellExecute = true
+                };
+                System.Diagnostics.Process.Start(info);
+            }
 #endif
         }
 

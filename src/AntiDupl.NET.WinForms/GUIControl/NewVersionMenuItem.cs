@@ -54,7 +54,23 @@ namespace AntiDupl.NET.WinForms
 
         private void OnClick(object sender, EventArgs e)
         {
-            System.Diagnostics.Process.Start(Resources.WebLinks.AntiDuplPlusReleases);
+            // .NET 8: Process.Start(url) with default UseShellExecute=false treats the URL
+            // as an executable name and throws Win32Exception. UseShellExecute=true hands
+            // it to the shell, which opens the default browser (same pattern as
+            // AboutProgramPanel.OnLinkLabelLinkClicked / Resources.Help.Show).
+            try
+            {
+                System.Diagnostics.ProcessStartInfo info = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = Resources.WebLinks.AntiDuplPlusReleases,
+                    UseShellExecute = true
+                };
+                System.Diagnostics.Process.Start(info);
+            }
+            catch
+            {
+                // No default browser / shell association: do not crash the GUI from a menu click.
+            }
         }
 
         private void UpdateStrings()

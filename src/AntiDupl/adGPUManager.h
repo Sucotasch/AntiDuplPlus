@@ -64,13 +64,8 @@ namespace ad
             return index < m_uploaded.size() && m_uploaded[index];
         }
 
-        bool CompareOneVsMany(const uint8_t* pQuery, size_t startIdx, size_t count, double threshold, 
-                              size_t* pMatchIndices, double* pMatchDifferences, size_t* pMatchCount, size_t maxMatches) {
-            if (!m_available) return false;
-            std::lock_guard<std::recursive_mutex> lock(m_mutex);
-            return GpuCompareOneVsMany(pQuery, startIdx, count, threshold, 
-                                                    pMatchIndices, pMatchDifferences, pMatchCount, maxMatches);
-        }
+        // P2-16: CompareOneVsMany wrapper removed together with the dead
+        // GpuCompareOneVsMany API (zero callers; OneVsList is the live path).
 
         bool CompareOneVsList(const uint8_t* pQuery, const size_t* pIndices, size_t count, double threshold, 
                               size_t* pMatchIndices, double* pMatchDifferences, size_t* pMatchCount, size_t maxMatches) {

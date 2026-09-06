@@ -9,6 +9,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
 
 namespace AntiDupl.NET.WinForms.Forms
@@ -885,18 +886,48 @@ namespace AntiDupl.NET.WinForms.Forms
             string content = "<DatabaseRegistry>\n";
             foreach (var entry in m_allEntries) {
                 content += "  <Database";
-                content += $" Path=\"{entry.Path}\"";
-                if (!string.IsNullOrEmpty(entry.Folder)) content += $" Folder=\"{entry.Folder}\"";
-                if (!string.IsNullOrEmpty(entry.Name)) content += $" Name=\"{entry.Name}\"";
-                if (!string.IsNullOrEmpty(entry.RemapFrom)) content += $" RemapFrom=\"{entry.RemapFrom}\"";
+                content += $" Path=\"{EscapeXmlAttr(entry.Path)}\"";
+                if (!string.IsNullOrEmpty(entry.Folder)) content += $" Folder=\"{EscapeXmlAttr(entry.Folder)}\"";
+                if (!string.IsNullOrEmpty(entry.Name)) content += $" Name=\"{EscapeXmlAttr(entry.Name)}\"";
+                if (!string.IsNullOrEmpty(entry.RemapFrom)) content += $" RemapFrom=\"{EscapeXmlAttr(entry.RemapFrom)}\"";
                 content += $" Enabled=\"{(entry.Enabled ? "true" : "false")}\"";
                 content += $" ThumbSize=\"{entry.ThumbSize}\"";
-                content += $" Count=\"{entry.ImageCount}\" Status=\"{entry.Status}\"";
+                content += $" Count=\"{entry.ImageCount}\" Status=\"{EscapeXmlAttr(entry.Status)}\"";
                 if (entry.Pool != 0) content += $" Pool=\"{entry.Pool}\"";
                 content += "/>\n";
             }
             content += "</DatabaseRegistry>\n";
             File.WriteAllText(filePath, content);
+        }
+
+        // P1-6: attribute values must be XML-escaped — a path containing & < > "
+        // used to corrupt ad_database.xml for every reader of the registry
+        // (native TDatabaseRegistry and the collector both parse this file).
+        private static string EscapeXmlAttr(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s ?? "";
+            var sb = new StringBuilder(s.Length);
+            foreach (char c in s)
+            {
+                switch (c)
+                {
+                    case '&': sb.Append("&amp;"); break;
+                    case '<': sb.Append("&lt;"); break;
+                    case '>': sb.Append("&gt;"); break;
+                    case '"': sb.Append("&quot;"); break;
+                    default: sb.Append(c); break;
+                }
+            }
+            return sb.ToString();
+        }
+
+        // Inverse of EscapeXmlAttr: decode entities written by any of the three
+        // registry writers (GUI, native DLL, collector).
+        private static string UnescapeXmlAttr(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            return s.Replace("&lt;", "<").Replace("&gt;", ">").Replace("&quot;", "\"")
+                    .Replace("&apos;", "'").Replace("&amp;", "&");
         }
 
         private void BtnAttachDatabase_Click(object sender, EventArgs e)
@@ -1085,7 +1116,9 @@ namespace AntiDupl.NET.WinForms.Forms
             start += search.Length;
             int end = tag.IndexOf("\"", start);
             if (end < 0) return null;
-            return tag.Substring(start, end - start);
+            // P1-6: all registry writers escape attribute values; decode them so
+            // paths round-trip correctly through the UI.
+            return UnescapeXmlAttr(tag.Substring(start, end - start));
         }
 
         // --- Data model ---

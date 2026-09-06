@@ -43,6 +43,26 @@ namespace ad
         return L"ad_database.xml";
     }
 
+    // Inverse of EscapeXmlAttr: decode the five XML entities in attribute values.
+    static std::wstring UnescapeXmlAttr(const std::wstring& s) {
+        std::wstring out;
+        out.reserve(s.size());
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == L'&') {
+                if (s.compare(i, 5, L"&amp;") == 0) { out += L'&'; i += 4; continue; }
+                if (s.compare(i, 4, L"&lt;") == 0) { out += L'<'; i += 3; continue; }
+                if (s.compare(i, 4, L"&gt;") == 0) { out += L'>'; i += 3; continue; }
+                if (s.compare(i, 6, L"&quot;") == 0) { out += L'"'; i += 5; continue; }
+                if (s.compare(i, 7, L"&apos;") == 0) { out += L'\''; i += 6; continue; }
+                // Unknown/bare '&' — keep as-is (legacy unescaped entries).
+                out += L'&';
+                continue;
+            }
+            out += s[i];
+        }
+        return out;
+    }
+
     // Simple XML attribute extractor
     static std::wstring GetXmlAttr(const std::wstring& tag, const std::wstring& attr) {
         std::wstring searchStr = attr + L"=\"";
@@ -51,7 +71,11 @@ namespace ad
         size_t start = pos + searchStr.length();
         size_t end = tag.find(L"\"", start);
         if (end == std::wstring::npos) return L"";
-        return tag.substr(start, end - start);
+        std::wstring value = tag.substr(start, end - start);
+        // The registry is written by three writers (DLL, C# GUI, collector) and
+        // all of them escape XML attribute values; decode entities on read so a
+        // round trip through any writer preserves the original path (P1-6).
+        return UnescapeXmlAttr(value);
     }
 
     // Escape XML attribute values (& < > " are the ones that corrupt the file)
@@ -72,11 +96,28 @@ namespace ad
 
     bool TDatabaseRegistry::Load(std::vector<TDatabaseInfo>& databases, const std::wstring& userPath) {
         databases.clear();
-        std::wifstream file(GetRegistryFilePath(userPath));
+        // P1-8: the registry is UTF-8 (written as UTF-8 by the C# GUI via
+        // File.WriteAllText and by the collector via WideCharToMultiByte).
+        // The former wide-stream read ran with the C locale and mis-decoded every
+        // non-ASCII path (e.g. Cyrillic database names/folders). Read bytes and
+        // convert UTF-8 -> UTF-16 explicitly.
+        std::ifstream file(GetRegistryFilePath(userPath), std::ios::binary);
         if (!file.is_open()) return false;
 
-        std::wstring line;
-        while (std::getline(file, line)) {
+        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        std::wstring wcontent;
+        if (!content.empty()) {
+            int len = MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), NULL, 0);
+            if (len <= 0) return false;
+            wcontent.resize(len);
+            MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), &wcontent[0], len);
+        }
+
+        size_t lineStart = 0;
+        while (lineStart <= wcontent.size()) {
+            size_t lineEnd = wcontent.find(L'\n', lineStart);
+            std::wstring line = wcontent.substr(lineStart,
+                (lineEnd == std::wstring::npos ? wcontent.size() : lineEnd) - lineStart);
             // Trim whitespace
             line.erase(0, line.find_first_not_of(L" \t\r\n"));
             line.erase(line.find_last_not_of(L" \t\r\n") + 1);
@@ -106,6 +147,9 @@ namespace ad
                     databases.push_back(db);
                 }
             }
+
+            if (lineEnd == std::wstring::npos) break;
+            lineStart = lineEnd + 1;
         }
         return true;
     }
@@ -114,22 +158,32 @@ namespace ad
         std::wstring filePath = GetRegistryFilePath(userPath);
         std::wstring tmpPath = filePath + L".tmp";
 
-        std::wofstream file(tmpPath);
-        if (!file.is_open()) return false;
-
-        file << L"<DatabaseRegistry>\n";
+        // P1-8: build the UTF-8 byte buffer in memory (same encoding as the C#
+        // GUI and collector writers), then write it atomically.
+        std::wstringstream wss;
+        wss << L"<DatabaseRegistry>\n";
         for (const auto& db : databases) {
-            file << L"  <Database Path=\"" << EscapeXmlAttr(db.Path) << L"\"";
-            if (!db.Folder.empty()) file << L" Folder=\"" << EscapeXmlAttr(db.Folder) << L"\"";
-            if (!db.Name.empty()) file << L" Name=\"" << EscapeXmlAttr(db.Name) << L"\"";
-            if (!db.RemapFrom.empty()) file << L" RemapFrom=\"" << EscapeXmlAttr(db.RemapFrom) << L"\"";
-            file << L" Enabled=\"" << (db.Enabled ? L"true" : L"false") << L"\"";
-            file << L" ThumbSize=\"" << db.ThumbSize << L"\" Count=\"" << db.ImageCount
-                 << L"\" Status=\"" << EscapeXmlAttr(db.Status) << L"\"";
-            if (db.Pool != 0) file << L" Pool=\"" << db.Pool << L"\"";
-            file << L"/>\n";
+            wss << L"  <Database Path=\"" << EscapeXmlAttr(db.Path) << L"\"";
+            if (!db.Folder.empty()) wss << L" Folder=\"" << EscapeXmlAttr(db.Folder) << L"\"";
+            if (!db.Name.empty()) wss << L" Name=\"" << EscapeXmlAttr(db.Name) << L"\"";
+            if (!db.RemapFrom.empty()) wss << L" RemapFrom=\"" << EscapeXmlAttr(db.RemapFrom) << L"\"";
+            wss << L" Enabled=\"" << (db.Enabled ? L"true" : L"false") << L"\"";
+            wss << L" ThumbSize=\"" << db.ThumbSize << L"\" Count=\"" << db.ImageCount
+                << L"\" Status=\"" << EscapeXmlAttr(db.Status) << L"\"";
+            if (db.Pool != 0) wss << L" Pool=\"" << db.Pool << L"\"";
+            wss << L"/>\n";
         }
-        file << L"</DatabaseRegistry>\n";
+        wss << L"</DatabaseRegistry>\n";
+
+        const std::wstring wcontent = wss.str();
+        int len = WideCharToMultiByte(CP_UTF8, 0, wcontent.c_str(), (int)wcontent.size(), NULL, 0, NULL, NULL);
+        if (len <= 0) return false;
+        std::string utf8(len, 0);
+        WideCharToMultiByte(CP_UTF8, 0, wcontent.c_str(), (int)wcontent.size(), &utf8[0], len, NULL, NULL);
+
+        std::ofstream file(tmpPath, std::ios::binary);
+        if (!file.is_open()) return false;
+        file.write(utf8.c_str(), utf8.size());
         file.flush();
         if (!file.good()) { file.close(); _wremove(tmpPath.c_str()); return false; }
         file.close();

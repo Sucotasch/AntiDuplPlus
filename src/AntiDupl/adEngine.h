@@ -58,7 +58,7 @@ namespace ad
 
         void Search();
 
-        void UpdateGpuDatabase();
+        // P2-16: UpdateGpuDatabase() removed — dead code (no callers).
         bool ExecuteGpuAllVsAllComparison();  // Возвращает true при успехе
 
         // Flag to skip comparison during collection (for GPU AllVsAll mode)

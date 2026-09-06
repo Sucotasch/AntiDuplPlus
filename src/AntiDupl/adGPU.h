@@ -57,10 +57,8 @@ namespace ad
     size_t GpuCurrentCapacity();
     size_t GpuCurrentThumbSize();
 
-    // Batch Comparison: Compare one query thumbnail against a range of thumbnails in the buffer
-    // Returns number of matches found (difference <= threshold)
-    bool GpuCompareOneVsMany(const uint8_t* pQuery, size_t startIdx, size_t count, double threshold, 
-                             size_t* pMatchIndices, double* pMatchDifferences, size_t* pMatchCount, size_t maxMatches);
+    // P2-16: GpuCompareOneVsMany removed — dead API (zero callers; the live
+    // per-image path is GpuCompareOneVsList below).
 
     // Compare one query thumbnail against a list of thumbnail indices in the buffer
     bool GpuCompareOneVsList(const uint8_t* pQuery, const size_t* pIndices, size_t count, double threshold, 

@@ -281,6 +281,43 @@ static std::wstring GetExeDir() {
     return (pos != std::wstring::npos) ? path.substr(0, pos) : L".";
 }
 
+// P1-6: escape XML attribute values written into ad_database.xml — a path with
+// & < > " must not corrupt the registry for its other readers (native DLL, GUI).
+static std::wstring EscapeXmlAttr(const std::wstring& s) {
+    std::wstring out;
+    out.reserve(s.size());
+    for (wchar_t c : s) {
+        switch (c) {
+        case L'&': out += L"&amp;"; break;
+        case L'<': out += L"&lt;"; break;
+        case L'>': out += L"&gt;"; break;
+        case L'"': out += L"&quot;"; break;
+        default: out += c; break;
+        }
+    }
+    return out;
+}
+
+// P1-6: inverse — decode entities when comparing an existing registry Path
+// (written escaped by any of the three writers) with a raw input path.
+static std::wstring UnescapeXmlAttr(const std::wstring& s) {
+    std::wstring out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == L'&') {
+            if (s.compare(i, 5, L"&amp;") == 0) { out += L'&'; i += 4; continue; }
+            if (s.compare(i, 4, L"&lt;") == 0) { out += L'<'; i += 3; continue; }
+            if (s.compare(i, 4, L"&gt;") == 0) { out += L'>'; i += 3; continue; }
+            if (s.compare(i, 6, L"&quot;") == 0) { out += L'"'; i += 5; continue; }
+            if (s.compare(i, 7, L"&apos;") == 0) { out += L'\''; i += 6; continue; }
+            out += L'&'; // unknown/bare '&' — keep as-is (legacy entries)
+            continue;
+        }
+        out += s[i];
+    }
+    return out;
+}
+
 // Read existing 0000.adi database into a map of path -> ImageInfo
 static bool LoadExistingDatabase(const std::wstring& dbFolder, int expectedThumbSize,
     std::map<std::wstring, ImageInfo>& existing)
@@ -928,10 +965,13 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                             }
                         }
                     }
-                    // Update Count attribute for this database's path
+                    // Update Count attribute for this database's path.
+                    // P1-6: writers now store Path XML-escaped, so match the escaped
+                    // form (a bare '&' path would otherwise miss and duplicate).
                     std::wstring countStr = std::to_wstring(images.size());
+                    std::wstring pathNeedle = L"Path=\"" + EscapeXmlAttr(args.inputPath) + L"\"";
                     size_t pos = 0;
-                    while ((pos = xmlContent.find(L"Path=\"" + args.inputPath + L"\"", pos)) != std::wstring::npos) {
+                    while ((pos = xmlContent.find(pathNeedle, pos)) != std::wstring::npos) {
                         size_t countPos = xmlContent.find(L"Count=\"", pos);
                         if (countPos != std::wstring::npos && countPos < pos + 500) {
                             size_t valStart = countPos + 7;
@@ -1135,7 +1175,10 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                 pStart += 6;
                 size_t pEnd = tag.find(L"\"", pStart);
                 if (pEnd != std::wstring::npos) {
-                    std::wstring existingPath = tag.substr(pStart, pEnd - pStart);
+                    // P1-6: existing entries store Path XML-escaped — decode before
+                    // comparing, otherwise an escaped path never matches the raw
+                    // input path and the entry gets duplicated on re-collect.
+                    std::wstring existingPath = UnescapeXmlAttr(tag.substr(pStart, pEnd - pStart));
                     // Case-insensitive comparison
                     std::wstring lowerExisting = existingPath;
                     std::wstring lowerInput = args.inputPath;
@@ -1152,7 +1195,9 @@ int wmain_impl(int argc, wchar_t* argv[]) {
         }
 
         // 3. Add new entry
-        newXml += L"  <Database Path=\"" + args.inputPath + L"\" Folder=\"" + relativeFolder + L"\" Name=\"" + dbName + L"\" ThumbSize=\"" + std::to_wstring(args.thumbSize) + L"\" Count=\"" + std::to_wstring(images.size()) + L"\" Status=\"Ready\"/>\n";
+        newXml += L"  <Database Path=\"" + EscapeXmlAttr(args.inputPath) + L"\" Folder=\"" + EscapeXmlAttr(relativeFolder)
+            + L"\" Name=\"" + EscapeXmlAttr(dbName) + L"\" ThumbSize=\"" + std::to_wstring(args.thumbSize)
+            + L"\" Count=\"" + std::to_wstring(images.size()) + L"\" Status=\"Ready\"/>\n";
         newXml += L"</DatabaseRegistry>\n";
 
         // 4. Write as UTF-8

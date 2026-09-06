@@ -28,6 +28,7 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <limits>
 #include <windows.h>
 
 #define AD_DEBUG(msg) OutputDebugStringA(msg)
@@ -47,6 +48,9 @@ namespace ad
     static uint8_t* g_pQueryBuffer = nullptr; 
     static double* g_pResultBuffer = nullptr; 
     static size_t* g_pIndexBuffer = nullptr; 
+    // P1-4: carries "result buffer overran" out of the SSIM readback block
+    // (that path has no single exit point where a local flag could survive).
+    static bool g_ssimTruncated = false;
 
     // --- Kernels ---
 
@@ -150,35 +154,8 @@ namespace ad
         }
     }
 
-    __global__ void OneVsManyKernel(const uint8_t* pQuery, const uint8_t* pDatabase, 
-                                    size_t thumbSize, size_t count, double* pResults)
-    {
-        size_t dbIdx = blockIdx.x; 
-        if (dbIdx >= count) return;
-
-        extern __shared__ double shared_sum[];
-        size_t tid = threadIdx.x;
-        
-        double localSum = 0;
-        const uint8_t* pTarget = pDatabase + (size_t)dbIdx * thumbSize;
-
-        for (size_t i = tid; i < thumbSize; i += blockDim.x) {
-            double diff = (double)pQuery[i] - (double)pTarget[i];
-            localSum += diff * diff;
-        }
-
-        shared_sum[tid] = localSum;
-        __syncthreads();
-
-        for (size_t s = blockDim.x / 2; s > 0; s >>= 1) {
-            if (tid < s) shared_sum[tid] += shared_sum[tid + s];
-            __syncthreads();
-        }
-
-        if (tid == 0) {
-            pResults[dbIdx] = shared_sum[0];
-        }
-    }
+    // P2-16: OneVsManyKernel + GpuCompareOneVsMany removed — dead API (zero
+    // callers in product or tests; the live per-image path is GpuCompareOneVsList).
 
     __global__ void OneVsListKernel(const uint8_t* pQuery, const uint8_t* pDatabase, 
                                     const size_t* pIndices, size_t thumbSize, size_t count, 
@@ -454,46 +431,6 @@ namespace ad
         return true;
     }
 
-    bool GpuCompareOneVsMany(const uint8_t* pQuery, size_t startIdx, size_t count, double threshold, 
-                             size_t* pMatchIndices, double* pMatchDifferences, size_t* pMatchCount, size_t maxMatches)
-    {
-        if (!g_pDeviceThumbnailBuffer || (startIdx + count) > g_bufferCapacity || count == 0 || 
-            pQuery == nullptr || pMatchIndices == nullptr || pMatchDifferences == nullptr || 
-            pMatchCount == nullptr || maxMatches == 0) 
-            return false;
-
-        if (cudaMemcpy(g_pQueryBuffer, pQuery, g_thumbSize, cudaMemcpyHostToDevice) != cudaSuccess) return false;
-        
-        // Check for integer overflow before kernel launch
-        if (count > INT_MAX) {
-#ifdef AD_LOGGER_ENABLE
-            AD_LOG("GPU: Count exceeds INT_MAX, cannot launch kernel");
-#endif
-            return false;
-        }
-        
-        int threadsPerBlock = 256; 
-        OneVsManyKernel<<< (int)count, threadsPerBlock, threadsPerBlock * sizeof(double) >>>(
-            g_pQueryBuffer, g_pDeviceThumbnailBuffer + (size_t)startIdx * g_thumbSize, g_thumbSize, count, g_pResultBuffer);
-
-        if (cudaGetLastError() != cudaSuccess) return false;
-        if (cudaDeviceSynchronize() != cudaSuccess) return false;
-
-        std::vector<double> results(count);
-        if (cudaMemcpy(results.data(), g_pResultBuffer, count * sizeof(double), cudaMemcpyDeviceToHost) != cudaSuccess) return false;
-
-        size_t found = 0;
-        for (size_t i = 0; i < count && found < maxMatches; ++i) {
-            if (results[i] <= threshold) {
-                pMatchIndices[found] = startIdx + i;
-                pMatchDifferences[found] = results[i];
-                found++;
-            }
-        }
-        *pMatchCount = found;
-        return true;
-    }
-
     bool GpuCompareOneVsList(const uint8_t* pQuery, const size_t* pIndices, size_t count, double threshold, 
                              size_t* pMatchIndices, double* pMatchDifferences, size_t* pMatchCount, size_t maxMatches)
     {
@@ -555,48 +492,55 @@ namespace ad
         if (testErr != cudaSuccess || deviceCount == 0)
             return 1e10;
 
+        // P1-5: every failure path must return NaN, never 0. Returning 0 made any
+        // CUDA error indistinguishable from "images are identical". Callers detect
+        // failure via isnan() and must not use the value for comparisons.
         uint8_t *d_1 = nullptr, *d_2 = nullptr;
         double *d_r = nullptr, h_r = 0;
         size_t numBlocks = 0;
+        bool failed = false;
 
         cudaError_t err;
         err = cudaMalloc(&d_1, size);
-        if (err != cudaSuccess) goto cleanup;
+        if (err != cudaSuccess) { failed = true; goto cleanup; }
 
         err = cudaMalloc(&d_2, size);
-        if (err != cudaSuccess) goto cleanup;
+        if (err != cudaSuccess) { failed = true; goto cleanup; }
 
         err = cudaMalloc(&d_r, sizeof(double));
-        if (err != cudaSuccess) goto cleanup;
+        if (err != cudaSuccess) { failed = true; goto cleanup; }
 
-        if (cudaMemcpy(d_1, pSrc1, size, cudaMemcpyHostToDevice) != cudaSuccess) goto cleanup;
-        if (cudaMemcpy(d_2, pSrc2, size, cudaMemcpyHostToDevice) != cudaSuccess) goto cleanup;
-        if (cudaMemset(d_r, 0, sizeof(double)) != cudaSuccess) goto cleanup;
+        if (cudaMemcpy(d_1, pSrc1, size, cudaMemcpyHostToDevice) != cudaSuccess) { failed = true; goto cleanup; }
+        if (cudaMemcpy(d_2, pSrc2, size, cudaMemcpyHostToDevice) != cudaSuccess) { failed = true; goto cleanup; }
+        if (cudaMemset(d_r, 0, sizeof(double)) != cudaSuccess) { failed = true; goto cleanup; }
 
         numBlocks = (size + 255) / 256;
         if (numBlocks > INT_MAX) {
 #ifdef AD_LOGGER_ENABLE
             AD_LOG("GPU: Block count exceeds INT_MAX, cannot launch kernel");
 #endif
+            failed = true;
             goto cleanup;
         }
 
         SquaredSumKernel<<< (int)numBlocks, 256, 256 * sizeof(double) >>>(d_1, d_2, size, d_r);
         
         err = cudaGetLastError();
-        if (err != cudaSuccess) goto cleanup;
+        if (err != cudaSuccess) { failed = true; goto cleanup; }
 
         err = cudaDeviceSynchronize();
-        if (err != cudaSuccess) goto cleanup;
+        if (err != cudaSuccess) { failed = true; goto cleanup; }
 
         err = cudaMemcpy(&h_r, d_r, sizeof(double), cudaMemcpyDeviceToHost);
-        if (err != cudaSuccess) goto cleanup;
+        if (err != cudaSuccess) { failed = true; goto cleanup; }
 
     cleanup:
         if (d_1) cudaFree(d_1);
         if (d_2) cudaFree(d_2);
         if (d_r) cudaFree(d_r);
-        return h_r;
+        // P1-5: NaN on failure — callers must treat isnan() as "no GPU result",
+        // never as a comparison value.
+        return failed ? std::numeric_limits<double>::quiet_NaN() : h_r;
     }
 
     // NEW: AllVsAll comparison с массовым upload + streaming callback
@@ -774,7 +718,18 @@ namespace ad
         AD_DEBUG("GpuCompareAllVsAll: Kernel complete\n");
 
         // 10. Считываем total match count
-        cudaMemcpy(&h_matchCount, d_matchCount, sizeof(size_t), cudaMemcpyDeviceToHost);
+        err = cudaMemcpy(&h_matchCount, d_matchCount, sizeof(size_t), cudaMemcpyDeviceToHost);
+        if (err != cudaSuccess) {
+            // P2-6: unchecked readback could reuse the stale counter value from a
+            // previous launch, attributing old matches to this run. Treat as failure.
+            AD_DEBUG_FMT("GpuCompareAllVsAll: Match count readback failed: %s\n", cudaGetErrorString(err));
+            cudaFree(d_thumbnails);
+            cudaFree(d_crcArray);
+            if (d_poolMask) cudaFree(d_poolMask);
+            cudaFree(d_results);
+            cudaFree(d_matchCount);
+            return false;
+        }
 
         // Log match count
         {
@@ -793,8 +748,27 @@ namespace ad
 
         // Ограничиваем чтение размером буфера
         size_t matchesToRead = (h_matchCount < maxMatchesPerBatch) ? h_matchCount : maxMatchesPerBatch;
-        if (h_matchCount > maxMatchesPerBatch) {
-            AD_DEBUG_FMT("GpuCompareAllVsAll: WARNING! Truncated from %zu to %zu matches\n", h_matchCount, maxMatchesPerBatch);
+        // P1-4: matches beyond the batch buffer are silently dropped by the kernel
+        // (idx < maxMatches guard) while the counter keeps counting them. Overrun
+        // used to end as "success" with a truncated result set; now it is surfaced
+        // as a comparison failure (the already-read batch is still delivered via
+        // the callback below, so partial results are not lost).
+        bool truncated = (h_matchCount > maxMatchesPerBatch);
+        if (truncated) {
+            AD_DEBUG_FMT("GpuCompareAllVsAll: WARNING! Match buffer overrun: %zu found, %zu readable, %zu dropped\n",
+                         h_matchCount, maxMatchesPerBatch, h_matchCount - maxMatchesPerBatch);
+            {
+                wchar_t exePath[MAX_PATH];
+                GetModuleFileNameW(NULL, exePath, MAX_PATH);
+                std::wstring logPath(exePath);
+                logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
+                FILE* logFile = _wfopen(logPath.c_str(), L"a");
+                if (logFile) {
+                    fwprintf(logFile, L"  ERROR: match buffer overrun: %zu found, buffer=%zu, %zu DROPPED\n",
+                             h_matchCount, maxMatchesPerBatch, h_matchCount - maxMatchesPerBatch);
+                    fclose(logFile);
+                }
+            }
         }
 
         // 11. Streaming readback — читаем батчами и вызываем callback
@@ -830,7 +804,9 @@ namespace ad
         cudaFree(d_matchCount);
 
         AD_DEBUG("GpuCompareAllVsAll: Complete\n");
-        return true;
+        // P1-4: buffer overrun means the result set is incomplete — success would
+        // hide the silently dropped tail (see step 10).
+        return !truncated;
     }
 
     // --- SSIM AllVsAll kernel ---
@@ -1024,9 +1000,20 @@ namespace ad
         // Readback
         {
             size_t h_matchCount = 0;
-            cudaMemcpy(&h_matchCount, d_matchCount, sizeof(size_t), cudaMemcpyDeviceToHost);
+            err = cudaMemcpy(&h_matchCount, d_matchCount, sizeof(size_t), cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess) {
+                // P2-6: unchecked readback could reuse a stale counter from a
+                // previous launch — treat as failure.
+                goto ssim_cleanup;
+            }
 
             size_t matchesToRead = (h_matchCount < maxMatchesPerBatch) ? h_matchCount : maxMatchesPerBatch;
+            // P1-4: overrun must surface as failure, not a silently truncated success.
+            if (h_matchCount > maxMatchesPerBatch)
+                g_ssimTruncated = true;
+            else
+                g_ssimTruncated = false;
+
             if (matchesToRead > 0) {
                 std::vector<Match> h_batch(maxMatchesPerBatch);
                 size_t remaining = matchesToRead;
@@ -1051,7 +1038,8 @@ namespace ad
         if (d_poolMask) cudaFree(d_poolMask);
         cudaFree(d_results);
         cudaFree(d_matchCount);
-        return true;
+        // P1-4: buffer overrun means an incomplete result set — not a success.
+        return !g_ssimTruncated;
 
     ssim_cleanup:
         cudaFree(d_thumbnails);

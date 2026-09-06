@@ -338,31 +338,37 @@ namespace AntiDupl.NET.WinForms
                 }
             }
 
-            if (m_options.resultsOptions.NotHighlightIfFragmentsMoreThan && rectangles.Count > m_options.resultsOptions.NotHighlightMaxFragments)
-                return;
-
-            if (!m_options.resultsOptions.HighlightAllDifferences)
+            // P1-7: build ONE final rectangle list and fire the event ONCE.
+            // The old code fired twice when !HighlightAllDifferences (limited list
+            // first, then an unconditional full list that overwrote it), so the
+            // "Max fragments" option never took effect.
+            List<Rectangle> dst = new List<Rectangle>();
+            if (rectangles.Count > 0)
             {
-                if (HighlightCompleteEvent != null)
+                rectangles.Sort(delegate (RectanglesWithSimilarity a, RectanglesWithSimilarity b)
                 {
-                    rectangles.Sort(delegate (RectanglesWithSimilarity a, RectanglesWithSimilarity b)
-                    {
-                        return a.similarity.CompareTo(b.similarity);
-                    });
-                    RectanglesWithSimilarity[] src = rectangles.ToArray();
-                    List<Rectangle> dst = new List<Rectangle>();
-                    for (int i = 0, n = Math.Min(src.Length, m_options.resultsOptions.MaxFragmentsForHighlight); i < n; ++i)
-                        dst.Add(src[i].rectangle);
-                    HighlightCompleteEvent(dst);
+                    return a.similarity.CompareTo(b.similarity);
+                });
+                RectanglesWithSimilarity[] src = rectangles.ToArray();
+                // Too many fragments => user asked not to highlight at all: send an
+                // EMPTY list so any highlight left from a previously viewed pair is
+                // cleared (the old early-out kept the stale one).
+                int n = rectangles.Count;
+                if (m_options.resultsOptions.NotHighlightIfFragmentsMoreThan
+                    && n > m_options.resultsOptions.NotHighlightMaxFragments)
+                {
+                    n = 0;
                 }
+                else if (!m_options.resultsOptions.HighlightAllDifferences)
+                {
+                    n = Math.Min(n, m_options.resultsOptions.MaxFragmentsForHighlight);
+                }
+                for (int i = 0; i < n; ++i)
+                    dst.Add(src[i].rectangle);
             }
 
             if (HighlightCompleteEvent != null)
             {
-                RectanglesWithSimilarity[] src = rectangles.ToArray();
-                List<Rectangle> dst = new List<Rectangle>();
-                for (int i = 0; i < src.Length; ++i)
-                    dst.Add(src[i].rectangle);
                 HighlightCompleteEvent(dst);
             }
         }

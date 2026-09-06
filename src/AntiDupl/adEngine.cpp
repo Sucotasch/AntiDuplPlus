@@ -45,6 +45,7 @@
 #include <windows.h>
 #include <vector>
 #include <sstream>
+#include <cmath>
 
 #define AD_DEBUG(msg) OutputDebugStringA(msg)
 #define AD_DEBUG_FMT(msg, ...) \
@@ -112,12 +113,20 @@ namespace ad
             AD_DEBUG("TEngine: GpuCompareSquaredSum returned\n");
 
             std::stringstream ts;
-            ts << "CUDA Sanity Check: CPU=" << cpuSum << ", GPU=" << gpuSum;
-            double tolerance = cpuSum * 0.001;  // 0.1% relative tolerance
-            if (fabs(cpuSum - gpuSum) <= tolerance) {
-                ts << " [SUCCESS - PARITY MATCH]";
-            } else {
-                ts << " [FAILURE - MATH MISMATCH] Tolerance: " << tolerance;
+            // P1-5: NaN means a CUDA error inside the sanity test itself (alloc/
+            // copy/launch/readback failure) — not a math mismatch, and never a
+            // valid comparison result.
+            if (std::isnan(gpuSum)) {
+                ts << "CUDA Sanity Check: FAILED (CUDA error — no GPU result)";
+            }
+            else {
+                ts << "CUDA Sanity Check: CPU=" << cpuSum << ", GPU=" << gpuSum;
+                double tolerance = cpuSum * 0.001;  // 0.1% relative tolerance
+                if (fabs(cpuSum - gpuSum) <= tolerance) {
+                    ts << " [SUCCESS - PARITY MATCH]";
+                } else {
+                    ts << " [FAILURE - MATH MISMATCH] Tolerance: " << tolerance;
+                }
             }
 #ifdef AD_LOGGER_ENABLE
             AD_LOG(ts.str().c_str());
@@ -171,68 +180,10 @@ namespace ad
 #endif//AD_LOGGER_ENABLE
     }
 
-    void TEngine::UpdateGpuDatabase()
-    {
-        AD_DEBUG("UpdateGpuDatabase: Starting\n");
-
-        if (m_pGpuManager && m_pGpuManager->IsAvailable())
-        {
-            AD_DEBUG("UpdateGpuDatabase: GPU is available\n");
-
-            const TImageDataStorage::TStorage& storage = m_pImageDataStorage->Storage();
-            AD_DEBUG("UpdateGpuDatabase: Storage size\n");
-
-            size_t reducedImageSize = m_pOptions->advanced.reducedImageSize;
-            size_t thumbSize = reducedImageSize * reducedImageSize;
-            AD_DEBUG("UpdateGpuDatabase: reducedImageSize and thumbSize calculated\n");
-
-            // Ensure GPU has enough capacity for the current database
-            AD_DEBUG("UpdateGpuDatabase: Calling EnsureCapacity\n");
-
-            if (!m_pGpuManager->EnsureCapacity(storage.size(), thumbSize))
-            {
-                AD_DEBUG("UpdateGpuDatabase: EnsureCapacity FAILED\n");
-#ifdef AD_LOGGER_ENABLE
-                AD_LOG("GPU: Failed to ensure capacity for database.");
-#endif
-                return;
-            }
-
-            AD_DEBUG("UpdateGpuDatabase: EnsureCapacity succeeded\n");
-
-            size_t count = 0;
-            for (TImageDataStorage::TStorage::const_iterator it = storage.begin(); it != storage.end(); ++it)
-            {
-                TImageDataPtr pImageData = it->second;
-                if (pImageData->data && pImageData->data->filled && pImageData->data->main != nullptr)
-                {
-                    if (m_pGpuManager->UploadThumbnail(pImageData->globalIdx, pImageData->data->main))
-                    {
-                        count++;
-                    }
-                    else
-                    {
-                        AD_DEBUG("UpdateGpuDatabase: Upload FAILED\n");
-                    }
-                }
-            }
-            AD_DEBUG("UpdateGpuDatabase: Uploaded thumbnails\n");
-
-#ifdef AD_LOGGER_ENABLE
-            if (count > 0)
-            {
-                std::stringstream ss;
-                ss << "GPU: Synchronized " << count << " thumbnails to VRAM.";
-                AD_LOG(ss.str().c_str());
-            }
-#endif
-        }
-        else
-        {
-            AD_DEBUG("UpdateGpuDatabase: GPU not available\n");
-        }
-        AD_DEBUG("UpdateGpuDatabase: Finished\n");
-    }
+    // P2-16: the former TEngine::UpdateGpuDatabase() full-DB upload was dead code
+    // (no callers; the live upload points are adThreadManagement.cpp for DB-loaded
+    // images and adDataCollector.cpp for freshly scanned ones, both funnelling
+    // through TGpuManager::UploadThumbnail which maintains the uploaded-bit set).
 
     // Структура для контекста callback
     struct MatchProcessContext {

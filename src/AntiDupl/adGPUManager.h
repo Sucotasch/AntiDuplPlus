@@ -26,6 +26,7 @@
 
 #include "adGPU.h"
 #include <mutex>
+#include <vector>
 
 namespace ad
 {
@@ -41,7 +42,26 @@ namespace ad
         bool UploadThumbnail(size_t index, const uint8_t* pData) {
             if (!m_available) return false;
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
-            return GpuUploadThumbnail(index, pData);
+            bool ok = GpuUploadThumbnail(index, pData);
+            // Track which slots really hold uploaded pixels. CompareWithSetGPU
+            // uses this to route never-uploaded/garbage slots to the CPU path
+            // instead of silently losing pairs (audit: "images outside VRAM").
+            if (ok) {
+                if (index >= m_uploaded.size()) m_uploaded.resize(index + 1, false);
+                m_uploaded[index] = true;
+            }
+            else if (index < m_uploaded.size()) {
+                m_uploaded[index] = false;
+            }
+            return ok;
+        }
+
+        // True when slot `index` is known to hold uploaded thumbnail data in the
+        // device buffer. Always false for slots never uploaded or after a buffer reset.
+        bool IsUploaded(size_t index) {
+            if (!m_available) return false;
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            return index < m_uploaded.size() && m_uploaded[index];
         }
 
         bool CompareOneVsMany(const uint8_t* pQuery, size_t startIdx, size_t count, double threshold, 
@@ -65,7 +85,15 @@ namespace ad
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
             size_t size = m_capacity; // Reuse current capacity
             GpuReleaseBuffer(); 
-            GpuCreateBuffer(size, m_thumbSize);
+            if (!GpuCreateBuffer(size, m_thumbSize)) {
+                // Re-allocation failed — sync manager fields with the (empty)
+                // actual buffers so the next EnsureCapacity retries instead of
+                // no-op'ing on stale capacity and silently dropping uploads.
+                m_capacity = GpuCurrentCapacity();
+                m_thumbSize = GpuCurrentThumbSize();
+            }
+            // The buffer was recreated (or released) — no slot holds uploaded data.
+            m_uploaded.clear();
         }
 
         bool EnsureCapacity(size_t required, size_t thumbSize);
@@ -119,6 +147,9 @@ namespace ad
         GpuDeviceInfo m_deviceInfo;
         size_t m_capacity;
         size_t m_thumbSize;
+        // Mirrors which thumbnail-buffer slots hold uploaded data. Maintained
+        // under m_mutex by UploadThumbnail/EnsureCapacity/ClearBuffer.
+        std::vector<bool> m_uploaded;
         mutable std::recursive_mutex m_mutex;
     };
 }

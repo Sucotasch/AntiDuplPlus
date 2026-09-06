@@ -1,542 +1,227 @@
-# AntiDuplPlus — полный инженерный аудит кода
+# AntiDuplPlus — новый полный аудит (2026-09-05)
 
 | Поле | Значение |
 |------|----------|
-| **Дата** | 2026-08-16 |
-| **Базовый коммит** | `04d9495` (master, после синхронизации документации) |
-| **Метод** | Сплошной read-only ревью: нативное ядро (`src/AntiDupl`), коллектор (`src/NvJpegCollector`), C# слой (Core + WinForms + WPF), сборка/CI/упаковка. Каждый пункт проверен чтением окружающего кода, ключевые P1 перепроверены вручную. |
-| **Валидация** | `cmd\Deploy.cmd` (полная сборка) — результат в §8 |
-| **Шкала** | P0 — краш/потеря данных; P1 — неверный результат/поведение; P2 — робастность; P3 — гигиена |
-| **Правило** | Код в этом документе — готовые к применению патчи (minimal, production-ready). Поведение не меняется, кроме случаев, где оно объективно сломано. |
+| **Дата** | 2026-09-05 |
+| **Базовый коммит** | `4f53533` (master) |
+| **Метод** | Полностью новое read-only ревью без опоры на старые аудиты: 6 листов по подсистемам (native-core, gpu-cuda, cs-interop, nvjpeg-collector, winforms-gui, build-ci-tests) + интеграционная проверка. Каждый лист независимо верифицирован (verify-report.mjs), цитаты вида `путь:строка` проверены скриптом. |
+| **Ограничение** | По требованию владельца **реальный билд не запускался** (Deploy.cmd, contract tests, msbuild) — весь аудит статический; первый прогон сборки будет валидацией после fixes. |
+| **Шкала** | P1 — неверный результат/тихая потеря данных; P2 — робастность/устойчивость; P3 — гигиена. |
+| **Правило** | Код ниже — готовые к применению правки. Поведение меняется только там, где оно объективно сломано. |
 
-**Кратко:** 0×P0, 12×P1, ~20×P2, ~40×P3. Самое важное: (1) `--update` коллектора пишет дубликаты записей для изменённых файлов; (2) GPU-ассист CPU-пути читает неинициализированную VRAM для изображений из БД; (3) авто-выбор игнорирует критерий времени при включённом критерии качества; (4) релизный zip не содержит `nvjpeg64_13.dll`; (5) межмодульный контракт коллектор↔DLL нарушен в трёх местах (CRC, алгоритм превью, thumbSize).
+**Итог: 6×P1, 23×P2, 10×P3** (полные списки в листах-отчётах `.unlazy/audit-2026-09-05/reports/leaf-*.md`; ниже — всё, что требует обсуждения и/или патча, с дедупликацией и назначением владельца-подсистемы). Практическая проверка 2026-09-05 (см. P2-16): исходная P1-3 понижена до P2 — дефолтный GPU-сценарий корректен, находка оказалась мёртвым кодом + дублированием логики. Дополнение этапа 2 (2026-09-06): P2-5b «образы вне VRAM» и P2-17 «WebP молча выпадает из БД коллектора» — новые позиции, обе исправлены. Тотальный счёт теперь **6×P1 / 25×P2 / 10×P3; исправлено 5 (P1-1, P1-2, P2-5, P2-5b, P2-17); открыто 4×P1 / 22×P2 / 10×P3**.
 
-**Статус исправлений 2026-08-18:** закрыты C1, C2, C4, C8, C9, C10, C13, N2–N7, N11, N18, N19, S1–S5, S13, S14, B1, B3, B6 (маркеры ✅ в тексте). Остаются открытыми: N1 (banded-ядро, требует верификации GPU), C3 (атомарная запись), C5/C6 (контракт CRC/превью), N8–N10, N12, B2 и P3-чистки — см. §7.
+**Статус исправлений 2026-09-05 (внедрены и подтверждены тестами, `cmd\Deploy.cmd` [OK]):** P1-1 (TurboJPEG TJPF_BGRA), P1-2 (коллектор Bgr24+BgrToGray), P2-5 (preserve-on-grow в `GpuCreateBuffer` + синхронизация manager-поля после сбоя аллокации). Полная матрица до/после — `.unlazy/audit-2026-09-05/tests/RESULTS.md`. Все БД, собранные старыми версиями, подлежат пересборке (миниатюры/памятка каналов и CRC меняются).
 
----
+**Статус исправлений 2026-09-05/06, этап 2 (согласован с владельцем):** WebP в коллекторе — декод через bundled libwebp вместо WIC (WIC требует опциональный Store-кодек «WebP Image Extension»; без него файлы молча выпадали из БД; тот же декодер, что у DLL в live-скане, — консистентность БД↔live). «Образы вне VRAM» — uploaded-set в `TGpuManager` + CPU-fallback в `CompareWithSetGPU`: при отказе роста/заливки образы сравниваются на CPU вместо молчаливой потери пар. Доказано дифференциально через fault-injection (`AD_TEST_INJECT_VRAM_LIMIT`, временный): фиксированный код 1100/1100, эмуляция старого поведения при том же отказе — потеряны ровно 76 пар (все образы с globalIdx≥1024); живое сжатие VRAM признано недетерминированным на WDDM (оверкоммит в системную память — документировано в RESULTS.md). Инъекция полностью откачена, финальный Deploy [OK], контрольная матрица A/B/B2/C/D/E/Edge-1025 зелёная. HEIF/AVIF/JXL в коллекторе — отклонено владельцем (редкие форматы, отложено в далёкие планы).
 
-## §1. Нативное ядро (`src/AntiDupl`) — 5×P1, 7×P2, 9×P3
+**Три находки, которые меняют картину продукта:**
 
-### N1 [P1] GPU AllVsAll молча обрезает результаты на 5 000 000 кандидатов
-`adGPU.cu:131-146`, `adGPU.cu:713-739` (SSIM-двойник: `adGPU.cu:947`)
-
-```cpp
-size_t idx = atomicAdd(matchCount, (size_t)1);
-if (idx < maxMatches) { ... results[idx] ... }   // сверх лимита — молча выбрасывается
-...
-size_t matchesToRead = (h_matchCount < maxMatchesPerBatch) ? h_matchCount : maxMatchesPerBatch;
-```
-
-Лимит `BATCH_MATCHES = 5'000'000` (`adEngine.cpp:412`) считается **до** метаданных-фильтров `MatchCallback` (type/size/folder/searchPath/ratio), поэтому на большом корпусе с рыхлым порогом кандидат-пар больше 5M — лишние молча теряются, поиск отчитывается успехом. «Стриминговый» цикл вычитки (`adGPU.cu:724-739`) структурно мёртв: `matchesToRead ≤ maxMatchesPerBatch` всегда, цикл делает ровно один проход. Это и есть суть известного BUG-08 (поле `ctx.bufferFullCount` мёртвое — `adEngine.cpp:244,409`: инициализируется нулём, никем не заполняется, никем не читается).
-
-**Фикс (последовательный проход полосами строк, без изменения ядра семантики):** ядру добавить `iBegin/iEnd` и цикл `for (size_t i = iBegin + blockIdx.x % (iEnd-iBegin); i < iEnd; i += gridDim.x)`, хосту — перезапуск по полосам:
-
-```cpp
-const size_t BAND = 512;                        // строк за проход; BAND*count << 5M пар
-std::vector<Match> h_batch(maxMatchesPerBatch);
-for (size_t i0 = 0; i0 < count; i0 += BAND) {
-    size_t i1 = std::min(i0 + BAND, count);
-    size_t zero = 0;
-    cudaMemcpy(d_matchCount, &zero, sizeof(size_t), cudaMemcpyHostToDevice);
-    AllVsAllKernel<<<blocks, threads, thumbSize>>>(..., i0, i1, ..., d_results, d_matchCount);
-    if (cudaDeviceSynchronize() != cudaSuccess) { /* free + return false */ }
-    size_t n = 0;
-    cudaMemcpy(&n, d_matchCount, sizeof(size_t), cudaMemcpyDeviceToHost);
-    size_t toRead = std::min(n, maxMatchesPerBatch);
-    if (n > toRead) AD_DEBUG_FMT("GPU: band overflow, %zu dropped\n", n - toRead);
-    cudaMemcpy(h_batch.data(), d_results, toRead * sizeof(Match), cudaMemcpyDeviceToHost);
-    callback(h_batch.data(), toRead, callbackContext);
-}
-```
-
-Полоса убирает саму возможность обрезки; лог делает остаточный дроп видимым.
-
-### N2 [P1] ✅ Исправлено 2026-08-18 — GPU-путь игнорирует `compare.checkOnEquality`
-`adEngine.cpp:625-629` (условие `useGpu`) против `adThreadManagement.cpp:324` (`CanCompare`)
-
-CPU-путь сравнивает только при `checkOnEquality == TRUE`; гейт GPU это условие опускает. При `checkOnEquality == FALSE` + включённой опции дефекта (тогда превью всё равно заполняются) GPU прогоняет полный AllVsAll и **впрыскивает пары дубликатов** в скан, который по настройкам CPU должен был дать только дефекты. Перепроверено вручную: `checkOnEquality` в `useGpu`-гейте отсутствует.
-
-```cpp
-bool useGpu = (m_pGpuManager && m_pGpuManager->IsAvailable() &&
-               m_pOptions->compare.checkOnEquality == TRUE &&   // паритет с CanCompare
-               (m_pOptions->compare.algorithmComparing == AD_COMPARING_SQUARED_SUM ||
-                m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM) &&
-               m_pOptions->advanced.ignoreFrameWidth == 0 &&
-               m_pOptions->compare.transformedImage == FALSE);
-```
-
-### N3 [P1] ✅ Исправлено 2026-08-18 — `CompareWithSetGPU` сравнивает с неинициализированной VRAM для картинок из БД
-`adThreadManagement.cpp:376-396` (кэш-ветка `TCollectManager::Add`) + `adImageComparer.cpp:125-134`; `TEngine::UpdateGpuDatabase` (`adEngine.cpp:174`) — **ноль вызывавших** (проверено grep'ом)
-
-Сценарий: `transformedImage == TRUE` + SQSUM + GPU → `useGpu == false` → работает CPU `CompareManager`, который диспетчеризуется в `CompareWithSetGPU`, читая глобальный VRAM-буфер по `globalIdx`. В глобальный буфер загружаются только изображения, прошедшие `TDataCollector::FillPixelData` (`adDataCollector.cpp:155-178`). Изображения, взятые из БД по кэш-ветке (`FillOther` + `CompareManager->Add` без загрузки), никогда не загружены; `GpuCreateBuffer` не делает `cudaMemset` — в слотах мусор/чужие пиксели → тихо неверные разности. Функция, которая должна была заполнять буфер (`UpdateGpuDatabase`), мёртвая.
-
-**Фикс — загрузка в кэш-ветке (минимальный):**
-
-```cpp
-else {
-    ...
-    pImageData->FillOther(m_pOptions);
-    if (!m_pEngine->SkipComparisonDuringCollection() &&
-        pImageData->data && pImageData->data->filled)
-    {
-        TGpuManager* pGpu = m_pEngine->GpuManager();
-        const size_t thumbSize = Simd::Square(m_pOptions->advanced.reducedImageSize);
-        if (pGpu->IsAvailable() && pImageData->data->side == m_pOptions->advanced.reducedImageSize &&
-            pGpu->EnsureCapacity(pImageData->globalIdx + 1, thumbSize))
-            pGpu->UploadThumbnail(pImageData->globalIdx, pImageData->data->main);
-    }
-    ...
-}
-```
-
-(Альтернатива: вызвать `UpdateGpuDatabase()` после загрузки БД в `Search()` и снять с неё флаг мёртвого кода. Выбрать один вариант.)
-
-### N4 [P1] ✅ Исправлено 2026-08-18 — `.adr` крашится на выходе индекса за границы
-`adResultStorage.cpp:341-345, 359-363` + `adImageInfoStorage.cpp:50-53`, `adFileStream.cpp:165-166`
-
-`TImageInfoStorage::Get` возвращает `NULL` для индекса ≥ размера; индекс читается из файла без проверки. Обрезанный/битый `.adr` → `NULL->Actual()` → краш хоста вместо ошибки.
-
-```cpp
-result.first  = m_pImageInfoStorage->Get((size_t)result.first);
-result.second = m_pImageInfoStorage->Get((size_t)result.second);
-if(result.first == NULL || (result.type == AD_RESULT_DUPL_IMAGE_PAIR && result.second == NULL))
-    throw TException(AD_ERROR_INVALID_FILE_FORMAT);
-```
-
-(в обеих ветках `TResultStorage::Load`.)
-
-### N5 [P1] ✅ Исправлено 2026-08-18 — Префикс-матчинг путей без границы разделителя: `C:\Foo` ловит `C:\Foo2`
-`adEngine.cpp:431-444` (пулы в движке) и `adResultStorage.cpp:493-500` (`FilterByPool`); та же ошибка в C# — см. S14; и в реестре БД — см. N11
-
-Класс ровно тот, от которого защищает `RemapPath` (`adImageDataStorage.cpp:59-63`), но назначение пулов не защищено: БД, зарегистрированная на `C:\Foo`, захватывает изображения `C:\Foo2\...` → режимы пулов 1–4 включают/исключают не те пары. Две копии логики ещё и разъехались. **Фикс — один общий хелпер** (`adPath.h`), используемый всеми тремя местами:
-
-```cpp
-inline bool PathStartsWith(const std::wstring& path, const std::wstring& prefix) {
-    if (path.size() < prefix.size() ||
-        ::CompareStringOrdinal(path.c_str(), (int)prefix.size(), prefix.c_str(),
-                               (int)prefix.size(), TRUE) != CSTR_EQUAL)
-        return false;
-    return path.size() == prefix.size() ||
-           path[prefix.size()] == L'\\' || path[prefix.size()] == L'/';
-}
-```
-
-### N6 [P2] ✅ Исправлено 2026-08-18 — `LoadCollectorData`: состояние записи не сбрасывается + все `fread` без проверки
-`adImageDataStorage.cpp:602-667`
-
-Два дефекта: (a) `imageData` переиспользуется между итерациями, но `data->filled`/`average`/`varianceSquare` только пишутся в `true`/значения — запись с `filled == 0` после записи с `filled == 1` вставляется с превью предыдущей записи, помеченным заполненным. Сейчас латентно (коллектор всегда пишет `filled=1`, проверено), но формат это допускает. (b) Все метаданные-`fread` (строки 613–623, 646, 655, 659–660) игнорируют результат: гнилой хвост → нули, запись тихо пропускается, функция возвращает `true` → `Load` возвращает `AD_OK`.
-
-```cpp
-for (uint64_t i = 0; i < count; i++) {
-    imageData.data->filled = false;
-    imageData.data->average = 0; imageData.data->varianceSquare = 0;
-    uint64_t fileSize, fileTime, crc32c; uint32_t hash, width, height;
-    float blockiness, blurring; uint8_t type, defect, filled;
-    if (fread(&fileSize,8,1,f)!=1 || fread(&fileTime,8,1,f)!=1 || fread(&hash,4,1,f)!=1 ||
-        fread(&type,1,1,f)!=1   || fread(&width,4,1,f)!=1  || fread(&height,4,1,f)!=1  ||
-        fread(&blockiness,4,1,f)!=1 || fread(&blurring,4,1,f)!=1 || fread(&defect,1,1,f)!=1 ||
-        fread(&crc32c,8,1,f)!=1 || fread(&filled,1,1,f)!=1)
-    { fclose(f); return false; }
-    ...
-```
-
-### N7 [P2] ✅ Исправлено 2026-08-18 — `LoadCollectorData` принимает thumbSize из файла, не равный `reducedImageSize`
-`adImageDataStorage.cpp:602, 643-657`; параметр `thumbSizeFromHeader` (`:505`) читается в `Load()` и не используется; `allLoad` тоже игнорируется
-
-DLL-native загрузчик строг (`adFileStream.cpp:141-143` — исключение при несовпадении стороны), collector-native — нет: БД с `--size 64` при опции 32 грузится с `filled=true`, GPU-pack их отфильтрует (известный фикс), но **CPU**-компаратор (`IsDuplPair`, `m_mainSize` = опция², `adImageComparer.cpp:56/275`) читает первые `m_mainSize` байт из большего буфера — сравнивает верхний левый квадрант → мусорные разности. Плюс `fileThumbSize` без верхней границы: битый заголовок кормит `new TPixelData(side)` без try/catch → `bad_alloc` вылетает из экспорта DLL.
-
-```cpp
-if (fread(&fileThumbSize, 4, 1, f) != 1 ||
-    fileThumbSize == 0 || fileThumbSize > 1024 ||
-    fileThumbSize != m_pOptions->advanced.reducedImageSize)
-{ fclose(f); return false; }
-```
-
-(Паритет с C-фиксом C6: оба конца должны отвергать несовпадение размера.)
-
-### N8 [P2] Постоянный leak пиннед-буферов на каждый поток каждого поиска
-`adNvJpeg.cpp:209-223`
-
-`thread_local` сырой указатель на `cudaHostAlloc`-память (до `w*3*h`, десятки МБ на современных фото) никогда не освобождается; collect-потоки создаются/умирают на каждый `Search()` → накопительный leak page-locked памяти.
-
-```cpp
-static thread_local struct PinnedBuffer {
-    unsigned char* p = nullptr; size_t size = 0;
-    ~PinnedBuffer() { if (p) cudaFreeHost(p); }
-} s_pin;
-```
-
-### N9 [P2] `MoveCurrentGroup`/`RenameCurrentGroupAs` — leak и порча undo-состояния на раннем выходе
-`adUndoRedoEngine.cpp:622-628` и `686-692`
-
-В отличие от остальных путей отказа в файле, ранний `return false` при `pImageGroup == NULL` не удаляет свежесозданный change и не восстанавливает `pOldChange` → `m_pCurrent->change` указывает на пустой объект, последующие действия копятся в чужой change.
-
-```cpp
-if(pImageGroup == NULL) {
-    delete m_pCurrent->change;
-    m_pCurrent->change = pOldChange;
-    return false;
-}
-```
-
-### N10 [P2] Undo рапортует успех, но файлы из корзины не восстанавливаются
-`adRecycleBin.cpp:57-62` (стаб `Restore` → `false`) + `adUndoRedoEngine.cpp:345-351` (результат игнорируется)
-
-`Undo` возвращает `true` при неудачном restore — в списке результатов воскрешаются пары, чьи файлы удалены (пропадут только по Refresh). Минимум — распространить отказ:
-
-```cpp
-for(...deletedImages...) {
-    if (!m_pRecycleBin->Restore(*it)) { m_pStatus->Reset(); return false; }
-    ...
-}
-```
-
-Реальный restore (IFileOperation из корзины) — см. §7 (не автоматизируется безопасно).
-
-### N11 [P2] ✅ Исправлено 2026-08-18 — `TDatabaseRegistry::UpdateCount`: префикс-коллизия в обе стороны + неатомарная незакавыченная запись XML
-`adDatabaseRegistry.cpp:185-194`, `97-115`
-
-(a) `searchPath.find(dbPath) == 0 || dbPath.find(searchPath) == 0` без границы разделителя — `C:\Foo` обновляет счётчик БД `C:\Foo2`, первый матч выигрывает. (b) `Save()` пишет `ad_database.xml` усечением на месте, без экранирования `Name` (`&`, `<`, `"` калечат файл) и без temp+rename — краш или параллельно работающий коллектор (он переписывает тот же файл, `main.cpp:1051`) теряет записи. Фикс: хелпер N5 + запись через `ad_database.xml.tmp` + `MoveFileEx(REPLACE_EXISTING)` + экранирование атрибутов.
-
-### N12 [P2] `adDatabaseRegistryLoadW`: NULL-разыменование / переполнение буфера вызывающего
-`AntiDupl.cpp:641-651`
-
-`*pCount = size` затирает capacity до использования как границы; `pPaths != NULL && pCount == NULL` → краш; `wcscpy_s(pPaths[i], MAX_PATH_EX, ...)` прерывает процесс, если буфер вызывающего меньше. Экспорт не объявлен в `AntiDupl.h` и не используется C# (он парсит XML сам) — мёртвая поверхность без контракта. Фикс: honor capacity + null-check, либо удалить экспорт:
-
-```cpp
-adSize capacity = pCount ? *pCount : 0;
-if (pCount) *pCount = databases.size();
-for (size_t i = 0; i < databases.size() && i < capacity; i++) { ... }
-```
-
-### N3-мелочи [P3] — ядро
-
-| # | Место | Проблема | Фикс |
-|---|------|----------|------|
-| N13 | `adGPU.cu:477-517` | `GpuCompareSquaredSum` возвращает `0.0` (= «идентичны») на всех путях отказа | возвращать `1e10` как в null-пути |
-| N14 | `adGPU.cu:657-661, 922-927` | `cudaMemcpy` poolMask не проверен; неудачный `cudaMalloc` тихо отключает фильтр пулов в ядре | проверять оба, фейлить вызов |
-| N15 | `adEngine.cpp:253-294` | `MatchCallback` нет гейта `type > AD_IMAGE_NONE` (есть в `CanCompare`); прогресс = «найденные пары», а не «сравнённые» → бар стоит на 0% и прыгает | добавить gate; кормить прогресс числом обработанных кандидатов |
-| N16 | `adImageData.h:44` + `main.cpp:324` + `adDataCollector.cpp:229` | crc32c: u32 против u64 на диске; коллектор считает CRC **превью**, DLL — **файла** → штраф `ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32` ведёт себя по-разному для БД-кэш и свежих картинок | см. C5 — унифицировать на CRC файла |
-| N17 | — | Мёртвый код: `UpdateGpuDatabase` (до N3), `GpuCompareOneVsMany`/`CompareOneVsMany`, фейковый стриминговый цикл (N1), экспорты N12; дубль-парсинг заголовков `LoadCollectorNative` vs `LoadCollectorData` (`:521-544` vs `:578-599`) | удалить; извлечь `ReadCollectorString(FILE*)` |
-| N18 | `adThreadManagement.h:68` | ✅ 2026-08-18: `TThreadQueue::Size()` читает `m_pQueue->size()` без CS — формальная гонка | обернуть в `TCriticalSection::TLocker` |
-| N19 | `adEngine.h:64` | ✅ 2026-08-18: `m_skipComparisonDuringCollection` — обычный `bool` через потоки | `std::atomic<bool>` |
-| N20 | `adFileStream.cpp:145-149` | legacy (v≤3) DLL-БД: average/variance не читаются и не пересчитываются → SSIM деградирует тихо | пересчитывать при `filled && average==0 && varianceSquare==0` |
-| N21 | `adSearcher.cpp:217-229` | эвристика `globalIdx >= prevCount` для «новых» записей связывает счётчик вставок с размером вектора — хрупко | помечать вставленные записи явно |
-
-### Проверено чисто (ядро)
-`RemapPath` (граница, регистр, слэши); конвейер DLL-native save/load (throw-on-short-IO, backup-порядок, `LoadSizeChecked`); `UpdateIndex` (деление защищено валидацией опции [16..128]); сериализация `TGpuManager` одним рекурсивным мьютексом; паритет CPU↔GPU порогов MS/SSIM (формулы, направление, штраф CRC — совпадают); fan-out `TCompareManager::Add` (пара сравнивается ровно один раз); `TSearcher::SearchImages` (рекурсия, фильтры, `FindClose`); `adOptions::Validate`; владение `TImageData` (`m_owner`, memcpy fast|main); стандартные экспорты `AntiDupl.cpp` (CHECK_HANDLE/LOCK-протокол).
+1. **Каналы R/B перепутаны в двух независимых декодерах** (лист 1: CPU-JPEG через TurboJPEG; лист 4: WIC для всех non-JPEG в коллекторе) — **исправлено** (P1-1, P1-2).
+2. **VRAM-модель хрупка в двух местах** (лист 2): realloc-wipe в режиме трансформаций при >~1024 образах (P2-5, **исправлено и подтверждено тестами 0/550→550/550, 0/512→512/512**) + «ноль = идентичны» при CUDA-ошибках (P1-5, остаётся). Дефолтный AllVsAll-путь корректен — понижение исходной P1-3 (см. P2-16).
+3. **Три писателя одного XML-реестра БД, экранирование есть только у одного** (лист 3: GUI; лист 4: коллектор; leaf-1: DLL-писатель с EscapeXmlAttr) — путь с `&`, `<`, `"` ломает реестр из двух из трёх писателей.
 
 ---
 
-## §2. NvJpegCollector (`src/NvJpegCollector/main.cpp`) — 2×P1, 8×P2, 17×P3
+## Methodology
 
-### C1 [P1] ✅ Исправлено 2026-08-18 — `--update`: для ИЗМЕНЁННЫХ файлов пишутся ОБЕ записи — старая и новая
-`main.cpp:699-704` (плейсхолдер) vs `main.cpp:746-747` (вставка декодированных)
+- **Charter:** `ReviewPrompt.txt` (широкое senior-ревью, новый Audit.md, report-only, без билда).
+- **Оркестрация:** unlazy-план `.unlazy/audit-2026-09-05/PLAN.md` (rev 3: после гибели двух волн субагентов от лимита 8 req/min драйвер исполнял листы последовательно сам).
+- **Каждый лист:** полное чтение файлов подсистемы → находки с цитатами `путь:строка` → формальная верификация (`scripts/verify-report.mjs`, включая режим `--citations` — проверка существования файла и достаточности строк).
+- **Интеграция (node-1):** все шесть листов проходят G1 вместе; все цитаты шести листов проверены `scripts/verify-multiple-citations.mjs`.
+- **Диск:** измерение `Get-ChildItem -Recurse` по каждой записи верхнего уровня, категории разбивают записи без пересечений, сумма сверена (`.unlazy/audit-2026-09-05/disk-report.json`).
+- **Независимость:** старые `Audit.md`, `Audit/`, `PROJECT_CONTEXT.md`, `IMPLEMENTATION_PLAN.md` не использовались как источник фактов; совпадения с ними (например, jpegPeaks) независимо перепроверены по коду (`src/AntiDupl/AntiDupl.h:552-565`, контракт-пин 69240B в `tests/AntiDupl.Contract.Tests/Program.cs:180`).
 
-```cpp
-// MODIFIED: need to re-decode
-images.push_back(existingImg); // placeholder, will be overwritten after decode  ← НИКОГДА не перезаписывается
-toDecode.push_back(it->second);
-...
-images.insert(images.end(), updJpegImages.begin(), updJpegImages.end());   // только append
-```
+## Repository overview
 
-Каждый изменённый файл попадает в `0000.adi` дважды: устаревшая запись и свежая. DLL `Find()` берёт первую попавшуюся (при `hash=0` у всех — недетерминированно), т.е. у изменённого файла может навсегда остаться старое превью/размер. Счётчик в index/реестре завышен. Если декод изменённого файла падает — остаётся только устаревшая запись. Перепроверено вручную: перезаписи плейсхолдера нет.
+GPU-ускоренный поиск дубликатов изображений (форк AntiDupl.NET), Windows x64, v2.6.0 (`src/version.txt:1`).
 
-**Фикс:** не пушить плейсхолдер — декодированная запись его заменяет:
+| Слой | Папка | Роль |
+|------|-------|------|
+| Нативное ядро (DLL) | `src/AntiDupl/` | CPU-декод (TurboJPEG/GDI+/WIC через adImageUtils), CUDA-ядра сравнения (`src/AntiDupl/adGPU.cu`), хранилище БД (`src/AntiDupl/adImageDataStorage.cpp`), XML-реестр (`src/AntiDupl/adDatabaseRegistry.cpp`), движок поиска (`src/AntiDupl/adEngine.cpp`) |
+| GPU-коллектор (exe) | `src/NvJpegCollector/` | Отдельный процесс: сборка/обновление attachable-БД (`databases/<Name>/index.adi`+`0000.adi`), nvJPEG Y-decode для JPEG + WIC для остальных |
+| C#-биндинги | `src/AntiDupl.NET.Core/` | P/Invoke (`src/AntiDupl.NET.Core/Original/CoreDll.cs`), `CoreLib`-обёртка, `DynamicModule` загрузка DLL |
+| WinForms GUI | `src/AntiDupl.NET.WinForms/` | Основной UI: поиск, Database Manager (запуск коллектора), автоселект, превью различий, миниатюры |
+| WPF GUI | `src/AntiDupl.NET.WPF/` | Вторичный UI, хуже поддерживается |
+| Контракт-тесты | `tests/AntiDupl.Contract.Tests/` | 65 проверок макета interop-структур; не в sln, не в CI |
 
-```cpp
-} else { // MODIFIED
-    toDecode.push_back(it->second); // не пушить existingImg: декодированная запись заменит её
-    modified++;
-}
-```
+Продуктовая модель форка: БД — не один встроенный store, а произвольное число подключаемых `databases/<Name>/`, которые создаёт/обновляет **отдельный** NvJpegCollector.exe (GUI его запускает и парсит stdout), а DLL читает обе ветки кода (двух несовместимых форматов `.adi`) и умеет сравнивать между БД (pool modes). DLL сама **не** делает GPU JPEG-декод (`src/AntiDupl/adNvJpeg.cpp` — мёртвый `#ifdef AD_NVJPEG_ENABLE` код; макрос определён только в `src/NvJpegCollector/NvJpegCollector.vcxproj:42` и там не используется).
 
-(Если декод упал — записи нет вообще; файл и так битый и попадает в failed.log.)
+## Findings by subsystem
 
-### C2 [P1] ✅ Исправлено 2026-08-18 — `LoadExistingDatabase`: use-after-close / двойной fclose на битой БД (UB, вероятен краш)
-`main.cpp:254-260`, `:298`
+Ниже — консолидированные находки. Полные детали (обоснование, контекст, все P3) — в `.unlazy/audit-2026-09-05/reports/leaf-1.md` … `leaf-6.md`.
 
-```cpp
-auto readStr = [&](FILE* fp) -> std::wstring {
-    uint64_t len = 0; fread(&len, 8, 1, fp);
-    if (len > 10000) { fclose(fp); return L""; }  // закрыл общий FILE*, цикл продолжает читать
-```
+### P1-1 [native-core] TurboJPEG RGBA-декод интерпретируется как BGRA — R/B перепутаны во всех CPU-JPEG — **ИСПРАВЛЕНО 2026-09-05**
+`src/AntiDupl/adTurboJpeg.cpp:82` — `tjDecompress2(..., TJPF_RGBA, ...)` кладёт **R,G,B,A**, а буфер далее заворачивается как Simd `Bgra32` (B,G,R,A). Все CPU-декодированные JPEG получали перевёрнутые каналы: grayscale-превью, blockiness, blurring, SSIM-статистика, CRC миниатюры — на R/B-перевёрнутых пикселях.
 
-На обрезанном `0000.adi` цикл записей (274–297) читает из закрытого хэндла, затем `fclose(f)` закрывает второй раз. Плюс все `fread` без проверки — усечение посреди записи даёт мусорные `size/time/hash`.
+**Фикс (внедрён и проверен):** `TJPF_RGBA` → `TJPF_BGRA` в `src/AntiDupl/adTurboJpeg.cpp:85` (тот же 4-байтовый пиксель, тот же pitch, alpha=0xFF — зеркало GDI+-пути). Проверка (harness C, до/после): до фикса пары `r_jpg↔u_png`/`u_jpg↔r_png` (красный JPEG совпадал с синим PNG) — после фикса пары `r_png↔r_jpg`, `u_png↔u_jpg` на 0.0%, кросс-пар нет — clean, exit=0. **Все существующие БД с JPEG-записями необходимо пересобрать** (CRC миниатюр меняется).
 
-```cpp
-bool bad = false;
-auto readStr = [&](FILE* fp) -> std::wstring {
-    uint64_t len = 0;
-    if (fread(&len, 8, 1, fp) != 1 || len > 10000) { bad = true; return L""; }
-    std::wstring s((size_t)len, L'\0');
-    if (len && fread(&s[0], sizeof(wchar_t), (size_t)len, fp) != len) { bad = true; return L""; }
-    return s;
-};
-// после каждого поля: if (bad || ferror(f)) { fclose(f); return false; }
-```
+### P1-2 [nvjpeg-collector] WIC-декод non-JPEG в формате BGR помечается как Rgb24 — R/B перепутаны во всех записях БД для PNG/BMP/TIFF/WebP/GIF — **ИСПРАВЛЕНО 2026-09-05**
+`src/NvJpegCollector/main.cpp:110` конвертирует WIC в `GUID_WICPixelFormat24bppBGR` (память **B,G,R**), но буфер заворачивался как `ad::TView::Rgb24` и обрабатывался `Simd::RgbToGray`. По собственным структурам Simd (`struct Rgb24 { red; green; blue; }` — red первый) канал 0 для Simd = red, а WIC туда положил blue. Доказательство правильной конвенции внутри того же продукта: GDI+-путь DLL делает `SimdBgrToBgra` (`src/AntiDupl/adGdiplus.cpp:118`), CPU-JPEG-путь — `RgbToBgra` на настоящий Rgb24 (`src/AntiDupl/adImageUtils.cpp:66`).
 
-### C3 [P2] БД пишется неатомарно: усечение на месте, index раньше data, без backup
-`main.cpp:787, 800` (update) и `940, 953` (full): `_wfopen_s(..., L"wb")`
+**Фикс (внедрён и проверен):** `ad::TView::Rgb24` → `ad::TView::Bgr24` и `Simd::RgbToGray` → `Simd::BgrToGray` в обеих точках (`src/NvJpegCollector/main.cpp:785`, `:948`). Проверка (harness D на живом билде коллектора): DB-миниатюры `r_png`=76.0 / `u_png`=29.0 (совпадают с JPEG-записями), пары same-color на 0.0% — clean, exit=0. **Все существующие БД с non-JPEG записями пересобрать** (решение владельца: старые БД выбрасываются, пересборка вручную).
 
-`"wb"` мгновенно убивает прежнюю БД; краш посреди записи (в update-режиме прежняя БД — единственная копия всех UNCHANGED превью) = потеря всей базы. DLL-наттив путь хранит `backup.adi`; коллектор — нет. `fwrite` не проверяются (диск full → тихо обрезанная БД).
+### P2-16 [gpu-cuda, понижено с P1 после практического разбора 2026-09-05] `TEngine::UpdateGpuDatabase()` — мёртвый код; его работу выполняют инкрементальные заливки
+`src/AntiDupl/adEngine.cpp:174-235` — функция не имеет ни одного вызова. Первоначальная оценка аудита («GPU-путь "образ против БД" читает пустую VRAM → мусорные совпадения») оказалась **преувеличенной**: детальный разбор вызовов показал, что в дефолтном GPU-режиме (AllVsAll, `src/AntiDupl/adEngine.cpp:625-630`) VRAM-буфер по `globalIdx` вообще не используется — `ExecuteGpuAllVsAllComparison()` (`src/AntiDupl/adEngine.cpp:352-380`) собирает валидные миниатюры в компактный host-массив и передаёт его одним куском, ядро индексирует `0..N-1`. Единственный читатель буфера по `globalIdx` — `CompareWithSetGPU` (`src/AntiDupl/adImageComparer.cpp:157`), работающий только в режиме трансформаций, и его заливка происходит инкрементально в двух местах, уже существующих: для изображений из БД — `src/AntiDupl/adThreadManagement.cpp:392-406` (комментарий прямо документирует этот фикс), для свежедекодированных — `src/AntiDupl/adDataCollector.cpp:153-178`. Следствие: корректность дефолтного сценария подтверждается кодом; находка — гигиеническая (дублирование логики + мёртвая функция), а реальный дефект VRAM-модели — отдельная P2-5.
 
-**Фикс:** писать `0000.adi.tmp` → `fflush` → `MoveFileExW(tmp, ..., MOVEFILE_REPLACE_EXISTING)`; data-файл первым, index последним (коммит-точка); проверять `fwrite(...) == 1`.
+**Фикс:** удалить `UpdateGpuDatabase()` (мёртвый код) или консолидировать три точки заливки в один метод. Решение по вкусу владельца; на корректность не влияет.
 
-### C4 [P2] ✅ Исправлено 2026-08-18 — Update при полном удалении файлов не пишет ничего — старая БД выживает
-`main.cpp:782`: `if (!images.empty()) {...}` — если все файлы источника удалены, записи и реестр не обновляются, DLL продолжает грузить призраки. Фикс: писать count=0 (или удалить папку БД + запись реестра).
+### P1-4 [gpu-cuda] AllVsAll молча обрезает >5M совпадений и возвращает success
+`src/AntiDupl/adEngine.cpp:412` (`BATCH_MATCHES = 5'000'000`), ядро `src/AntiDupl/adGPU.cu:134` (`atomicAdd` + `if (idx < maxMatches)` — сверхлимитные молча теряются), кламп при вычитке `src/AntiDupl/adGPU.cu:713`. На большом корпусе с рыхлым порогом часть кандидатов исчезает, поиск завершается успехом.
 
-### C5 [P2] Контракт: crc32c коллектора — CRC превью; DLL — CRC файла
-`main.cpp:324` против `adDataCollector.cpp:222-235`; потребитель — `adEngine.cpp:456/480` (`ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32` как сигнал байт-идентичности)
+**Фикс:** полосовой проход (band) по строкам матрицы — ядро получает `iBegin/iEnd`, хост повторяет запуск до исчерпания; логировать остаточный дроп (готовый патч в `leaf-2`).
 
-В смешанных БД: байт-идентичные файлы получают штраф «разный CRC», а перекодированные файлы с идентичными превью — бонус «одинаковый CRC». Сырые байты файла уже есть в `item.raw` — CRC файла бесплатен:
+### P1-5 [gpu-cuda] `GpuCompareSquaredSum` возвращает 0 («идентичны») при любой CUDA-ошибке
+`src/AntiDupl/adGPU.cu:477,482+` — при провале `cudaMemcpy`/`cudaDeviceSynchronize` (нетерпеливый `return h_r` с нулём) пара считается полностью совпадающей. Ошибка CUDA превращается в **ложные дубликаты**, а не в диагностику.
 
-```cpp
-info.crc32c = SimdCrc32c(item.raw.data(), (size_t)item.raw.size());  // вместо thumbnail
-```
+**Фикс:** статус-код ошибки наружу + в движке — отказ от GPU-результата и фолбэк/стоп с логом; ноль-результат допустим только при подтверждённом успехе.
 
-(Для WIC-пути — прочитать файл; см. §7 про совместимость со старыми БД.)
+### P1-6 [cs-interop] GUI `SaveDatabases` пишет XML-реестр без экранирования — пути с `&<>\"` тихо ломают ad_database.xml
+`src/AntiDupl.NET.WinForms/Forms/DatabaseManagerForm.cs:885-899` — raw-конкатенация атрибутов. Нативный писатель экранирует (`src/AntiDupl/adDatabaseRegistry.cpp:58-71`), нативный ридер **не декодирует** энтити (`GetXmlAttr`, `src/AntiDupl/adDatabaseRegistry.cpp:47-55`) — т.е. даже корректно экранированный `&amp;` читается буквально; неэкранированный `&` ломает парсинг. В сумме: любой путь с `&`, `<`, `>` из GUI-писателя портит реестр для DLL-ридера.
 
-### C6 [P2] Контракт: алгоритм превью отличается от DLL (один Resize против 256+пирамида 2x2)
-`main.cpp:319-322` против `adDataCollector.cpp:51-52, 133-137`
+**Фикс:** (а) добавить экранирование в GUI-писатель (зеркало `EscapeXmlAttr`); (б) добавить декодирование в `GetXmlAttr`; (в) долго: единый read/write реестра в одном модуле, а не три писателя.
 
-Разные пиксели → разные `average`/`varianceSquare` (входы SSIM) и превью; одна и та же картинка, заполненная коллектором и DLL, сравнивается по-разному. Фикс в `ProcessGray`: повторить пирамиду — `Simd::Resize(gray -> 256)` (INITIAL_REDUCED_IMAGE_SIZE, `adConfig.h:101`), затем `Simd::ReduceGray2x2` до `side`.
+### P1-7 [winforms-gui] Highlight-difference воркер шлёт событие дважды — опция «Max fragments» мертва
+`src/AntiDupl.NET.WinForms/GUIControl/ResultsPreviewDuplPair.cs:344-367` — при `HighlightAllDifferences == false` сначала шлётся ограниченный список (`:356`), затем безусловно полный (`:360-367`), который перетирает первый. Хендлер `:370-386` отписывается после первого вызова, но второй вызов уже в полёте. Пользовательская опция не работает вообще, а ранний выход `:341-342` (слишком много фрагментов) оставляет подсветку от предыдущей пары.
 
-### C7 [P2] DLL доверяет thumbSize файла и игнорирует свой `reducedImageSize` — следствие N7
-(полное описание в N7; здесь — сторона контракта: оба конца должны отвергать несовпадение, включая `--size` коллектора — см. C13.)
+**Фикс:** собрать итоговый список один раз (с лимитом при `!HighlightAllDifferences`), послать событие один раз; early-out посылает пустой список (сброс подсветки).
 
-### C8 [P2] ✅ Исправлено 2026-08-18 — Непроверенные CUDA-результаты: буфер предыдущей картинки записывается как данные текущей
-`main.cpp:528, 533`
+### P2-1 [native-core] Хранилище: multimap по CRC32 пути; Get() реинсертит запись под устаревшим хэшем
+`src/AntiDupl/adImageInfo.cpp:67,82`; `src/AntiDupl/adImageDataStorage.cpp:89-102,720`. При переименовании (update path) запись вставляется под новым хэшем, а старый ключ остаётся — запись дублируется в двух корзинах, поиск по пути находит обе. Рост БД и ложные дубликаты в UI.
 
-При device-lost/async-ошибке `cudaEventSynchronize` вернёт ошибку, но `slot.gray` всё ещё держит пиксели **предыдущего** изображения — `ProcessGray` захеширует их и запишет под путём текущего → у двух разных картинок идентичные превью/CRC → гарантированный ложный дубликат в БД.
+**Фикс:** при Get()-update удалять старый ключ перед вставкой; либо (чище) перейти на `unordered_multimap` с вычисляемым ключом и одной точкой мутации.
 
-```cpp
-if (cudaEventSynchronize(slot.done) != cudaSuccess) { logFail(fp, 6, (long)cudaGetLastError()); continue; }
-```
+### P2-2 [native-core] Трейс-лог: неограниченный append в trace.log + хардкод gpu_debug.log
+`src/AntiDupl/adEngine.cpp:528,543,597,614` (gpu_debug.log рядом с exe, без ротации), trace.log — append без границ. На длинной истории папка exe распухает; gpu_debug.log пишется даже без ошибок GPU.
 
-(+ проверять код постановки `cudaMemcpy2DAsync`.)
+**Фикс:** ограничить размер (truncate при >N МБ), писать gpu_debug-блоки только при `#ifdef AD_GPU_DEBUG`, имя — из настроек.
 
-### C9 [P2] ✅ Исправлено 2026-08-18 — `fs::file_size()` бросает на исчезнувшем файле → весь прогон падает
-`main.cpp:693` (классификация update) и `ProcessGray` `:306` из WIC-циклов `:762`, `:918`
+### P2-3 [native-core] `dbLoaded` шорт-ircuit сканирование файлов
+`src/AntiDupl/adEngine.cpp:603-622` — при загруженной БД сканирование каталогов пропускается; удалённые с диска файлы остаются в БД до ручного update (см. также leaf-3 retraction о CHECK_HANDLE). Продуктовое решение спорное, но тихое: пользователь не получает индикации, что скан не выполнялся.
 
-Незакрытые `filesystem_error` долетают до обработчика `wmain` → «FATAL ERROR», exit 2, вся декодированная работа теряется. В `ProcessJpegList` внутри try/catch — только там безопасно.
+**Фикс (минимум):** статус-сообщение «использована БД, скан каталогов пропущен»; максимум — убрать шорт-сircuit за флагом.
 
-```cpp
-std::error_code ec; uint64_t sz = fs::file_size(path, ec); if (ec) { /* log + skip */ }
-```
+### P2-4 [gpu-cuda] Sanity-check расхождение CPU/GPU не отключает GPU
+`src/AntiDupl/adEngine.cpp:117-121` — при провале sanity-check просто лог; GPU продолжает участвовать в поиске. Ошибка усугубляется P1-5.
 
-### C10 [P2] ✅ Исправлено 2026-08-18 — `thumbSizeVal` из файла без валидации → `resize(0x7FFF...)` → необработанный `length_error`
-`main.cpp:289-291` — в отличие от DLL-ридера (`:647-651`), собственный загрузчик доверяет полю длины: `img.thumbnail.resize((size_t)thumbSizeVal);`. Фикс: `if (thumbSizeVal != (uint64_t)ts*ts) { fclose(f); return false; }`.
+**Фикс:** после N провалов подряд — `DisableGpu()` + статус в UI.
 
-### C11-C17 [P3] — коллектор
+### P2-5 [gpu-cuda] `EnsureCapacity` realloc затирает VRAM-буфер — **ИСПРАВЛЕНО 2026-09-05**
+`src/AntiDupl/adGPUManager.cpp:95-105` + `src/AntiDupl/adDataCollector.cpp:163-170`. Рост буфера посреди сессии = все ранее залитые образы потеряны, а последующие сравнения читают мусор. **Уточнение после практического разбора 2026-09-05:** единственный затронутый сценарий — GPU-assist CPU-пути в режиме трансформаций; дефолтный AllVsAll не читает этот буфер вовсе. Ёмкость растёт ступенями 1024 → ×1.2 (`src/AntiDupl/adGPUManager.cpp:96`), триггер — **режим трансформаций + корпус > ~1024 изображений за сессию**: после realloc-wipe сравнения читали неинициализированную VRAM → **100% потеря пар** (подтверждено тестом: 0/550 на 1100 образах; 0/512 при 1025).
 
-| # | Место | Проблема | Фикс |
-|---|------|----------|------|
-| C11 | `main.cpp:55-74, 380-386, 146/161` | Мёртвое: `GenerateAdiFileName`, `ResolveWorkers` (help обещает «cores−1», фактически `DetectPhysicalCores()`), `--batch` парсится и не используется (batch захардкожен 1) | удалить/синхронизировать help |
-| C12 | `main.cpp:193-199` | Глобальные nvJPEG state+stream инициализируются и никогда не используются (каждый декодер создаёт свои) | удалить |
-| C13 | `main.cpp:160` | ✅ 2026-08-18 (clamp 16..128): `--size` без валидации: 0 → десинк ридера DLL; 50000 → UB переполнения `int` | clamp 8..256, степень двойки |
-| C14 | `main.cpp:476-478` | `threads.emplace_back` может бросить после старта reader'а → деструктор joinable thread → terminate | try/catch + join что есть |
-| C15 | `main.cpp:134-142` | `GetImageType` — только точный регистр: `.Jpg`/`.Tiff` → 0 → файл тихо не собирается (даже не failed) | `_wcsicmp` |
-| C16 | `main.cpp:777-829 vs 931-979` | Дубль save-кода (update vs full) и реестр-XML блока | извлечь `SaveDatabase(...)` |
-| C17 | `main.cpp:833-870 vs 984-1055` | Реестр XML: наивный `find(Path="")`+`Count`, без экранирования `&<>"`, full-path rebuild дропает всё не-self-closing | XElement + escaping (синхронно с N11) |
+**Фикс (внедрён и проверен):** `GpuCreateBuffer` (`src/AntiDupl/adGPU.cu:260-385`) перестроен — новые буферы аллоцируются первыми, старые миниатюры копируются D2D (`cudaMemcpyDeviceToDevice`), только затем старые освобождаются; error-пути восстанавливают старые буферы + stride (`g_thumbSize`) вместо тихой потери. Транзитный пик VRAM учтён в проверке `freeMem*0.8`. `ClearBuffer` (сессионный сброс) сохраняет семантику wipe: `GpuReleaseBuffer()` обнуляет глобалы до create → preserve-ветка не срабатывает. Добавлены `GpuCurrentCapacity()`/`GpuCurrentThumbSize()` (`src/AntiDupl/adGPU.h:56-59`), по которым `EnsureCapacity`/`ClearBuffer` синхронизируют manager-поля после сбоя аллокации (раньше сбой рассинхронизировал `m_capacity` с реальностью: последующие вызовы no-op'ались и загрузки молча падали). Проверка (harness B): 1100 → 550/550 (было 0/550), Edge-1025 → 512/512 (было 0/512), Edge-1024/1000-контроль без изменений; B2 (CPU-only) без регресса; A (AllVsAll) без регресса.
 
-Прочее [P3]: WIC `pConverter` leak при неудачном `Initialize` (`:108-112`); failed.log теряет не-ASCII пути (`std::wofstream`, `:581-583` — писать UTF-8 через `WideCharToMultiByte`); трижды повторяющаяся сортировка `images` в update (`:723,771,784`); регистрозависимое сравнение путей в update (`D:\` vs `d:\` → всё NEW+DELETED, `:674-710`); очередь ограничена штукой, не байтами (`kQueueCap=nThreads*2` × 250MP ≈ 4 ГБ, push вне try → terminate); «(100%)» печатается даже при неудачах (`:568`); `--help` через `PauseAndExit` MessageBox (`:606`); crc32c=0 для полностью чёрных превью трактуется DLL как «не собрано» (`adThreadManagement.cpp:361`); бессмысленный копи `string what(...)` в `wmain` catch (`:228`).
+### P2-5b [gpu-cuda] «Образы вне VRAM»: отказ роста/заливки буфера молча теряет пары — **ИСПРАВЛЕНО 2026-09-06**
+Сопутствующий дефект к P2-5, найден при разборе последствий фикса. В режиме трансформаций (`CompareWithSetGPU`, `src/AntiDupl/adImageComparer.cpp:157`) каждый кандидат сравнивается по `globalIdx`-слоту VRAM-буфера, но ничего не проверяет, что слот реально залит: (а) `globalIdx ≥ capacity` после неудачного роста `EnsureCapacity` — `GpuCompareOneVsList` читает 1e100-заглушки/мусор, пары теряются молча; (б) неудачная `UploadThumbnail` (слот < capacity) оставляет мусор в слоте. Отказ роста детерминирован только при почти исчерпанной VRAM (напр., rIS=128, 200-500К образов = буферы 3-8GB, или чужой процесс, съевший VRAM); при дефолтном rIS=32 практических триггеров почти нет — но при срабатывании результат неполон без единого предупреждения.
 
-### Проверено чисто (коллектор)
-Шатдаун очереди (нет дедлока, `DoneGuard` на исключениях); расшаренное состояние (`outMtx`, атомики, `nextIdx` только у reader'а); паттерн per-thread nvJPEG state+stream; время жизни `item.raw` против `cudaEventSynchronize`; pitch-математика (`((w*3+31)/32)*32`, alloc `imgPitch*h`, `cudaMemcpy2DAsync` согласованы); wire-формат писателя ↔ DLL-ридера поле-в-поле (включая average/variance после пропущенного превью); семантика update (удалённые записи выкидываются, UNCHANGED переиспользуют превью, несовпадение thumbSize → graceful full rebuild); COM-баланс; широкие пути (`_wfopen_s`).
+**Фикс (внедрён и проверен):** uploaded-set в `TGpuManager` (`std::vector<bool> m_uploaded` под `m_mutex`; `UploadThumbnail` ставит/снимает бит, рост с тем же thumbSize сохраняет множество — D2D-копия переносит слоты, смена thumbSize/`ClearBuffer` очищают). `CompareWithSetGPU` делит кандидатов: залитые → GPU-батчи, незалитые → CPU-цикл `IsDuplPair` (тот же предикат, что в CPU-ветке `CompareWithSet`). Все заливки идут через `UploadThumbnail` (2 точки: `adThreadManagement.cpp:404`, `adDataCollector.cpp:170`) — множество ведётся автоматически. Проверка: дифференциальная fault-injection (временный `AD_TEST_INJECT_VRAM_LIMIT` в `EnsureCapacity`: отказ роста >1024 при живом старом буфере = состояние реального сбоя): фикс 1100/1100, эмуляция старого поведения при том же отказе — потеряны ровно 76 пар (все с `globalIdx ≥ 1024`), живое сжатие VRAM на WDDM недетерминировано (оверкоммит в системную память; зафиксировано в RESULTS.md). Инъекция откачена, финальная контрольная матрица зелёная (A/B/B2/C/D/E/Edge-1025).
 
----
+### P2-17 [nvjpeg-collector] WIC не декодирует WebP на большинстве систем — файлы молча выпадают из БД — **ИСПРАВЛЕНО 2026-09-06**
+`src/NvJpegCollector/main.cpp` — WIC-путь берёт любой non-JPEG формат, но для WebP требует опциональный Store-кодек «WebP Image Extension»; без него декод возвращал ошибку и файл **молча пропускался** (без лога и счётчика). Базы теряли полноту непонятно для пользователя.
 
-## §3. C# слой (Core + WinForms + WPF) — 5×P1, 13×P2, 16×P3
+**Фикс (внедрён и проверен):** `.webp` декодируется bundled libwebp (`webp/decode.h`, `WebPGetFeatures`+`WebPDecodeBGRAInto` → `Simd::BgraToGray`) — тем же декодером, что использует DLL в live-скане (`src/AntiDupl/adWebp.cpp`), сохраняя консистентность БД↔live. `libwebp.lib` добавлен в явный статический список vcpkg-библиотек проекта (интеграцией MSBuild проект не пользуется). На машине с установленным кодеком миниатюры WIC-пути и libwebp-пути байт-тождественны (8/8). Обе ветки коллектора теперь считают и репортят неудачные декоды. Проверка энд-ту-энд: коллектор 8/8 (0 отказов), DLL-сравнение БД: все webp~png одноцветные близнецы 0.0%, кросс-пар нет.
 
-### S1 [P1] ✅ Исправлено 2026-08-18 — AutoSelector: критерии Time и Pool молча игнорируются при включённом критерии качества
-`AutoSelector.cs:243-299`
+### P2-6 [gpu-cuda] Непроверенные `cudaMemcpy` readback счётчиков
+`src/AntiDupl/adGPU.cu:695,945` — если `cudaMemcpy` провалится, счётчик остаётся от предыдущего запуска: пары из прошлой итерации приписываются текущей.
 
-Диалог (`AutoSelectDialog.cs:49-101`) позволяет одновременно «выбрать старый файл» И «выбрать меньший файл», но `DetermineSide` при любом активном критерии качества возвращается из каждой ветки каскада — Time/Pool недостижимы. Решение ведёт удаление → **удаляется не тот файл**.
+**Фикс:** проверять код возврата, при ошибке — fail-ветка (см. P1-5).
 
-```csharp
-if (criteria.TimeSide != AutoSelectSide.DontCare) {
-    AutoSelectSide side = OlderSide(r);
-    if (side != AutoSelectSide.DontCare)
-        return (criteria.TimeSide == AutoSelectSide.First) ? side : Opposite(side);
-}
-if (hasQualityCriterion) { /* существующий каскад */ }
-```
+### P2-7 [cs-interop] `DynamicModule` глотает отсутствие экспорта → NRE в делегатах
+`src/AntiDupl.NET.Core/DynamicModule.cs:57-70` — `GetProcAddress` вернул NULL → обёртка создаётся с null-полем; вызов делегата = NRE без указания причины. Плюс `CoreLib`-ctor не проверяет `adCreateW == NULL`.
 
-(Альтернатива — блокировать конфликтующие группы в диалоге; выбрать одно.)
+**Фикс:** бросать осмысленное исключение «DLL <name> отсутствует экспорт <X> (несовместимая версия?)».
 
-### S2 [P1] ✅ Исправлено 2026-08-18 — Массовое удаление без подтверждения, на UI-потоке, без длинных путей
-`MainMenu.cs:391-400`, `ResultsListViewContextMenu.cs:180-188`
+### P2-8 [cs-interop] `AutoSelector` fetches `GetResult(0, 1000000)` × 5 сайтов — 138KB/строку маршаллинг
+`src/AntiDupl.NET.WinForms/AutoSelector.cs:69,118,160,181,200` — пять полных выгрузок всех результатов ради счётчиков/меток; на 100k результатов это сотни МБ аллокаций и секундные паузы.
 
-Классический путь (`ResultsListView.MakeAction`) предупреждает о безвозвратном удалении длинных путей и работает через фон `ProgressForm`; новый батч-путь вызывает `AutoSelector.ExecuteBatch(m_core, true)` синхронно: ноль подтверждений (безвозвратно при выключенной корзине или пути >260 — проверка `HasLongPaths` не выполняется), фриз UI на весь батч, без отмены. Фикс: `MessageBox.Show(...YesNo)` + обёртка в фоновое выполнение как в классическом пути.
+**Фикс:** вернуть из Core managed-счётчики (отдельная лёгкая экспорт-функция) или ленивый enumerator.
 
-### S3 [P1] ✅ Исправлено 2026-08-18 — `CoreOptions.Set`: NRE в fallback-ветке, проглоченный логом → поиск идёт не по тем папкам
-`CoreOptions.cs:143-148`
+### P2-9 [nvjpeg-collector] CrashHandler + `catch(...)` MessageBox: для GUI-запуска это вечное зависание
+`src/NvJpegCollector/main.cpp:218-239` — модальный MessageBox в невидимой консоли; GUI ждёт EOF из stdout коллектора (`src/AntiDupl.NET.WinForms/Forms/DatabaseManagerForm.cs:496-513`) — вечно.
 
-```csharp
-CorePathWithSubFolder[] tmpSearch = new CorePathWithSubFolder[1];
-if (... Directory.Exists(searchPath[0].path))
-    tmpSearch[0] = searchPath[0];
-else
-    tmpSearch[0].path = Application.StartupPath;   // tmpSearch[0] == null → NRE
-```
+**Фикс:** при `--update` не показывать MessageBox; писать `[FATAL]` в stdout + ненулевой exit; MessageBox оставить только интерактивному запуску.
 
-NRE ловится внешним catch (`:162`) и пишется только в `path_debug.log`; поиск продолжает использовать прежние пути нативной стороны без видимой ошибки.
+### P2-10 [nvjpeg-collector] `hash=0` для новых записей при update
+`src/NvJpegCollector/main.cpp:326` — все ProcessGray-записи получают hash 0 → в DLL-мульти-мап все новые записи в одной корзине, `Find()` деградирует до линейной на каждой вставке при загрузке (`src/AntiDupl/adImageDataStorage.cpp:684`).
 
-```csharp
-tmpSearch[0] = new CorePathWithSubFolder { path = Application.StartupPath };
-```
+**Фикс:** `info.hash = SimpleCRC32(info.path)` (функция уже есть, `src/NvJpegCollector/main.cpp:43-53`).
 
-### S4 [P1] ✅ Исправлено 2026-08-18 — Запуск коллектора из DatabaseManagerForm: классический дедлок пайпов
-`DatabaseManagerForm.cs:425-439` (Update) и `:681-694` (Update All)
+### P2-11 [winforms-gui] `MoveSelectedAction` выполняет весь батч в UI-потоке
+`src/AntiDupl.NET.WinForms/GUIControl/MainMenu.cs:438` — в отличие от delete (`:407-421` с потоком), move синхронно: сотни файлов = минуты замороженного окна.
 
-Последовательный `ReadToEnd` на stdout, потом stderr: если коллектор пишет в stderr больше ёмкости пайпа, пока stdout открыт — взаимоблокировка. `UpdateAllDatabases` вообще не дренит stderr. Плюс `WaitForExit()` блокирует UI-поток.
+**Фикс:** тот же паттерн фон+BeginInvoke, что у delete.
 
-```csharp
-var stderrTask = proc.StandardError.ReadToEndAsync();
-string stdout = proc.StandardOutput.ReadToEnd();
-string stderr = stderrTask.Result;
-proc.WaitForExit();
-```
+### P2-12 [winforms-gui] Ниточная гигиена: `ThreadState.Running`-гвард, non-volatile abort-флаги, статический Dictionary без синхронизации
+`src/AntiDupl.NET.WinForms/GUIControl/ResultsPreviewDuplPair.cs:301-306` (ThreadState.Running ненадёжен, Join пропускается), `:295` (`_highlightStop` не volatile), `src/AntiDupl.NET.WinForms/GUIControl/ThumbnailGroupTable.cs:355-366` (`m_abortUpdateThumbnailsThread` не volatile + Join без тайм-аута), `src/AntiDupl.NET.WinForms/AutoSelector.cs` (`s_sideCache` статический Dictionary между UI- и batch-потоком).
 
-### S5 [P1] ✅ Исправлено 2026-08-18 — Рабочие потоки без обработки исключений оставляют модальные диалоги навсегда
-`SearchExecuterForm.cs:148-201`, `ProgressForm.cs:222-313`, `StartFinishForm.cs:108-143`, WPF `SearchDllCommand.cs:156-174`
+**Фикс:** volatile-флаги, `IsAlive`-гвард, `ConcurrentDictionary` для sideCache.
 
-`CoreThreadTask` ставит `State.Finish` только на успехе; любое исключение убивает поток молча — таймер никогда не видит Finish, неклозабельный диалог висит, Stop/Cancel заблокированы. Конкретные триггеры: `LogPerformance` (`:482-497`) разыменовывает `statistic.searchedImageSize`, когда `CoreLib.GetStatistic()` вернул null (`CoreLib.cs:165-190`); null-делегаты DynamicModule (S7). Фикс: try/catch вокруг тела `CoreThreadTask` → состояние `Error` → закрытие с сообщением; null-check `statistic`.
+### P2-13 [build-ci-tests] CI не запускает contract tests
+`.github/workflows/AntiDupl_CI.yml:15-118` — единственный регрессионный набор репозитория (65 проверок interop) не выполняется ни в CI, ни в Deploy.cmd. Все три P1 этого аудита, живущие на границе native/managed, невидимы для CI.
 
-### S6 [P2] `CoreLib` передаёт нативному коду адреса НЕзакреплённых managed-массивов
-`CoreLib.cs:292-300, 344-349, 354-361, 395-403, 522-525`
+**Фикс (4 строки):** после Release-билда — `dotnet run --project tests\AntiDupl.Contract.Tests\AntiDupl.Contract.Tests.csproj`.
 
-`Marshal.UnsafeAddrOfPinnedArrayElement` валиден только для pinned-массивов; GC на другом потоке во время нативного вызова может перенести массив → повреждение кучи. Спасает то, что большие буфера попадают на LOH; `UIntPtr[1]` и мелкие буфера действительно подвижны.
+### P2-14 [build-ci-tests] CI Publish-джоба не проверяет, что native DLL попали в single-file пакет
+`.github/workflows/AntiDupl_CI.yml:77-96` — `dotnet publish` не копирует P/Invoke DLL (AGENTS.md Binary imports); если логика MakePublish сломается, CI зелёный, а у пользователя «Can't load AntiDupl.dll».
 
-```csharp
-fixed (UIntPtr* pStart = pStartFrom, pSize = pSizeArr)
-fixed (byte* pBuf = buffer) {
-    if (m_dll.adResultGetW(m_handle, (IntPtr)pStart, (IntPtr)pBuf, (IntPtr)pSize) == Error.Ok) { ... }
-}
-```
+**Фикс:** шаг-верификация присутствия `AntiDupl.dll`/`cudart64_12.dll`/`nvjpeg64_13.dll` в `out/Publish/` (зеркало `cmd/Deploy.cmd:75-97`).
 
-### S7 [P2] DynamicModule глотает отсутствующие экспорты → null-делегаты → дальние NRE
-`DynamicModule.cs:57-70`: `GetProcAddress == 0` → throw → catch → поле null; первый вызов даёт NRE без намёка на причину. Фикс: собрать недостающие имена и `throw new MissingMethodException("AntiDupl.dll", field.Name)`.
+### P2-15 [build-ci-tests] Contract tests — чистые layout-проверки без единого вызова в реальную DLL
+`tests/AntiDupl.Contract.Tests/Program.cs:169-199` — только `Marshal.SizeOf/OffsetOf` по managed-структурам и сравнение строки версий; пин против натива — ручной список констант. Правка `src/AntiDupl/AntiDupl.h` без правки тестов проходит мимо.
 
-### S8 [P2] `jpegPeaks` в interop-структуре читает нативный tail-padding
-`CoreDll.cs:411` vs `AntiDupl.h:552-565` — нативная `adImageInfoW` не имеет поля; вычисление показывает, что C# `uint` попадает ровно в 4 байта tail-padding (sizeof совпадает, stride верен — не дрейф размера), но значение — мусор паддинга. WinForms всегда видит 0 (`CoreImageInfo` не копирует), WPF использует `JpegPeaks` как критерий (`ImageInfoClass.cs:98`, `DuplResultMultiValueConverter.cs:52-56`) — мёртвая/вводящая в заблуждение фича. Фикс: удалить поле из `adImageInfoW` и из WPF-цепочки (либо реализовать нативно и маршалить).
+**Фикс:** один live-check (`adGetVersionW` против `src/version.txt:1`), скипающийся с сообщением, если DLL не рядом.
 
-### S9-S18 [P2] — прочее
+### P3-консолидировано
+См. листы: MAX_PATH-буферы (лист 1), мёртвый `AD_NVJPEG_ENABLE` (`src/NvJpegCollector/NvJpegCollector.vcxproj:42`), JFIF-only magic (E0, EXIF E1 отклоняется — лист 1), thumbSize-mismatch silent reject (лист 1, UX-дыру закрывает GUI — `src/AntiDupl.NET.WinForms/Form/SearchExecuterForm.cs:233-258`), `SimpleCRC32` по wchar-юнитам vs DLL-хэш (лист 4), stdout-аккумуляция в UpdateDatabaseAsync (лист 5), positional 500-char Count-патч (лист 4), NvJpegCollector Debug→Release маппинг (лист 6), `nuget restore`-пустышка (лист 6), `src/version.txt:1` newline-риск (лист 6).
 
-| # | Место | Проблема | Фикс |
-|---|------|----------|------|
-| S9 | `ThumbnailPanel.cs:67-79`, `ThumbnailGroupTable.cs:364-383` | `BeginInvoke` без guard `IsDisposed` → `ObjectDisposedException`; `UpdateThumbnailsStop` — `Join()` без таймаута → вечный фриз на мёртвом сетевом диске | `if (IsDisposed \|\| Disposing) return;` / `Join(TimeSpan.FromSeconds(5))` |
-| S10 | `ResultsPreviewDuplPair.cs:352-371` | событие подсветки стреляет дважды — второй раз со ВСЕМИ прямоугольниками, `MaxFragmentsForHighlight` затирается; `_highlightStop` не volatile; проверка `ThreadState == Running` пропускает `Unstarted/WaitSleepJoin` → два потока подсветки | `else` вокруг второго вызова; volatile; generation-токен |
-| S11 | `DatabaseManagerForm.cs:961-965` | `int.Parse(GetAttr(...))` без try/catch в `LoadRegistry` — битый атрибут валит конструктор формы И рабочий поток поиска (`GetEnabledDatabasePaths` зовётся из `SearchExecuterForm.cs:153`) | `int.TryParse` + skip + log |
-| S12 | `DatabaseManagerForm.cs:1026`, `SearchExecuterForm.cs:157`, `CoreOptions.cs:124`, `CoreLib.cs:605`, `AntiDupl.cpp:389` | Дебажные логи в папке exe в проде: `cs_debug.log` (необрезаемый), `trace.log`, `path_debug.log` — под Program Files тихо падают, на writable — растут вечно | удалить или гейт `#DEBUG`/настройкой |
-| S13 | `AutoSelector.cs:169-229` | ✅ 2026-08-18: Учёт батча: неудачи delete не попадают в `FailedPaths`; исчезнувший файл считается failed, но строка в результатах не снимается (`MarkRemoved*` не зовётся) — вечный stale-ряд; `s_sideCache.Clear()` стирает разметку и при частичной неудаче | дополнять FailedPaths; MarkRemoved для отсутствующих; чистить только успешные ключи |
-| S14 | `AutoSelector.cs:368-376` | ✅ 2026-08-18: Префикс-матчинг пула без разделителя (та же болезнь, что N5) — `C:\Photos` ловит `C:\Photos2` → автовыбор удаляет не с той стороны | `StartsWith(..., OrdinalIgnoreCase) && (len==dbPath.Length \|\| imgPath[dbPath.Length]=='\\')` |
-| S15 | `MainMenu.cs:427-438` + 2 копии | `IsSafeMoveTarget` блокирует только System32; `C:\Windows`, Program Files, корни дисков проходят; сообщение врёт про тест записи; три копии кода | блокировать `%SystemRoot%`, `%ProgramFiles%`, корни; probe записью temp-файла; одна общая копия |
-| S16 | `CoreOptions.cs:104-107` | `Get(onePath)` индексирует `core.searchPath[0]` без проверки длины | length guard |
-| S17 | `MainForm.cs:111-112` | После таймаута `WaitForWorker(10000)` `m_core.Dispose()` зовёт `adRelease`, пока finish-воркер может быть внутри `adSaveW` на освобождённом движке → нативный краш на выходе | при таймауте утечь core (`GC.SuppressFinalize`, не Dispose) вместо release |
-| S18 | `ResultsListView.cs:468-474` | `row.selected = selection[i]` без проверки `selection.Length` (нативный `GetSelection` может вернуть меньше) | `&& i < selection.Length` |
+### Observations (позитив)
+Пайплайн коллектора (reader→bounded queue→per-thread nvJPEG state, RAII DoneGuard `src/NvJpegCollector/main.cpp:499-502`) — учебниковый. stdout-дрейн GUI (`src/AntiDupl.NET.WinForms/Forms/DatabaseManagerForm.cs:496-513`) корректно закрывает классический pipe-deadlock. S13-удержание частично-проваленных меток (`src/AntiDupl.NET.WinForms/AutoSelector.cs:274-277`) — продуманно. `cmd/Deploy.cmd` — правильная форма локального гейта. Contract-тесты по дизайну — именно то, что нужно hand-maintained interop.
 
-### S19-S34 [P3] — C# гигиена (выжимка)
+## Disk footprint analysis
 
-Мёртвая interop-структура `adPathWithSubFolderW` с неверным layout (65540 vs 65538 байт — безопасно только потому, что `CoreLib.SetPath` пакует вручную; удалить); отсутствие `AD_IMAGE_UNDEFINE=-1`/`AD_DEFECT_UNDEFINE=-1` в enum'ах; `Mutex` как внутрипроцессный лок + недиспоз замещённых битмапов в `ThumbnailStorage`; `LockBits` без try/finally и `GC.Collect()` как средство от OOM в `BitmapWorker`; недиспоз Timer/NotifyIcon и `-=` только на счастливом пути в `SearchExecuterForm`; Pen/StringFormat на каждый paint в `DataGridViewDoubleTextBoxCell`; статическое событие `Strings.OnCurrentChange` без отписок (10 подписчиков); хардкод-английский против инфраструктуры Strings RU/EN (MainMenu, DatabaseManagerForm, AutoSelectDialog); утроенная логика move/delete/IsSafeMoveTarget в MainMenu/ContextMenu/ToolStrip (копии разъехались); перевёрнутые имена пресетов («Select Worst» → `KeepBest` — поведение верное, имена путают); `LoadRegistry(string userPath)` игнорирует параметр; hand-rolled XML в `SaveDatabases` без экранирования; цепочки ремапа (`RemapFrom` перезаписывается — второй ремап до Update ломает оба значения); `AutoSelector.Apply` — NRE на разреженных страницах + burst аллокаций ~138 КБ/результат на UI-потоке.
+| Категория | Размер | Вердикт |
+|-----------|--------|---------|
+| vcpkg toolchain clone (`vcpkg/`) | 10.87 GB | **Не оправдан в таком виде**: ~9 GB — чистый кэш (buildtrees 4544 MB, packages 3789 MB, downloads 606 MB); сам клон (ports+scripts) ~210 MB |
+| `src/` (вкл. vcpkg_installed и строй-мусор) | 6.28 GB | Частично оправдан: manifest-инсталл 4.3 GB нужен; WinForms/WPF bin+obj 964 MB и stray `src/bin`+`src/obj` 726 MB — регенерируемый мусор; tracked sources ~4 MB |
+| Git store (`.git`) | 1.41 GB | Нужен `git gc`: 1.26 GiB loose vs 45 MiB packs — история включает крупные блобы медиа-эпохи |
+| Build outputs (`bin/`, `obj/`, `out/`) | 2.06 GB | Оправдан с устаревшим мусором: Debug 535 MB + Publish 162 MB + старые пакеты out/Publish 495 MB; чистая пересборка даёт нужные ~1.5 GB |
+| Tracked sources, docs, tool caches, audit infra | 0.06 GB | Оправдан (~750 tracked файлов, ~12 MB собственно проекта) |
+| **Итого** | **19.26 GB** | **Не оправдан как есть**; разумный steady state **~4-6 GB** |
 
-**WPF (быстрый проход):** `RunProcess` без try/catch (окно прогресса не закрывается — тот же класс S5); `GetResults` индексирует по `resultSize`, прочитанному ДО `GetResult` → NRE на усохшей странице; `JpegPeaks` — мёртвые данные (S8).
+**Почему 20 GB — не «просто так», но и не оправдано:** настоящий проект — ~12 МБ. Всё остальное — кэши и регенерируемый мусор, которые можно (а) сократить, (б) вынести наружу. Конкретные шаги в §Opinion.
 
-### Проверено чисто (C#)
-Дрейф enum'ов между `CoreDll.cs` и `AntiDupl.h` — **нет** (Error, LocalActionType 0–15 c MarkRemoved*=14/15, SortType, все сравниваемые — совпадают); размеры interop-структур поле-к-полю (x64, pack 8; MAX_PATH_EX=32768, MAX_EXIF_SIZE=260; bool → int везде); делегаты Cdecl+Unicode; фейковые указатели `IntPtr(1)` в GetResultSize/GetGroupSize безопасны; SHFILEOPSTRUCT корректен для x64; Options round-trip + Clone; pool-mode registry; порядок ремапа (`RemapFrom` до `Path`); защита от двойного старта поиска модальностью.
+**Важно:** в `bin/Release/databases/` лежат **локальные тестовые БД пользователя** — их не трогать; чистки касаются только кэшей/билд-артефактов.
+
+## Remaining concerns
+
+1. **Паритет JPEG-путей после фиксов R/B:** CPU-путь (libjpeg-turbo RGBA→gray) и GPU-путь (nvJPEG Y-plane) даже после исправления каналов дают слегка разные luma (BT.601 vs BT.709-веса) — кросс-путевые сравнения сохранят малое систематическое смещение. Проверить на реальном корпусе после фиксов.
+2. Файлы `src/AntiDupl/adPsd.cpp`, `src/AntiDupl/adDds.cpp`, `src/AntiDupl/adTga.cpp`, `src/AntiDupl/adImageExif.cpp` не читались этим аудитом (вне шести листов) — отдельный мини-ревью при случае.
+3. **CI vs локальная vcpkg-схема** (nested-path quirk): зелёный CI не доказывает, что свежий clone без продублированных headers соберётся; требует проверки CI-логов (не делалось — no-build).
+4. **WPF GUI** вне скоупа (WinForms — продуктовый UI); его view-model'ы не ревьюились.
+5. **Мёртвый `src/AntiDuplCore/`** — орфан-проект не в sln; кандидат на удаление (решение за владельцем).
+6. **`EnsureCapacity`/VRAM-модель** в целом хрупкая (P2-5) — долгосрочный дизайн preallocated-буферов vs потоковая заливка заслуживает отдельного обсуждения. Триггер P2-5 (трансформации + >1024 образов) и канальные находки P1-1/P1-2 **подлежат практическому подтверждению управляемыми тестами до правок кода** — решение владельца от 2026-09-05; тест-план: сценарий A (AllVsAll контроль), B (трансформации, 1100+ картинок, контрольная группа CPU), C (R/B-каналы: перекрёстные JPEG×PNG пары с известным цветовым смещением).
+
+## Assumptions
+
+- Билд-корректность не проверялась (no-build по требованию); все цитаты — только по фактически прочитанному коду текущего коммита `4f53533`.
+- Conventions каналов (Simd Rgb24 = R,G,B; WIC 24bppBGR = B,G,R; GDI+ 24bpp = B,G,R) — документированные конвенции библиотек, дополнительно подтверждены взаимной согласованностью внутри продукта (правильные пары `SimdBgrToBgra`/`RgbToBgra` в соседних путях).
+- Дисковая классификация — по записям верхнего уровня; «пользовательские БД» считаются только `bin/Release/databases/` (тестовые БД владельца — неприкосновенны).
+- Скоринг P1/P2 — по влиянию на корректность результата/данных, не на удобство.
+
+## Opinion and proposals
+
+**Мнение.** Кодовая база здорова по архитектуре (дисциплина потоков, RAII, контракт-тесты как идея) и больна в двух местах: (а) **систематические ошибки на границах форматов/каналов/структур** — старшие находки это «данные прошли через границу и тихо исказились»; (б) **тихие отказы** — обрезка результатов, ноль-при-ошибке, глотание экспортов, MessageBox-в-невидимом-окне. Оба класса — плата за скорость развития форка без интеграционной валидации. При этом ни одна из находок не требует переписывания: почти все фиксы — точечные, от 1 строки до одного экрана. Важная поправка от практической проверки 2026-09-05: дефолтный GPU-сценарий (AllVsAll) корректен — статический анализ переоценил P1-3; перед правками кода ключевые гипотезы (R/B-каналы, realloc-wipe) стоит подтверждать управляемыми тестами.
+
+**Предложения (по убыванию ценности):**
+
+1. **Сначала каналы (P1-1, P1-2), потом всё остальное.** Оба фикса — по 1-2 строки, но оба меняют содержимое всех существующих БД. Делать их до любых других изменений, чтобы пересборка БД была одна. После фиксов — обязательная полная пересборка всех БД (команда update с force-режимом или full rebuild).
+2. **GPU-доверие (P1-4/5 + P2-4/5/6 + P2-16) как один пакет:** полосовой AllVsAll, fail-fast при CUDA-ошибках, sanity→DisableGpu, перезаливка после realloc (или preallocated), удаление/консолидация мёртвого `UpdateGpuDatabase`. Это один принцип: «GPU-результат без подтверждённого успеха — не результат».
+3. **Реестр БД — один писатель (P1-6 + лист-4):** экранирование+декодирование сейчас, единый модуль позже. Три писателя одного файла — мина с длинным фитилём.
+4. **CI: contract tests + native-DLL-проверка в Publish (P2-13/14/15)** — четыре строки YAML, закрывающие целый класс регрессий, найденных этим аудитом.
+5. **Диск: не удалять, а разложить.** (а) `vcpkg` buildtrees/packages/downloads (~9 GB) — снести или перенаправить кэш в `%LOCALAPPDATA%` (vcpkg поддерживает `VCPKG_DEFAULT_BINARY_CACHE`); (б) stray `src/bin`, `src/obj` (726 MB) — удалить (старые layout'ы, не используются текущими билдами — AGENTS.md); (в) `bin/Debug`, `out/Publish`-старье (~1 GB) — удалить, `bin/Release` оставить (там тестовые БД!); (г) `git gc` (1.26 GiB loose → пакеты). Итог: ~20 GB → **~4-6 GB** без потери чего-либо ценного. **Не трогать:** `bin/Release/databases/`, `src/vcpkg_installed` (нужен для билда с `VcpkgManifestInstall=false`-схемой), vendored vcpkg-клон как таковой (порты).
+6. **Мелочи пачкой (P2/P3),** после основных: hash≠0, volatile-флаги, ConcurrentDictionary, фоновый move, [FATAL]-режим коллектора. Каждое — <30 минут.
+
+**Обсуждения требует:** судьба мёртвого `src/AntiDupl/adNvJpeg.cpp` + `AD_NVJPEG_ENABLE` (удалить как мёртвый код или оставить как референс — я за удаление: он дважды вводит в заблуждение); судьба орфана `src/AntiDuplCore/`; решение по P2-3 (dbLoaded short-circuit) — это продуктовое поведение, не баг.
 
 ---
-
-## §4. Сборка / CI / упаковка — 1×P1, 7×P2/P3
-
-### B1 [P1] ✅ Исправлено 2026-08-18 — MakeBin.cmd пакует НЕ ту nvjpeg: релизный zip без `nvjpeg64_13.dll`
-`cmd/MakeBin.cmd:44-46`
-
-NvJpegCollector линкуется против CUDA 13.1 (`nvjpeg.lib` → `nvjpeg64_13.dll` + `cudart64_13.dll`; подтверждено содержимым `bin/Release`). MakeBin копирует `nvjpeg64_12.dll` (устаревшую) и опционально `cudart64_12.dll`, **не копируя** `nvjpeg64_13.dll`/`cudart64_13.dll` — `xcopy` молча проваливается (нет проверки errorlevel), CI собирает артефакт, и коллектор в дистрибутиве не запускается.
-
-```bat
-REM было: xcopy %RELEASE_DIR%\nvjpeg64_12.dll ...
-xcopy %RELEASE_DIR%\nvjpeg64_13.dll %TMP_DIR%\* /y /i
-if exist %RELEASE_DIR%\cudart64_13.dll xcopy %RELEASE_DIR%\cudart64_13.dll %TMP_DIR%\* /y /i
-if exist %RELEASE_DIR%\cudart64_12.dll xcopy %RELEASE_DIR%\cudart64_12.dll %TMP_DIR%\* /y /i
-```
-
-(`cudart64_12.dll` нужна самой `AntiDupl.dll` — оставить опционально; проверить фактические импорты dumpbin'ом и зафиксировать список.) То же проверить в `MakePublish.cmd`.
-
-### B2 [P2] CI ставит CUDA 12.8, локальная сборка — 13.1
-`.github/workflows/AntiDupl_CI.yml:40-44` — collector на CI линкуется против 12.8-версии nvjpeg, локально против 13.1: одна и та же ветка производит бинарники против разных мажор-версий nvJPEG. Зафиксировать 13.1 в CI (`JimVer/cuda-toolkit-action` с `cuda: '13.1.x'`) или перевести локальную сборку на 12.8.
-
-### B3 [P2] ✅ Исправлено 2026-08-18 — Deploy.cmd: шаг коллектора без `/p:VcpkgManifestInstall=false`
-`cmd/Deploy.cmd:40` против `:32` — несогласованность с шагом AntiDupl: одиночный запуск может триггернуть полную vcpkg manifest-установку (долго, ловит simd-quirk). Добавить флаг.
-
-### B4 [P3] Deploy.cmd: хардкод пути `v12.8` относительно CUDA 13
-`cmd/Deploy.cmd:62` — `if not exist "%BIN_DIR%\cudart64_12.dll" copy ...v12.8\bin\...` — работает только на конкретной машине. Вынести `CUDA12_BIN` в переменную/параметр с понятным WARN при отсутствии.
-
-### B5 [P3] CI без `timeout-minutes` и `concurrency`
-Отсутствуют оба — зависший билд жрёт раннер 6 часов (дефолт), параллельные пуши не отменяются. Добавить `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }` и `timeout-minutes: 90`.
-
-### B6 [P3] ✅ Исправлено 2026-08-18 — Сгенерированные `External.cs`/`adExternal.h` закоммичены
-`git ls-files`: оба файла в репо, при том что pre-build перегенерирует их из `version.txt`. Дрейф при смене версии без билда + вечные диффы. Удалить из индекса и добавить в `.gitignore` (pre-build создаёт их до компиляции — сборке не мешает).
-
-### B7 [P3] `nuget restore` на решении без NuGet-пакетов
-`AntiDupl_CI.yml:46-48` — шаг безвреден, но лишний (нет packages.config/PackageReference вне SDK-дефолтов). Удалить или оставить осознанно.
-
-### B8 [Проверено] Прочее сборки — чисто
-Решение: NvJpegCollector имеет только Release-маппинг в sln (Debug-билд решения его корректно пропускает); C# OutputPath → общий `bin/`; C++ OutDir → общий `bin/`; Verify-блок Deploy.cmd полный (ловит отсутствующие CUDA dll); MakeBin/MakePublish имеют фолбэк `7za` при отсутствии WinRAR (GH-раннеры survive); vcpkg.json соответствует фактическим include'ам (libjpeg-turbo, openjpeg, webp, heif, avif, jxl, simd); `.gitignore` не пропускает bin/obj/adi/log в индекс (git ls-files чист).
-
----
-
-## §5. Сквозные темы (чинить классами, не по одному)
-
-1. **Префикс-матчинг путей без границы разделителя** — 4 независимых копии одной ошибки: N5 (adEngine, FilterByPool), N11 (реестр БД), S14 (AutoSelector пулы). Один хелпер на каждой стороне (N5 C++ + S14 C#), все сайты переводятся на него.
-2. **Контракт коллектор↔DLL нарушен в 3 местах**: C5 (CRC превью vs файла), C6 (алгоритм превью), C7/N7 (thumbSize без валидации). Любой из них делает смешанные БД тихо несравнимыми. Чинить парой: и писателя, и читателя; старые БД без CRC-миграции продолжат работать (CRC-штраф — эвристика, не критерий).
-3. **Глотание ошибок на границах**: unchecked `fread`/`fwrite` (N6, C3), игнор CUDA-кодов (C8, N14), `catch { Trace }` (S7), thread-без-try/catch (S5). Правило: на границе формата/IPC ошибка = отказ от записи/вызова, не нули.
-4. **Мёртвый код как симптом**: `UpdateGpuDatabase`, `bufferFullCount`, стриминговый цикл, `--batch`, `GenerateAdiFileName`, `jpegPeaks`, `adPathWithSubFolderW`, экспорты N12 — почти каждый мёртвый элемент связан с реальным багом (N3, N1) или вводит в заблуждение (S8). Удалить после фиксов-хозяев.
-
-## §6. Порядок внедрения (каждый пункт ≈ один маленький PR)
-
-| PR | Состав | Почему сначала |
-|----|--------|----------------|
-| 1 | ✅ C1, C2, C4, C10 (корректность update + UB загрузчика) | Портит данные пользователей прямо сейчас |
-| 2 | ✅ N4, N6, N7/C7, C13 (валидация форматов при загрузке) | Краш/мусор на битых входных, обе стороны контракта |
-| 3 | ✅ N2, N3, S1, S3 (неверные результаты: GPU-гейт, VRAM-слоты, AutoSelector, CoreOptions) | Тихо неверные результаты — худший класс |
-| 4 | ✅ S2, S4, S5, S13 (UI-безопасность батчей и потоков) | Данные под угрозой от одного клика |
-| 5 | ◐ N5+S14+N11 ✅; C5, C6 ⏭ отложены (сквозные контракты: префиксы, CRC, превью) | Классовые фиксы, требуют Smoke на GPU+CPU |
-| 6 | ✅ B1, B3 (упаковка/деплой) | Дистрибутив с неработающим коллектором |
-| 7 | ⏭ N8-N12, C3, C8, C9 ✅, S6-S12, S15-S18, B2, B5 (робастность) | Вторая волна |
-| 8 | ⏭ P3-чистка (N13-N21, C11-C17, S19-S34, B4, B6 ✅, B7) + удаление мёртвого кода | После стабилизации |
-
-После каждого PR: `cmd\Deploy.cmd` до `[OK] Deploy complete.` + Smoke из DEV_GUIDE §1 (коллектор → поиск SqSum и SSIM → delete pair → рестарт).
-
-## §7. Остаточные проблемы — безопасно НЕ фиксируется автоматически
-
-1. **N1/Bug-08 (5M cap)** — требует изменения сигнатуры ядра и перезапуска по полосам; патч-скетч в N1 готов, но изменение GPU-плана нужно верифицировать на реальном корпусе (регресс скорости), прежде чем включать.
-2. **Restore из корзины (N10)** — честная реализация (IFileOperation / исходная temp-схема оригинала) — отдельная фича; сейчас минимальный фикс только прекращает врать про успех.
-3. **Смешанные БД со старым CRC (C5)** — пересчёт CRC файлов для уже собранных БД потребовал бы полной перечитки источников или `--rehash`-режима; миграция не бесплатная, решение за владельцем.
-4. **WPF-паритет** — Rot прогрессирует (S8/WPF-найдётки); чинить точечно только при запросе (правило AGENTS.md).
-5. **S17 (shutdown race)** — правильное решение — кооперативная отмена сохранения; «утечь core при таймауте» — паллиатив, безопасный на выходе процесса.
-6. **Batch cancel (WP-B)** — остаётся открытым пунктом DEV_GUIDE; частично перекрывается S2.
-7. **Тесты** — автотестов нет; перед PR3/PR5 минимально необходимы фикстуры: magic-detect, thumbBytes≠side², thumbSize-mismatch reject, MarkRemoved enum size, AutoSelector criteria-matrix (S1), update-duplicate-records (C1) — иначе фиксы не на что опереть.
-
-## §8. Валидация
-
-- `cmd\Deploy.cmd`: **пройден** — `[OK] Deploy complete.` (exit 0); C++ (AntiDupl.dll, NvJpegCollector.exe) и C# (WinForms + Core) собрались, CUDA-депенденси и ресурсы на месте, все артефакты верифицированы (16.08.2026, коммит `04d9495`).
-- Перепроверка после фиксов 2026-08-18: **`cmd\Deploy.cmd` пройден** (`[OK] Deploy complete.`); одиночные MSBuild-сборки AntiDupl.dll / NvJpegCollector.exe / WinForms — 0 ошибок; запуск `bin\Release\AntiDupl.NET.WinForms.exe` — стартует, процесс жив, закрывается штатно. Полный GUI Smoke (коллектор → поиск → delete → auto-select → restart) требует ручного прогона — см. DEV_GUIDE §1.
-- Автотестов в решении нет — CI проверяет только сборку (см. §7.7).
-- Lint/typecheck: не настроены (C# — /warnasdefault; C++ — W3). Рекомендация: включить `/W4` + `TreatWarningAsError` на новый код — не в этом аудите.
-
-## §9. Допущения
-
-1. «Портативность данных рядом с exe» и два формата `.adi` — незыблемые инварианты (AGENTS.md); фиксы N7/C7 намеренно отвергают, а не конвертируют чужой thumbSize — консервативный выбор в пользу инварианта.
-2. Поведенческие фиксы (N2, S1, S2, S3, C1) меняют наблюдаемое поведение там, где текущее объективно противоречит настройкам пользователя/формату данных; это разрешено стандартом ревью («preserve existing intended behaviour unless clearly broken»).
-3. Номера строк указаны на коммит `04d9495`; после PR-1..8 будут сдвигаться — привязываться к символам (`MatchCallback`, `ProcessGray` и т.п.), они названы в каждом пункте.
-4. Агентские находки P1 перепроверены вручную (N2, N3, C1 — grep/чтение исходника в этом отчёте); находки P2/P3 приведены as-is с готовыми патчами — применять по одному с Smoke-проверкой.
-5. Гонки/UB-пункты (C2, S6, N8) доказаны статически (пути кода), не воспроизведены динамически — поэтому им P1/P2, а не P0, и они не «прогоняются» до фикса.
-
----
-
-*Аудит подготовлен ZCode (read-only ревью, 2026-08-16). Код приложения не изменялся; все патчи — предложения, готовые к применению PR-батчами §6.*
-
-*Применение фиксов 2026-08-18: закрыты C1-C2, C4, C8-C10, C13, N2-N7, N11, N18-N19, S1-S5, S13-S14, B1, B3, B6 (маркеры ✅). Отложены (не фиксить без согласования): N1, C3, C5-C6, N8-N10, N12, B2, B4-B5, B7 и P3-чистки.*
+*Аудит не запускал сборку и не менял код (report-only). Доказательная база: `.unlazy/audit-2026-09-05/` (листы, гейты, disk-report.json). Все цитаты проверены скриптами `scripts/verify-report.mjs`, `scripts/verify-multiple-citations.mjs`.*

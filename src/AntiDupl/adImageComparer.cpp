@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -165,11 +165,17 @@ namespace ad
 
         AD_DEBUG("CompareWithSetGPU: Gathering indices\n");
 
-        // Gather indices
+        // Gather indices, splitting into GPU-resident and CPU-only candidates.
+        // A slot is GPU-resident only when its upload succeeded (TGpuManager
+        // tracks this). Images whose upload never happened or failed (VRAM
+        // shortage, index beyond capacity) are compared on the CPU below —
+        // otherwise their pairs are silently lost (audit: "images outside VRAM").
         std::vector<size_t> indices;
         std::vector<TImageDataPtr> ptrs;
+        std::vector<TImageDataPtr> cpuOnlyPtrs;
         indices.reserve(list.size());
         ptrs.reserve(list.size());
+        cpuOnlyPtrs.reserve(list.size());
 
         for (TImageDataPtrList::const_iterator i = list.begin(); i != list.end(); ++i)
         {
@@ -181,11 +187,32 @@ namespace ad
             if(m_pOptions->compare.compareInsideOneFolder == FALSE && TPath::EqualByDirectory(pTransformed->path, pSecond->path)) continue;
             if(m_pOptions->compare.compareInsideOneSearchPath == FALSE && pTransformed->index == pSecond->index) continue;
 
-            indices.push_back(pSecond->globalIdx);
-            ptrs.push_back(pSecond);
+            if (pGpu->IsUploaded(pSecond->globalIdx))
+            {
+                indices.push_back(pSecond->globalIdx);
+                ptrs.push_back(pSecond);
+            }
+            else
+            {
+                cpuOnlyPtrs.push_back(pSecond);
+            }
         }
 
         AD_DEBUG("CompareWithSetGPU: Processing batches\n");
+
+        // CPU fallback for non-resident images (same predicate as the CPU branch
+        // of CompareWithSet): these thumbnails are valid in host memory, only
+        // their GPU copy is missing.
+        if (!cpuOnlyPtrs.empty())
+        {
+            double difference;
+            for (size_t i = 0; i < cpuOnlyPtrs.size(); ++i)
+            {
+                TImageDataPtr pSecond = cpuOnlyPtrs[i];
+                if (IsDuplPair(pTransformed, pSecond, &difference))
+                    m_pResult->AddDuplImagePair(pOriginal, pSecond, difference, transform);
+            }
+        }
 
         if (indices.empty()) return;
 

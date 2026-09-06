@@ -52,6 +52,11 @@ namespace ad
     void GpuReleaseBuffer();
     bool GpuUploadThumbnail(size_t index, const uint8_t* pData);
 
+    // Current buffer state (for keeping TGpuManager fields in sync after a failed
+    // GpuCreateBuffer — the old buffers are restored, not destroyed)
+    size_t GpuCurrentCapacity();
+    size_t GpuCurrentThumbSize();
+
     // Batch Comparison: Compare one query thumbnail against a range of thumbnails in the buffer
     // Returns number of matches found (difference <= threshold)
     bool GpuCompareOneVsMany(const uint8_t* pQuery, size_t startIdx, size_t count, double threshold, 

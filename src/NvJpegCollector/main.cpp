@@ -1,4 +1,4 @@
-﻿/*
+/*
 * NvJpegCollector - GPU-accelerated image pre-processing utility for AntiDuplPlus.
 * Decodes JPEG via nvJPEG (GPU) and other formats via WIC (CPU).
 */
@@ -23,6 +23,7 @@
 #include <wincodec.h>
 #include <nvjpeg.h>
 #include <cuda_runtime.h>
+#include <webp/decode.h>
 #include "QualityDetectors.h"
 
 namespace fs = std::filesystem;
@@ -115,6 +116,39 @@ static bool DecodeWithWIC(const wchar_t* path, std::vector<uint8_t>& outRgb, int
     hr = pConverter->CopyPixels(nullptr, w * 3, (UINT)outRgb.size(), outRgb.data());
     pConverter->Release(); pFactory->Release();
     return SUCCEEDED(hr);
+}
+
+// Decode a WebP file with libwebp (bundled via vcpkg) into a BGRA buffer.
+// Rationale (audit): WIC can only decode WebP when the optional "WebP Image
+// Extension" codec is installed — on machines without it every .webp file was
+// SILENTLY dropped from the database (no failed.log entry, no warning; WIC
+// returns no codec at all, not an error). libwebp is the same decoder the main
+// DLL uses for live scans (adWebp.cpp), so DB thumbnails and live-scan
+// thumbnails are now produced by identical code paths.
+// NOTE: unlike DecodeWithWIC (which outputs BGR), this outputs BGRA — the
+// caller must know which layout it receives; see the single call site below.
+static bool DecodeWithWebP(const wchar_t* path, std::vector<uint8_t>& outBgra, int& outW, int& outH) {
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path, L"rb") != 0 || !f) return false;
+    std::vector<uint8_t> data;
+    uint8_t buf[65536];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) data.insert(data.end(), buf, buf + n);
+    fclose(f);
+    if (data.empty()) return false;
+
+    WebPBitstreamFeatures features;
+    if (WebPGetFeatures(data.data(), (size_t)data.size(), &features) != VP8_STATUS_OK) return false;
+    if (features.width <= 0 || features.height <= 0) return false;
+    if ((int64_t)features.width * (int64_t)features.height * 4 >= INT_MAX) return false;
+
+    outW = features.width; outH = features.height;
+    outBgra.resize((size_t)outW * outH * 4);
+    const size_t stride = (size_t)outW * 4;
+    if (WebPDecodeBGRAInto(data.data(), (size_t)data.size(), outBgra.data(),
+                           outBgra.size(), (int)stride) == nullptr)
+        return false;
+    return true;
 }
 
 struct ImageInfo {
@@ -773,21 +807,42 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                     processed += (int)updJpegImages.size();
                 }
 
-                // CPU decode non-JPEG
+                // CPU decode non-JPEG (WebP via libwebp, rest via WIC)
+                size_t updCpuFailed = 0;
                 for (size_t idx : updNonJpegIdx) {
                     const auto& fp = toDecode[idx];
-                    std::vector<uint8_t> rgb; int w=0, h=0;
-                    if (!DecodeWithWIC(fp.c_str(), rgb, w, h)) continue;
-                    std::vector<uint8_t> fullGray(w * h);
-                    {
-                        ad::TView rgbV(w, h, w * 3, ad::TView::Rgb24, rgb.data());
+                    std::vector<uint8_t> px; int w=0, h=0;
+                    std::vector<uint8_t> fullGray;
+                    const uint8_t imgType = GetImageType(fs::path(fp).extension().wstring());
+                    if (imgType == 14) { // AD_IMAGE_WEBP: libwebp, see full-scan branch for rationale
+                        std::vector<uint8_t> bgra;
+                        if (!DecodeWithWebP(fp.c_str(), bgra, w, h)) {
+                            updCpuFailed++;
+                            std::wcerr << L"[WEBP] failed to decode: " << fp << std::endl;
+                            continue;
+                        }
+                        fullGray.resize((size_t)w * h);
+                        ad::TView bgraV(w, h, w * 4, ad::TView::Bgra32, bgra.data());
                         ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
-                        Simd::RgbToGray(rgbV, grayV);
+                        Simd::BgraToGray(bgraV, grayV);
+                    } else {
+                        if (!DecodeWithWIC(fp.c_str(), px, w, h)) {
+                            updCpuFailed++;
+                            std::wcerr << L"[WIC] failed to decode: " << fp << std::endl;
+                            continue;
+                        }
+                        fullGray.resize((size_t)w * h);
+                        // WIC delivers 24bppBGR — treat as Bgr24 (audit P1-2).
+                        ad::TView rgbV(w, h, w * 3, ad::TView::Bgr24, px.data());
+                        ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
+                        Simd::BgrToGray(rgbV, grayV);
                     }
                     ImageInfo img = ProcessGray(fullGray.data(), w, h, fp, args.thumbSize);
                     images.push_back(img);
                     processed++;
                 }
+                if (updCpuFailed > 0)
+                    std::wcerr << L"[UPDATE] " << updCpuFailed << L" file(s) were NOT added (decode failed — see messages above)" << std::endl;
 
 
                 std::wcout << std::endl << L"[UPDATE] Decoded " << processed << L" files." << std::endl;
@@ -933,21 +988,52 @@ int wmain_impl(int argc, wchar_t* argv[]) {
         std::wcout << std::endl;
     }
 
-    // ========== Non-JPEG via WIC (CPU) ==========
+    // ========== Non-JPEG via libwebp / WIC (CPU) ==========
     if (!nonJpegIndices.empty()) {
-        std::wcout << L"[WIC]  Processing " << nonJpegIndices.size() << L" files..." << std::endl;
+        size_t cpuFailed = 0;
+        std::wcout << L"[CPU]  Processing " << nonJpegIndices.size() << L" files..." << std::endl;
         for (size_t idx : nonJpegIndices) {
-            std::vector<uint8_t> rgb; int w=0, h=0;
-            if (!DecodeWithWIC(imageFiles[idx].c_str(), rgb, w, h)) continue;
-            std::vector<uint8_t> fullGray(w * h);
-            {
-                ad::TView rgbV(w, h, w * 3, ad::TView::Rgb24, rgb.data());
-                ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
-                Simd::RgbToGray(rgbV, grayV);
+            std::vector<uint8_t> px; int w=0, h=0;
+            std::vector<uint8_t> fullGray;
+            const uint8_t imgType = GetImageType(fs::path(imageFiles[idx]).extension().wstring());
+            if (imgType == 14) { // AD_IMAGE_WEBP: WIC needs an optional OS codec — libwebp is bundled
+                std::vector<uint8_t> bgra;
+                if (!DecodeWithWebP(imageFiles[idx].c_str(), bgra, w, h)) {
+                    cpuFailed++;
+                    std::wcerr << L"[WEBP] failed to decode: " << imageFiles[idx] << std::endl;
+                    continue;
+                }
+                fullGray.resize((size_t)w * h);
+                {
+                    // libwebp BGRA output — the same decoder+layout as the main DLL
+                    // (adWebp.cpp), keeping DB thumbs consistent with live scans.
+                    ad::TView bgraV(w, h, w * 4, ad::TView::Bgra32, bgra.data());
+                    ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
+                    Simd::BgraToGray(bgraV, grayV);
+                }
+            } else {
+                if (!DecodeWithWIC(imageFiles[idx].c_str(), px, w, h)) {
+                    // Was a bare `continue` before: files the machine's WIC cannot
+                    // decode (e.g. WebP without the optional OS codec) silently
+                    // vanished from the DB with no trace. Now counted and reported.
+                    cpuFailed++;
+                    std::wcerr << L"[WIC] failed to decode: " << imageFiles[idx] << std::endl;
+                    continue;
+                }
+                fullGray.resize((size_t)w * h);
+                {
+                    // WIC delivers 24bppBGR (B,G,R in memory) — decode it as Bgr24,
+                    // not Rgb24, or R/B-weighted luma ends up swapped (audit P1-2).
+                    ad::TView rgbV(w, h, w * 3, ad::TView::Bgr24, px.data());
+                    ad::TView grayV(w, h, w, ad::TView::Gray8, fullGray.data());
+                    Simd::BgrToGray(rgbV, grayV);
+                }
             }
             ImageInfo info = ProcessGray(fullGray.data(), w, h, imageFiles[idx], args.thumbSize);
             images.push_back(info); processed++;
         }
+        if (cpuFailed > 0)
+            std::wcerr << L"[CPU] " << cpuFailed << L" file(s) were NOT added to the database (decode failed — see messages above)" << std::endl;
     }
 
 

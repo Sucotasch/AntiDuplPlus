@@ -259,18 +259,57 @@ namespace ad
 
     bool GpuCreateBuffer(size_t capacity, size_t thumbSize)
     {
-        GpuReleaseBuffer();
-        if (capacity == 0 || thumbSize == 0) return true;
+        // Preserve previously uploaded thumbnails across a capacity/size change.
+        // The old implementation called GpuReleaseBuffer() first, which cudaFree'd the
+        // thumbnail buffer before the new one existed — every EnsureCapacity() GROWTH
+        // silently wiped all previously uploaded data (audit P2-5: with >1024 images in
+        // transform mode, comparisons after the growth read garbage and reported zero
+        // matches). Now we allocate the new buffers first, copy the old thumbnails
+        // over (D2D), and only then free the old ones. A size change (thumbSize
+        // mismatch) is still a full reset because old pixels are not reusable.
+        const bool preserve = (g_pDeviceThumbnailBuffer != nullptr &&
+                               thumbSize != 0 && thumbSize == g_thumbSize &&
+                               capacity != 0);
+        const size_t oldCapacity = g_bufferCapacity;
+        const size_t oldThumbSize = g_thumbSize;
+        uint8_t* oldThumbnailBuffer = g_pDeviceThumbnailBuffer;
+        uint8_t* oldQueryBuffer = g_pQueryBuffer;
+        double* oldResultBuffer = g_pResultBuffer;
+        size_t* oldIndexBuffer = g_pIndexBuffer;
+
+        // Detach old pointers so the error path below does not free them twice
+        // (they are released explicitly only after the new buffers are in place).
+        g_pDeviceThumbnailBuffer = nullptr;
+        g_pQueryBuffer = nullptr;
+        g_pResultBuffer = nullptr;
+        g_pIndexBuffer = nullptr;
+        g_bufferCapacity = 0;
+
+        if (capacity == 0 || thumbSize == 0) {
+            // Pure release (also the old ClearBuffer semantics when size was 0)
+            GpuReleaseBuffer(); // frees nothing now (detached), but resets state safely
+            if (oldThumbnailBuffer) cudaFree(oldThumbnailBuffer);
+            if (oldQueryBuffer) cudaFree(oldQueryBuffer);
+            if (oldResultBuffer) cudaFree(oldResultBuffer);
+            if (oldIndexBuffer) cudaFree(oldIndexBuffer);
+            return true;
+        }
 
         // Use temporary variable for validation before setting global state
         size_t testThumbSize = thumbSize;
 
         size_t freeMem = 0, totalMem = 0;
         cudaMemGetInfo(&freeMem, &totalMem);
-        
+
         size_t requiredMem = capacity * testThumbSize + capacity * sizeof(double) + capacity * sizeof(size_t) + testThumbSize;
-        
-        if (requiredMem > (size_t)(freeMem * 0.8)) 
+        // While migrating to the new buffers the old ones are still alive, so the
+        // transient peak is requiredMem + the old buffers' footprint. Account for
+        // it up front so a mid-copy OOM cannot happen: with insufficient headroom
+        // we keep the old (smaller but working) buffers instead.
+        if (preserve)
+            requiredMem += oldCapacity * oldThumbSize + oldCapacity * sizeof(double) + oldCapacity * sizeof(size_t) + oldThumbSize;
+
+        if (requiredMem > (size_t)(freeMem * 0.8))
         {
 #ifdef AD_LOGGER_ENABLE
             std::stringstream ss;
@@ -278,17 +317,22 @@ namespace ad
                << " MB, Free: " << (freeMem / 1024 / 1024) << " MB.";
             AD_LOG(ss.str().c_str());
 #endif
+            // Allocation failed: restore the OLD buffers (and their stride) so
+            // previously uploaded thumbnails keep working with the old capacity.
+            g_pDeviceThumbnailBuffer = oldThumbnailBuffer;
+            g_pQueryBuffer = oldQueryBuffer;
+            g_pResultBuffer = oldResultBuffer;
+            g_pIndexBuffer = oldIndexBuffer;
+            g_bufferCapacity = oldCapacity;
+            g_thumbSize = oldThumbSize;
             return false;
         }
 
-        // Only set g_thumbSize after memory check passes
-        g_thumbSize = testThumbSize;
-
         cudaError_t err;
-        err = cudaMalloc(&g_pDeviceThumbnailBuffer, capacity * g_thumbSize);
+        err = cudaMalloc(&g_pDeviceThumbnailBuffer, capacity * testThumbSize);
         if (err != cudaSuccess) goto error;
 
-        err = cudaMalloc(&g_pQueryBuffer, g_thumbSize);
+        err = cudaMalloc(&g_pQueryBuffer, testThumbSize);
         if (err != cudaSuccess) goto error;
 
         err = cudaMalloc(&g_pResultBuffer, capacity * sizeof(double));
@@ -297,18 +341,46 @@ namespace ad
         err = cudaMalloc(&g_pIndexBuffer, capacity * sizeof(size_t));
         if (err != cudaSuccess) goto error;
 
+        // Copy the preserved old thumbnails into the new (larger) buffer before
+        // releasing the old one. min(oldCapacity, capacity) slots hold live data;
+        // the rest of the new buffer is uninitialized garbage by design — callers
+        // only read slots they have uploaded (bounded by kernel maxBufferCapacity).
+        if (preserve && oldThumbnailBuffer)
+        {
+            const size_t copyCount = oldCapacity < capacity ? oldCapacity : capacity;
+            err = cudaMemcpy(g_pDeviceThumbnailBuffer, oldThumbnailBuffer,
+                             copyCount * testThumbSize, cudaMemcpyDeviceToDevice);
+            if (err != cudaSuccess) goto error;
+        }
+
+        // New buffers are fully in place — now it is safe to commit the new state
+        // and release the old ones.
+        g_thumbSize = testThumbSize;
         g_bufferCapacity = capacity;
+        if (oldThumbnailBuffer) cudaFree(oldThumbnailBuffer);
+        if (oldQueryBuffer) cudaFree(oldQueryBuffer);
+        if (oldResultBuffer) cudaFree(oldResultBuffer);
+        if (oldIndexBuffer) cudaFree(oldIndexBuffer);
 #ifdef AD_LOGGER_ENABLE
         {
             std::stringstream ss;
-            ss << "GPU: VRAM Allocated. Capacity: " << capacity << " units. Thumbnail Size: " << g_thumbSize << " bytes. Required: " << (requiredMem / 1024 / 1024) << " MB. Free VRAM: " << (freeMem / 1024 / 1024) << " MB.";
+            ss << "GPU: VRAM Allocated. Capacity: " << capacity << " units. Thumbnail Size: " << g_thumbSize << " bytes. Required: " << (requiredMem / 1024 / 1024) << " MB. Free VRAM: " << (freeMem / 1024 / 1024) << " MB."
+               << (preserve ? " (preserved previous thumbnails)" : "");
             AD_LOG(ss.str().c_str());
         }
 #endif
         return true;
 
     error:
+        // Free the half-built NEW buffers, then restore the old ones with their
+        // original stride so live thumbnails survive this failure.
         GpuReleaseBuffer();
+        g_pDeviceThumbnailBuffer = oldThumbnailBuffer;
+        g_pQueryBuffer = oldQueryBuffer;
+        g_pResultBuffer = oldResultBuffer;
+        g_pIndexBuffer = oldIndexBuffer;
+        g_bufferCapacity = oldCapacity;
+        g_thumbSize = oldThumbSize;
         return false;
     }
 
@@ -329,6 +401,16 @@ namespace ad
     {
         GpuReleaseBuffer();
         cudaDeviceReset();
+    }
+
+    size_t GpuCurrentCapacity()
+    {
+        return g_bufferCapacity;
+    }
+
+    size_t GpuCurrentThumbSize()
+    {
+        return g_thumbSize;
     }
 
     bool GpuUploadThumbnail(size_t index, const uint8_t* pData)

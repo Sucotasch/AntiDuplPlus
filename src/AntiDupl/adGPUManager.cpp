@@ -24,6 +24,7 @@
 #include "adGPUManager.h"
 #include "adLogger.h"
 #include <cstring>
+#include <vector>
 #include <windows.h>
 
 #define AD_DEBUG(msg) OutputDebugStringA(msg)
@@ -95,12 +96,25 @@ namespace ad
         size_t newCapacity = (size_t)(required * 1.2);
         if (newCapacity < 1024) newCapacity = 1024; // Minimum buffer to avoid frequent reallocs
 
+        const bool sameThumbSize = (m_capacity > 0 && thumbSize == m_thumbSize);
+
         if (GpuCreateBuffer(newCapacity, thumbSize))
         {
             m_capacity = newCapacity;
             m_thumbSize = thumbSize;
+            // Growth with the same thumbSize copies old slots over (D2D), so the
+            // uploaded-set stays valid. A thumbSize change starts from an empty
+            // buffer: every old slot would hold differently-scaled pixels.
+            if (!sameThumbSize)
+                m_uploaded.clear();
             return true;
         }
+        // GpuCreateBuffer restores the previous buffers on failure, so keep the
+        // manager state in sync with what is actually allocated: retry the same
+        // request instead of skipping the growth (required <= m_capacity) and
+        // then failing every UploadThumbnail for indexes beyond the real capacity.
+        m_capacity = GpuCurrentCapacity();
+        m_thumbSize = GpuCurrentThumbSize();
         return false;
     }
 }

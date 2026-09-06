@@ -79,7 +79,10 @@ namespace ad
             }
 
             TView * pView = new TView(scaledWidth, scaledHeight, TView::Bgra32, NULL, 4);
-            if (::tjDecompress2(_handle, data, size, pView->data, scaledWidth, 0, scaledHeight, ::TJPF_RGBA, flags) != 0 && ::tjGetErrorCode(_handle) != ::TJERR_WARNING)
+            // TJPF_BGRA writes B,G,R,A per pixel — exactly Simd's Bgra32 memory layout
+            // (blue at the lowest address). TJPF_RGBA here previously swapped R/B channels,
+            // corrupting luma of every live-decoded JPEG (see audit P1-1).
+            if (::tjDecompress2(_handle, data, size, pView->data, scaledWidth, 0, scaledHeight, ::TJPF_BGRA, flags) != 0 && ::tjGetErrorCode(_handle) != ::TJERR_WARNING)
             {
                 delete pView;
                 pView = NULL;

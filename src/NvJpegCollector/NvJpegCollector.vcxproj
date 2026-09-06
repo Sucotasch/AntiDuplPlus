@@ -49,7 +49,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>Simd.lib;Base.lib;Sse41.lib;Avx2.lib;Avx512bw.lib;Avx512vnni.lib;AmxBf16.lib;nvjpeg.lib;cudart.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Simd.lib;Base.lib;Sse41.lib;Avx2.lib;Avx512bw.lib;Avx512vnni.lib;AmxBf16.lib;nvjpeg.lib;cudart.lib;shlwapi.lib;libwebp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ProjectDir)..\vcpkg_installed\x64-windows-static\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>

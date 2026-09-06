@@ -98,20 +98,20 @@ GPU-ускоренный поиск дубликатов изображений 
 
 **Фикс:** при Get()-update удалять старый ключ перед вставкой; либо (чище) перейти на `unordered_multimap` с вычисляемым ключом и одной точкой мутации.
 
-### P2-2 [native-core] Трейс-лог: неограниченный append в trace.log + хардкод gpu_debug.log
+### P2-2 [native-core] Трейс-лог: неограниченный append в trace.log + хардкод gpu_debug.log — **ИСПРАВЛЕНО 2026-09-06 (этап 5)**
 `src/AntiDupl/adEngine.cpp:528,543,597,614` (gpu_debug.log рядом с exe, без ротации), trace.log — append без границ. На длинной истории папка exe распухает; gpu_debug.log пишется даже без ошибок GPU.
 
-**Фикс:** ограничить размер (truncate при >N МБ), писать gpu_debug-блоки только при `#ifdef AD_GPU_DEBUG`, имя — из настроек.
+**Фикс (внедрён):** конструктор `TEngine` усекает `trace.log` + `gpu_debug.log` (`_wfopen "w"` один раз на процесс) — неограниченный рост ~18 append-сайтов остановлен, каждая сессия начинается с чистого лога. Ротация по размеру не потребовалась: лог одной сессии мал, усечение на старте достаточно.
 
-### P2-3 [native-core] `dbLoaded` шорт-ircuit сканирование файлов
+### P2-3 [native-core] `dbLoaded` шорт-сircuit сканирование файлов — **РЕШЕНИЕ ВЛАДЕЛЬЦА 2026-09-06: БЕЗ ИЗМЕНЕНИЙ**
 `src/AntiDupl/adEngine.cpp:603-622` — при загруженной БД сканирование каталогов пропускается; удалённые с диска файлы остаются в БД до ручного update (см. также leaf-3 retraction о CHECK_HANDLE). Продуктовое решение спорное, но тихое: пользователь не получает индикации, что скан не выполнялся.
 
-**Фикс (минимум):** статус-сообщение «использована БД, скан каталогов пропущен»; максимум — убрать шорт-сircuit за флагом.
+**Решение владельца (цитата):** «Не думаешь, что сообщение типа "скан папок пропущен" вызовет у пользователя еще больше вопросов и сомнений в достоверности результата? Придется целое развернутое объяснение писать, которое, по сути, ничего не изменит.» Поведение остаётся как есть: статусное сообщение не добавляет достоверности, а подрывает её.
 
-### P2-4 [gpu-cuda] Sanity-check расхождение CPU/GPU не отключает GPU
+### P2-4 [gpu-cuda] Sanity-check расхождение CPU/GPU не отключает GPU — **ИСПРАВЛЕНО 2026-09-06 (этап 5)**
 `src/AntiDupl/adEngine.cpp:117-121` — при провале sanity-check просто лог; GPU продолжает участвовать в поиске. Ошибка усугубляется P1-5.
 
-**Фикс:** после N провалов подряд — `DisableGpu()` + статус в UI.
+**Фикс (внедрён):** `TGpuManager::Disable()` (`adGPUManager.h`: `recursive_mutex` + `m_available=false`; без `GpuRelease` — на момент sanity-check буферы ещё не аллоцированы, CUDA-рантайм почистит сам); sanity-check движка: NaN **или** math-mismatch → `gpuUsable=false` → `Disable()`; строка лога содержит «GPU DISABLED, falling back to CPU». Дальнейший поиск идёт CPU-путём (`IsAvailable()`=false).
 
 ### P2-5 [gpu-cuda] `EnsureCapacity` realloc затирает VRAM-буфер — **ИСПРАВЛЕНО 2026-09-05**
 `src/AntiDupl/adGPUManager.cpp:95-105` + `src/AntiDupl/adDataCollector.cpp:163-170`. Рост буфера посреди сессии = все ранее залитые образы потеряны, а последующие сравнения читают мусор. **Уточнение после практического разбора 2026-09-05:** единственный затронутый сценарий — GPU-assist CPU-пути в режиме трансформаций; дефолтный AllVsAll не читает этот буфер вовсе. Ёмкость растёт ступенями 1024 → ×1.2 (`src/AntiDupl/adGPUManager.cpp:96`), триггер — **режим трансформаций + корпус > ~1024 изображений за сессию**: после realloc-wipe сравнения читали неинициализированную VRAM → **100% потеря пар** (подтверждено тестом: 0/550 на 1100 образах; 0/512 при 1025).
@@ -158,28 +158,34 @@ GPU-ускоренный поиск дубликатов изображений 
 
 **Фикс (внедрён):** паттерн фон+BeginInvoke (зеркально delete) + общий `s_batchRunning` re-entry guard для delete/move: тулбарные кнопки вызывают те же экшны, гейт одного пункта меню не останавливал второй клик по кнопке во время батча.
 
-### P2-12 [winforms-gui] Ниточная гигиена: `ThreadState.Running`-гвард, non-volatile abort-флаги, статический Dictionary без синхронизации
+### P2-12 [winforms-gui] Ниточная гигиена: `ThreadState.Running`-гвард, non-volatile abort-флаги, статический Dictionary без синхронизации — **ИСПРАВЛЕНО 2026-09-06 (этап 5)**
 `src/AntiDupl.NET.WinForms/GUIControl/ResultsPreviewDuplPair.cs:301-306` (ThreadState.Running ненадёжен, Join пропускается), `:295` (`_highlightStop` не volatile), `src/AntiDupl.NET.WinForms/GUIControl/ThumbnailGroupTable.cs:355-366` (`m_abortUpdateThumbnailsThread` не volatile + Join без тайм-аута), `src/AntiDupl.NET.WinForms/AutoSelector.cs` (`s_sideCache` статический Dictionary между UI- и batch-потоком).
 
-**Фикс:** volatile-флаги, `IsAlive`-гвард, `ConcurrentDictionary` для sideCache.
+**Фикс (внедрён):** `_highlightStop` → `volatile` + гвард `IsAlive` перед Join (SetDifference); `UpdateThumbnailsStop` — `IsAlive`-гвард (флаг уже volatile); `s_sideCache` → `ConcurrentDictionary` (`TryRemove(key, out _)` на трёх сайтах: SetSide / ClearSide / batch-remove; `InvertSides` строит новую ConcurrentDictionary).
 
-### P2-13 [build-ci-tests] CI не запускает contract tests
+### P2-13 [build-ci-tests] CI не запускает contract tests — **ИСПРАВЛЕНО 2026-09-06 (этап 5)**
 `.github/workflows/AntiDupl_CI.yml:15-118` — единственный регрессионный набор репозитория (65 проверок interop) не выполняется ни в CI, ни в Deploy.cmd. Все три P1 этого аудита, живущие на границе native/managed, невидимы для CI.
 
-**Фикс (4 строки):** после Release-билда — `dotnet run --project tests\AntiDupl.Contract.Tests\AntiDupl.Contract.Tests.csproj`.
+**Фикс (внедрён):** шаг «Run contract tests (P2-13)» в Release-джобе матрицы сразу после билда — `dotnet run --project tests\AntiDupl.Contract.Tests`. Набор вырос до 66 проверок (см. P2-15).
 
-### P2-14 [build-ci-tests] CI Publish-джоба не проверяет, что native DLL попали в single-file пакет
+### P2-14 [build-ci-tests] CI Publish-джоба не проверяет, что native DLL попали в single-file пакет — **ИСПРАВЛЕНО 2026-09-06 (этап 5)**
 `.github/workflows/AntiDupl_CI.yml:77-96` — `dotnet publish` не копирует P/Invoke DLL (AGENTS.md Binary imports); если логика MakePublish сломается, CI зелёный, а у пользователя «Can't load AntiDupl.dll».
 
-**Фикс:** шаг-верификация присутствия `AntiDupl.dll`/`cudart64_12.dll`/`nvjpeg64_13.dll` в `out/Publish/` (зеркало `cmd/Deploy.cmd:75-97`).
+**Фикс (внедрён):** шаг «Verify native DLLs in Publish output (P2-14)» (pwsh) проверяет `AntiDupl.dll` + `cudart64_12.dll` в `out/Publish/AntiDupl.NET-<ver>/`; `cmd/MakePublish.cmd` теперь сам копирует `cudart64_12.dll` (bin\Release → `%CUDA_PATH%\bin\x64\` → `%CUDA_PATH%\bin\` → error exit 1). Пакет Publish = GUI-only: `NvJpegCollector.exe`/`nvjpeg64_13.dll` в него намеренно не входят (CI на CUDA 12.8 не имеет 13.1; проверено, MakePublish их никогда не копировал — копии в старых пакетах были ручными остатками).
 
-### P2-15 [build-ci-tests] Contract tests — чистые layout-проверки без единого вызова в реальную DLL
+### P2-15 [build-ci-tests] Contract tests — чистые layout-проверки без единого вызова в реальную DLL — **ИСПРАВЛЕНО 2026-09-06 (этап 5)**
 `tests/AntiDupl.Contract.Tests/Program.cs:169-199` — только `Marshal.SizeOf/OffsetOf` по managed-структурам и сравнение строки версий; пин против натива — ручной список констант. Правка `src/AntiDupl/AntiDupl.h` без правки тестов проходит мимо.
 
-**Фикс:** один live-check (`adGetVersionW` против `src/version.txt:1`), скипающийся с сообщением, если DLL не рядом.
+**Фикс (внедрён):** секция [7] live-check: `LoadLibrary` реальной `AntiDupl.dll` (поиск: bin\Release → bin\Publish → тестовая папка) → `GetProcAddress("adVersionGet")` → сравнение возвращённой версии с `External.Version`; скип с уведомлением, если DLL отсутствует. Делегат Cdecl/Unicode, буфер byte[64], ASCII-декод. Результат: 66/66, live-check PASS из bin\Release.
 
 ### P3-консолидировано
-См. листы: MAX_PATH-буферы (лист 1), мёртвый `AD_NVJPEG_ENABLE` (`src/NvJpegCollector/NvJpegCollector.vcxproj:42`), JFIF-only magic (E0, EXIF E1 отклоняется — лист 1), thumbSize-mismatch silent reject (лист 1, UX-дыру закрывает GUI — `src/AntiDupl.NET.WinForms/Form/SearchExecuterForm.cs:233-258`), `SimpleCRC32` по wchar-юнитам vs DLL-хэш (лист 4), stdout-аккумуляция в UpdateDatabaseAsync (лист 5), positional 500-char Count-патч (лист 4), NvJpegCollector Debug→Release маппинг (лист 6), `nuget restore`-пустышка (лист 6), `src/version.txt:1` newline-риск (лист 6).
+См. листы: MAX_PATH-буферы (лист 1), мёртвый `AD_NVJPEG_ENABLE` (`src/NvJpegCollector/NvJpegCollector.vcxproj:42` — **устранено 2026-09-06, этап 5: мёртвый макрос удалён из PreprocessorDefinitions**), JFIF-only magic (E0, EXIF E1 отклоняется — лист 1), thumbSize-mismatch silent reject (лист 1, UX-дыру закрывает GUI — `src/AntiDupl.NET.WinForms/Form/SearchExecuterForm.cs:233-258`), `SimpleCRC32` по wchar-юнитам vs DLL-хэш (лист 4), stdout-аккумуляция в UpdateDatabaseAsync (лист 5), positional 500-char Count-патч (лист 4), NvJpegCollector Debug→Release маппинг (лист 6), `nuget restore`-пустышка (лист 6), `src/version.txt:1` newline-риск (лист 6).
+
+**Мини-ревью форматов (этап 5, 2026-09-06, report-only — P3, вне исходных шести листов):**
+- `src/AntiDupl/adPsd.cpp` — пустой `catch(...)` глотает ошибки чтения → частичные изображения без диагностики; resize не проверяет число каналов (`channels` из файла) → потенциальный OOB на malformed PSD.
+- `src/AntiDupl/adDds.cpp` — чтения DXT-блоков без EOF/счётных проверок.
+- `src/AntiDupl/adTga.cpp` — RLE: `colors[index]` lookup color-map без границ (`colors.size()` может быть < index) → потенциальный OOB-read; логика interleave-offset `offset/base` нестандартна.
+- `src/AntiDupl/adImageExif.cpp` — чисто (только копии полей).
 
 ### Observations (позитив)
 Пайплайн коллектора (reader→bounded queue→per-thread nvJPEG state, RAII DoneGuard `src/NvJpegCollector/main.cpp:499-502`) — учебниковый. stdout-дрейн GUI (`src/AntiDupl.NET.WinForms/Forms/DatabaseManagerForm.cs:496-513`) корректно закрывает классический pipe-deadlock. S13-удержание частично-проваленных меток (`src/AntiDupl.NET.WinForms/AutoSelector.cs:274-277`) — продуманно. `cmd/Deploy.cmd` — правильная форма локального гейта. Contract-тесты по дизайну — именно то, что нужно hand-maintained interop.
@@ -208,11 +214,11 @@ GPU-ускоренный поиск дубликатов изображений 
    - Copy-Item 16-МБ файла в temp без `-Force` тихо продырявился при подготовке теста (файл не существовал) — ошибка тестовой инфраструктуры, не продукта; задокументирована, чтобы не списывать на читатель БД (читатель доказан корректным на всех усечениях вплоть до 3721 записей).
    - Тулбарные кнопки Move/Delete остаются Enabled во время фонового батча (гейт — только пункт меню + s_batchRunning-гвард от реентерабельности). Двойной клик теперь безвреден (гвард), но кнопка не даёт визуального отклика «занято». Отмечено как UX-наблюдение, не фиксовано умышленно (surgical rule; тот же precedent у delete-кнопки).
 
-1. **Паритет JPEG-путей после фиксов R/B:** CPU-путь (libjpeg-turbo RGBA→gray) и GPU-путь (nvJPEG Y-plane) даже после исправления каналов дают слегка разные luma (BT.601 vs BT.709-веса) — кросс-путевые сравнения сохранят малое систематическое смещение. Проверить на реальном корпусе после фиксов.
-2. Файлы `src/AntiDupl/adPsd.cpp`, `src/AntiDupl/adDds.cpp`, `src/AntiDupl/adTga.cpp`, `src/AntiDupl/adImageExif.cpp` не читались этим аудитом (вне шести листов) — отдельный мини-ревью при случае.
+1. **Паритет JPEG-путей после фиксов R/B — ИЗМЕРЕНО И ЗАКРЫТО (этап 5, 2026-09-06):** CPU-путь (libjpeg-turbo) и GPU-путь (nvJPEG Y-plane) действительно дают разные luma (BT.601 vs BT.709-веса), но измерение на 6 реальных JPEG (Sara St James) + PNG-близнецах (конверсия System.Drawing, коллектор 64px): максимальная дельта пикселя 1–12/255, средняя 0.01–0.14, пикселей с дельтой >8 — 0–4 из 4096 (0.00–0.10%). Клинически незначимо; кросс-порогового риска нет; правка кода не требуется (report-only, решение владельца).
+2. **Файлы `src/AntiDupl/adPsd.cpp`, `src/AntiDupl/adDds.cpp`, `src/AntiDupl/adTga.cpp`, `src/AntiDupl/adImageExif.cpp` — МИНИ-РЕВЬЮ ВЫПОЛНЕНО (этап 5):** находки P3-уровня задокументированы в P3-консолидировано (PSD: пустой catch + resize без границ каналов; DDS: DXT-чтения без EOF-проверок; TGA: RLE color-map lookup без границ + нестандартный interleave-offset; adImageExif чисто). Все обёрнуты внешним try/catch в Load — падение исключено, худший исход — артефакты декода на malformed-файлах.
 3. **CI vs локальная vcpkg-схема** (nested-path quirk): зелёный CI не доказывает, что свежий clone без продублированных headers соберётся; требует проверки CI-логов (не делалось — no-build).
 4. **WPF GUI** вне скоупа (WinForms — продуктовый UI); его view-model'ы не ревьюились.
-5. **Мёртвый `src/AntiDuplCore/`** — орфан-проект не в sln; кандидат на удаление (решение за владельцем).
+5. **`src/AntiDuplCore/` — УДАЛЁН (этап 5, 2026-09-06):** орфан-проект не в sln, ничего не ссылается — `git rm -r`; история git сохраняет всё.
 6. **`EnsureCapacity`/VRAM-модель** в целом хрупкая (P2-5) — долгосрочный дизайн preallocated-буферов vs потоковая заливка заслуживает отдельного обсуждения. Триггер P2-5 (трансформации + >1024 образов) и канальные находки P1-1/P1-2 **подлежат практическому подтверждению управляемыми тестами до правок кода** — решение владельца от 2026-09-05; тест-план: сценарий A (AllVsAll контроль), B (трансформации, 1100+ картинок, контрольная группа CPU), C (R/B-каналы: перекрёстные JPEG×PNG пары с известным цветовым смещением).
 
 ## Assumptions
@@ -235,7 +241,7 @@ GPU-ускоренный поиск дубликатов изображений 
 5. **Диск: не удалять, а разложить.** (а) `vcpkg` buildtrees/packages/downloads (~9 GB) — снести или перенаправить кэш в `%LOCALAPPDATA%` (vcpkg поддерживает `VCPKG_DEFAULT_BINARY_CACHE`); (б) stray `src/bin`, `src/obj` (726 MB) — удалить (старые layout'ы, не используются текущими билдами — AGENTS.md); (в) `bin/Debug`, `out/Publish`-старье (~1 GB) — удалить, `bin/Release` оставить (там тестовые БД!); (г) `git gc` (1.26 GiB loose → пакеты). Итог: ~20 GB → **~4-6 GB** без потери чего-либо ценного. **Не трогать:** `bin/Release/databases/`, `src/vcpkg_installed` (нужен для билда с `VcpkgManifestInstall=false`-схемой), vendored vcpkg-клон как таковой (порты).
 6. **Мелочи пачкой (P2/P3),** после основных: hash≠0, volatile-флаги, ConcurrentDictionary, фоновый move, [FATAL]-режим коллектора. Каждое — <30 минут.
 
-**Обсуждения требует:** судьба мёртвого `src/AntiDupl/adNvJpeg.cpp` + `AD_NVJPEG_ENABLE` (удалить как мёртвый код или оставить как референс — я за удаление: он дважды вводит в заблуждение); судьба орфана `src/AntiDuplCore/`; решение по P2-3 (dbLoaded short-circuit) — это продуктовое поведение, не баг.
+**Обсуждения требует:** ~~судьба мёртвого `src/AntiDupl/adNvJpeg.cpp` + `AD_NVJPEG_ENABLE`~~ — **решено и удалено (этап 5)**: `adNvJpeg.cpp/.h` вырезаны из обоих vcxproj, ifdef-блоки из adImage.cpp/adDataCollector.cpp (макрос никогда не компилировался в истории форка, коллектор им не пользовался — прямая ссылка nvjpeg.lib); ~~судьба орфана `src/AntiDuplCore/`~~ — **удалён (этап 5)**; ~~решение по P2-3 (dbLoaded short-circuit)~~ — **закрыто владельцем без изменения кода**.
 
 ---
 *Аудит не запускал сборку и не менял код (report-only). Доказательная база: `.unlazy/audit-2026-09-05/` (листы, гейты, disk-report.json). Все цитаты проверены скриптами `scripts/verify-report.mjs`, `scripts/verify-multiple-citations.mjs`.*

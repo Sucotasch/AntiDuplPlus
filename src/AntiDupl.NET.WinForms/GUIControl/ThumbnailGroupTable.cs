@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar.
@@ -360,7 +360,11 @@ namespace AntiDupl.NET.WinForms
         public void UpdateThumbnailsStop()
         {
             m_abortUpdateThumbnailsThread = true;
-            if (m_updateThumbnailsThread != null)
+            // P2-12: IsAlive guard — Join on an already-finished thread is
+            // harmless, but checking first avoids even touching a thread that
+            // exited between assignment and this call. The flag is volatile,
+            // so a live worker exits at the next group boundary.
+            if (m_updateThumbnailsThread != null && m_updateThumbnailsThread.IsAlive)
             {
                 m_updateThumbnailsThread.Join();
             }

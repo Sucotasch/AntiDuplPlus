@@ -18,6 +18,8 @@
 #include <condition_variable>
 #include <atomic>
 #include <limits>
+#include <fcntl.h>
+#include <io.h>
 #include <shlobj.h>
 #include <windows.h>
 #include <tchar.h>
@@ -300,6 +302,15 @@ int wmain(int argc, wchar_t* argv[]) {
         if (wcscmp(argv[i], L"--no-pause") == 0) { g_noPause = true; break; }
     SetUnhandledExceptionFilter(CrashHandler);
     SetConsoleOutputCP(CP_UTF8);
+    // Cyrillic output fix: wcout converts through the CRT codecvt facet. In the
+    // default "C" locale a wide char that has no narrow representation sets the
+    // failbit and ALL further output is silently dropped (the collector looks
+    // "hung without logs" when run with a Cyrillic database name). Switching
+    // stdout/stderr to UTF-8 text mode makes every wide string encodable —
+    // pipes (GUI) get UTF-8 bytes which the .NET reader decodes as UTF-8, and
+    // an interactive UTF-8 console shows the characters correctly.
+    _setmode(_fileno(stdout), _O_U8TEXT);
+    _setmode(_fileno(stderr), _O_U8TEXT);
     CoInitialize(NULL);
     try { return wmain_impl(argc, argv); }
     catch (const std::exception& e) {

@@ -198,6 +198,54 @@ namespace AntiDupl.Contract.Tests
                 Eq("External.Version", External.Version, versionTxt.Trim());
             });
 
+            // P2-15: everything above exercises only static metadata. This one
+            // check loads the real native DLL when it can be found next to the
+            // build outputs and verifies the exported version matches the
+            // generated External.cs / src/version.txt — catching a stale or
+            // mismatched native build that layout checks alone cannot see.
+            // When no DLL is present (e.g. a managed-only CI lane) the check
+            // is skipped with a notice.
+            Console.WriteLine("\n[7] Live version check (native DLL, skipped if absent)");
+            string dllPath = FindNativeDll();
+            if (dllPath == null)
+            {
+                Console.WriteLine("  [SKIP] AntiDupl.dll not found near test outputs (managed-only lane).");
+            }
+            else
+            {
+                Check($"adVersionGet(AD_VERSION_TYPE_ANTIDUPL) from {dllPath}", () =>
+                {
+                    IntPtr hModule = LoadLibrary(dllPath);
+                    if (hModule == IntPtr.Zero)
+                        throw new InvalidOperationException($"LoadLibrary failed: {dllPath}");
+                    try
+                    {
+                        IntPtr proc = GetProcAddress(hModule, "adVersionGet");
+                        if (proc == IntPtr.Zero)
+                            throw new InvalidOperationException("export adVersionGet not found in AntiDupl.dll");
+
+                        var versionGet = Marshal.GetDelegateForFunctionPointer<CoreDll.adVersionGet_fn>(proc);
+                        byte[] buf = new byte[64];
+                        unsafe
+                        {
+                            fixed (byte* pBuf = buf)
+                            {
+                                IntPtr size = (IntPtr)buf.Length;
+                                Error err = versionGet(CoreDll.VersionType.AntiDupl, (IntPtr)pBuf, (IntPtr)(&size));
+                                Eq("adVersionGet return", err, Error.Ok);
+                                int len = Array.IndexOf(buf, (byte)0);
+                                string version = System.Text.Encoding.ASCII.GetString(buf, 0, len < 0 ? buf.Length : len);
+                                Eq("native AD_VERSION == External.Version", version, External.Version);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        FreeLibrary(hModule);
+                    }
+                });
+            }
+
             Console.WriteLine();
             Console.WriteLine($"RESULT: {_passed} passed, {_failed} failed.");
             return _failed == 0 ? 0 : 1;
@@ -219,5 +267,48 @@ namespace AntiDupl.Contract.Tests
             }
             throw new InvalidOperationException("Could not locate repo root (src/version.txt not found).");
         }
+
+        private static string FindNativeDll()
+        {
+            // Search the usual build-output locations for the native DLL.
+            // 1) bin/Release (Deploy.cmd target — the GUI's runtime folder)
+            // 2) bin/Publish (publish lane)
+            // 3) next to the test binary itself (copied manually / special setups)
+            string root = FindRepoRootPath();
+            string[] candidates =
+            {
+                Path.Combine(root, "bin", "Release", "AntiDupl.dll"),
+                Path.Combine(root, "bin", "Publish", "AntiDupl.dll"),
+                Path.Combine(AppContext.BaseDirectory, "AntiDupl.dll"),
+            };
+            foreach (string c in candidates)
+                if (File.Exists(c))
+                    return c;
+            return null;
+        }
+
+        private static string FindRepoRootPath()
+        {
+            string dir = AppContext.BaseDirectory;
+            while (!string.IsNullOrEmpty(dir))
+            {
+                if (File.Exists(Path.Combine(dir, "src", "version.txt")))
+                    return dir;
+                string parent = Path.GetDirectoryName(dir);
+                if (parent == dir)
+                    break;
+                dir = parent;
+            }
+            throw new InvalidOperationException("Could not locate repo root (src/version.txt not found).");
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr LoadLibrary(string fileName);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Ansi)]
+        private static extern IntPtr GetProcAddress(IntPtr module, string procName);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool FreeLibrary(IntPtr module);
     }
 }

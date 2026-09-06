@@ -66,6 +66,23 @@ namespace ad
         TLogger::s_logger.SetFileOut((UserPath() + TEXT("\\debug_log.txt")).c_str(), true);
 #endif//AD_LOGGER_ENABLE
 
+        // P2-2: trace.log / gpu_debug.log are opened with "a" at ~18 sites and
+        // were never truncated — a long-lived install grew them without bound.
+        // Truncate both once per process here: the logs then hold exactly the
+        // current session, same policy gpu_debug.log already follows per Search().
+        {
+            wchar_t exePath[MAX_PATH];
+            if (GetModuleFileNameW(NULL, exePath, MAX_PATH)) {
+                std::wstring dir(exePath);
+                dir = dir.substr(0, dir.find_last_of(L"\\/"));
+                for (const wchar_t* name : { L"\\trace.log", L"\\gpu_debug.log" }) {
+                    FILE* f = _wfopen((dir + name).c_str(), L"w");
+                    if (f)
+                        fclose(f);
+                }
+            }
+        }
+
         AD_DEBUG("TEngine: Creating TInit\n");
         m_pInit = new TInit();
 
@@ -116,8 +133,10 @@ namespace ad
             // P1-5: NaN means a CUDA error inside the sanity test itself (alloc/
             // copy/launch/readback failure) — not a math mismatch, and never a
             // valid comparison result.
+            bool gpuUsable = true;
             if (std::isnan(gpuSum)) {
                 ts << "CUDA Sanity Check: FAILED (CUDA error — no GPU result)";
+                gpuUsable = false;
             }
             else {
                 ts << "CUDA Sanity Check: CPU=" << cpuSum << ", GPU=" << gpuSum;
@@ -125,9 +144,17 @@ namespace ad
                 if (fabs(cpuSum - gpuSum) <= tolerance) {
                     ts << " [SUCCESS - PARITY MATCH]";
                 } else {
-                    ts << " [FAILURE - MATH MISMATCH] Tolerance: " << tolerance;
+                    // P2-4: a proven math mismatch means every later GPU compare
+                    // would silently produce wrong differences — disable the GPU
+                    // (all compare paths then fall back to CPU) instead of running
+                    // on with corrupted results.
+                    ts << " [FAILURE - MATH MISMATCH] Tolerance: " << tolerance
+                       << " — GPU DISABLED, falling back to CPU";
+                    gpuUsable = false;
                 }
             }
+            if (!gpuUsable)
+                m_pGpuManager->Disable();
 #ifdef AD_LOGGER_ENABLE
             AD_LOG(ts.str().c_str());
 #endif//AD_LOGGER_ENABLE

@@ -38,6 +38,21 @@ xcopy %ROOT_DIR%\bin\Publish\AntiDupl.pdb %PUBLISH_DIR% /y
 xcopy %ROOT_DIR%\bin\Publish\AntiDupl.NET.WinForms.runtimeconfig.json %PUBLISH_DIR% /y
 xcopy %ROOT_DIR%\bin\Publish\AntiDupl.NET.WPF.runtimeconfig.json %PUBLISH_DIR% /y
 
+rem P2-14: AntiDupl.dll P/Invokes cudart64_12.dll (see AGENTS.md "Binary
+rem imports") and dotnet publish does not copy native dependencies. Copy it
+rem from the local build output (Deploy.cmd keeps it in bin\Release) or from
+rem the CUDA toolkit as a fallback, so the portable package actually starts.
+if exist %ROOT_DIR%\bin\Release\cudart64_12.dll (
+xcopy %ROOT_DIR%\bin\Release\cudart64_12.dll %PUBLISH_DIR% /y
+) else if exist "%CUDA_PATH%\bin\x64\cudart64_12.dll" (
+xcopy "%CUDA_PATH%\bin\x64\cudart64_12.dll" %PUBLISH_DIR% /y
+) else if exist "%CUDA_PATH%\bin\cudart64_12.dll" (
+xcopy "%CUDA_PATH%\bin\cudart64_12.dll" %PUBLISH_DIR% /y
+) else (
+echo [ERROR] cudart64_12.dll not found - publish package would fail to start!
+exit /b 1
+)
+
 xcopy %PUBLISH_DIR% %TMP_DIR% /y /i /s
 
 if exist %RAR_EXE% (

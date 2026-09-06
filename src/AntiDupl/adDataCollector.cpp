@@ -31,9 +31,6 @@
 #include "adDataCollector.h"
 #include "adImageUtils.h"
 #include "adTurboJpeg.h"
-#ifdef AD_NVJPEG_ENABLE
-#include "adNvJpeg.h"
-#endif
 #include "adPixelData.h"
 #include "adBlurringDetector.h"
 #include "adGPUManager.h"
@@ -90,21 +87,9 @@ namespace ad
                 pImageData->width = (TUInt32)pTurbo->OriginalWidth();
             }
             else
-#endif
-#ifdef AD_NVJPEG_ENABLE
             {
-                TNvJpeg* pNvJpeg = dynamic_cast<TNvJpeg*>(pImage);
-                if (pNvJpeg && pNvJpeg->OriginalWidth() > 0 && pNvJpeg->OriginalHeight() > 0) {
-                    pImageData->height = (TUInt32)pNvJpeg->OriginalHeight();
-                    pImageData->width = (TUInt32)pNvJpeg->OriginalWidth();
-                }
-                else
-#endif
-                {
-                    pImageData->height = (TUInt32)pImage->View()->height;
-                    pImageData->width = (TUInt32)pImage->View()->width;
-                }
-#ifdef AD_NVJPEG_ENABLE
+                pImageData->height = (TUInt32)pImage->View()->height;
+                pImageData->width = (TUInt32)pImage->View()->width;
             }
 #endif
             pImageData->type = (TImageType)pImage->Format();

@@ -14,7 +14,11 @@ namespace AntiDupl.NET.WinForms
     public static class AutoSelector
     {
         // Side cache: normalized path pair → targeted image path (or null for DontCare)
-        private static Dictionary<string, string> s_sideCache = new Dictionary<string, string>();
+        // P2-12: written by batch threads (Apply/BatchRunAtOnce), read by the UI
+        // thread (GetTargetPath/GetTargetIndex during painting) — a plain
+        // Dictionary can corrupt or throw when a resize coincides with a read.
+        private static System.Collections.Concurrent.ConcurrentDictionary<string, string> s_sideCache =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
 
         public static IReadOnlyDictionary<string, string> SideCache => s_sideCache;
 
@@ -97,7 +101,7 @@ namespace AntiDupl.NET.WinForms
         public static void SetSide(CoreResult r, AutoSelectSide side)
         {
             if (side == AutoSelectSide.DontCare)
-                s_sideCache.Remove(GetKey(r));
+                s_sideCache.TryRemove(GetKey(r), out _);
             else
                 s_sideCache[GetKey(r)] = (side == AutoSelectSide.First) ? r.first.path : r.second.path;
         }
@@ -107,7 +111,7 @@ namespace AntiDupl.NET.WinForms
         /// </summary>
         public static void ClearSide(CoreResult r)
         {
-            s_sideCache.Remove(GetKey(r));
+            s_sideCache.TryRemove(GetKey(r), out _);
         }
 
         /// <summary>
@@ -118,7 +122,7 @@ namespace AntiDupl.NET.WinForms
             var results = core.GetResult(0, 1000000);
             if (results == null || results.Length == 0) return 0;
 
-            var newCache = new Dictionary<string, string>();
+            var newCache = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
             int inverted = 0;
 
             for (int i = 0; i < results.Length; i++)
@@ -274,7 +278,7 @@ namespace AntiDupl.NET.WinForms
             // Remove only the keys that were successfully acted upon, so that a partial
             // failure keeps the marking for the remaining rows (S13).
             foreach (var key in succeededKeys)
-                s_sideCache.Remove(key);
+                s_sideCache.TryRemove(key, out _);
 
             if (succeeded > 0)
             {

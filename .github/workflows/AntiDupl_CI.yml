@@ -82,6 +82,11 @@ jobs:
         Configuration: ${{ matrix.configuration }}
         
     - if: matrix.configuration == 'Release'
+      name: Run contract tests (P2-13)
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: dotnet run --project tests\AntiDupl.Contract.Tests\AntiDupl.Contract.Tests.csproj
+
+    - if: matrix.configuration == 'Release'
       name: Make release binary and source files
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
@@ -94,6 +99,30 @@ jobs:
       run: |
         cd cmd
         .\MakePublish.cmd
+
+    # P2-14: dotnet publish does not copy native P/Invoke DLLs — if the copy
+    # step above breaks or misses a dependency, the package would ship without
+    # them and fail at startup ("Can't load AntiDupl.dll"). Fail the build early
+    # instead of letting a broken package reach the artifact store.
+    # Note: the Publish package contains the GUI only (no NvJpegCollector.exe,
+    # no nvjpeg64_13.dll — those live in the full bin package).
+    - if: matrix.configuration == 'Publish'
+      name: Verify native DLLs in Publish output (P2-14)
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      shell: pwsh
+      run: |
+        $version = Get-Content src/version.txt
+        $pkgDir = "out\Publish\AntiDupl.NET-$version"
+        $required = @('AntiDupl.dll', 'cudart64_12.dll')
+        $missing = @()
+        foreach ($f in $required) {
+          if (-not (Test-Path (Join-Path $pkgDir $f))) { $missing += $f }
+        }
+        if ($missing.Count -gt 0) {
+          Write-Host "Missing native DLLs in $pkgDir : $($missing -join ', ')"
+          exit 1
+        }
+        Write-Host "Native DLLs verified: $($required -join ', ')"
       
     - if: matrix.configuration == 'Release'
       name: Upload build

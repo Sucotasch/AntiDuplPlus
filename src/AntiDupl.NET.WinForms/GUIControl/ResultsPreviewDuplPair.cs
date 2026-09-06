@@ -292,13 +292,19 @@ namespace AntiDupl.NET.WinForms
         private delegate void HighlightCompleteDelegate(List<Rectangle> rectangles);
         private event HighlightCompleteDelegate HighlightCompleteEvent;
         private Thread _thread;
-        private bool _highlightStop = false;
+        // P2-12: written by the UI thread, read by the diff worker — must be
+        // volatile so the worker observes the stop request promptly.
+        private volatile bool _highlightStop = false;
 
         private void SetDifference()
         {
             if (m_options.resultsOptions.HighlightDifference)
             {
-                if (_thread != null && _thread.ThreadState == System.Threading.ThreadState.Running)
+                // P2-12: ThreadState.Running misses other live states (e.g. the
+                // thread finishing between the check and Join); IsAlive is the
+                // reliable "still worth stopping" test. Join keeps no timeout
+                // risk: the worker checks _highlightStop each iteration.
+                if (_thread != null && _thread.IsAlive)
                 {
                     HighlightCompleteEvent -= new HighlightCompleteDelegate(HighlightCompleteEventHandler);
                     _highlightStop = true;

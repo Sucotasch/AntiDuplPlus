@@ -39,6 +39,18 @@ namespace ad
         bool IsAvailable() const { return m_available; }
         const GpuDeviceInfo& DeviceInfo() const { return m_deviceInfo; }
 
+        // P2-4: called when the sanity check proves the GPU produces wrong
+        // numbers — further GPU use would silently corrupt comparison results.
+        // Every public entry already falls back to the CPU path when
+        // !IsAvailable(), so this flips the same switch as "no GPU present".
+        // No device buffers can be allocated yet at the call site (the sanity
+        // check runs before any thumbnail upload); the CUDA runtime cleans up
+        // at process exit. The caller logs the reason.
+        void Disable() {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            m_available = false;
+        }
+
         bool UploadThumbnail(size_t index, const uint8_t* pData) {
             if (!m_available) return false;
             std::lock_guard<std::recursive_mutex> lock(m_mutex);

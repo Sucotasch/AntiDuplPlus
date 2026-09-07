@@ -446,9 +446,16 @@ namespace AntiDupl.NET.WinForms
             if (resultSize == 0)
             {
                 m_results = new CoreResult[0];
-                return;
             }
-            m_results = m_core.GetResult(0, resultSize);
+            else
+            {
+                m_results = m_core.GetResult(0, resultSize);
+            }
+            // P2-8: keep the AutoSelector side cache in sync with the live result
+            // list — after this, CountMarked/HasLongPaths/InvertSides are pure
+            // cache computations (no full GetResult marshalling per menu open), and
+            // markings from a previous search or removed rows never linger.
+            AutoSelector.PruneStaleEntries(m_results);
         }
 
         private void UpdateRows()

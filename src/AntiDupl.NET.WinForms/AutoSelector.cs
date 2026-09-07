@@ -51,6 +51,38 @@ namespace AntiDupl.NET.WinForms
             return path;
         }
 
+        // P2-8: the cache value is always the targeted path itself, and the cache is
+        // pruned against the live result list (ResultsListView.GetResults), so the
+        // counters/long-path checks below are pure cache computations — no full
+        // GetResult marshalling per menu open anymore.
+
+        /// <summary>
+        /// Remove cache entries whose key does not match any current result pair.
+        /// Called after the result list has been (re)loaded, so counters and batch
+        /// execution never see markings from a previous search or from pairs that
+        /// were removed from the results by single-row actions.
+        /// </summary>
+        public static void PruneStaleEntries(CoreResult[] results)
+        {
+            if (s_sideCache.IsEmpty) return;
+            if (results == null || results.Length == 0) { s_sideCache.Clear(); return; }
+
+            var liveKeys = new HashSet<string>(results.Length, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < results.Length; i++)
+            {
+                var r = results[i];
+                if (r == null || r.type != CoreDll.ResultType.DuplImagePair) continue;
+                liveKeys.Add(GetKey(r));
+            }
+
+            foreach (var key in s_sideCache.Keys)
+            {
+                if (!liveKeys.Contains(key))
+                    s_sideCache.TryRemove(key, out _);
+            }
+        }
+
+
         /// <summary>
         /// Get which position (0=first, 1=second, -1=none) the targeted image is in.
         /// </summary>
@@ -116,26 +148,29 @@ namespace AntiDupl.NET.WinForms
 
         /// <summary>
         /// Invert side cache: swap targeted image to the other one in each pair.
+        /// P2-8: works purely on cache keys — the key is the order-independent
+        /// "p1|p2" pair, and '|' cannot occur in a Windows path, so the targeted
+        /// side is always the *other* component of the same key. No GetResult.
         /// </summary>
         public static int InvertSides(CoreLib core)
         {
-            var results = core.GetResult(0, 1000000);
-            if (results == null || results.Length == 0) return 0;
-
-            var newCache = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
             int inverted = 0;
+            var newCache = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
 
-            for (int i = 0; i < results.Length; i++)
+            foreach (var kv in s_sideCache)
             {
-                var r = results[i];
-                string key = GetKey(r);
-                string oldPath;
-                if (s_sideCache.TryGetValue(key, out oldPath))
+                string key = kv.Key;
+                int sep = key.IndexOf('|');
+                if (sep < 0 || sep == key.Length - 1) continue; // malformed key — drop
+                string p1 = key.Substring(0, sep);
+                string p2 = key.Substring(sep + 1);
+
+                string newPath =
+                    string.Equals(kv.Value, p1, StringComparison.OrdinalIgnoreCase) ? p2 :
+                    string.Equals(kv.Value, p2, StringComparison.OrdinalIgnoreCase) ? p1 :
+                    null; // value no longer matches either side — drop the marking
+                if (newPath != null)
                 {
-                    // Swap: if was targeting first, now target second, and vice versa
-                    string newPath = string.Equals(oldPath, r.first?.path, StringComparison.OrdinalIgnoreCase)
-                        ? r.second.path
-                        : r.first.path;
                     newCache[key] = newPath;
                     inverted++;
                 }
@@ -158,39 +193,30 @@ namespace AntiDupl.NET.WinForms
         /// <summary>
         /// <summary>
         /// Number of results currently marked for action.
+        /// P2-8: cache values ARE the targeted paths, and the cache is pruned
+        /// against the live result list — count distinct values, no GetResult.
         /// </summary>
         public static int CountMarked(CoreLib core)
         {
-            var results = core.GetResult(0, 1000000);
-            if (results == null || results.Length == 0) return 0;
-            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int count = 0;
-            for (int i = 0; i < results.Length; i++)
+            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var v in s_sideCache.Values)
             {
-                var r = results[i];
-                if (r.type != CoreDll.ResultType.DuplImagePair) continue;
-                string targetPath;
-                if (!s_sideCache.TryGetValue(GetKey(r), out targetPath)) continue;
-                if (processed.Add(targetPath)) count++;
+                if (v != null && processed.Add(v)) count++;
             }
             return count;
         }
 
         /// <summary>
         /// True if any marked target has a path longer than MAX_PATH (260).
+        /// P2-8: pure cache computation — values are the target paths.
         /// </summary>
         public static bool HasLongPaths(CoreLib core)
         {
             const int MAX_PATH = 260;
-            var results = core.GetResult(0, 1000000);
-            if (results == null || results.Length == 0) return false;
-            for (int i = 0; i < results.Length; i++)
+            foreach (var v in s_sideCache.Values)
             {
-                var r = results[i];
-                if (r.type != CoreDll.ResultType.DuplImagePair) continue;
-                string targetPath;
-                if (!s_sideCache.TryGetValue(GetKey(r), out targetPath)) continue;
-                if (targetPath != null && targetPath.Length > MAX_PATH) return true;
+                if (v != null && v.Length > MAX_PATH) return true;
             }
             return false;
         }

@@ -232,7 +232,20 @@ namespace ad
 							{
 								size_t index = ReadByte(pStream);
 								if (info.colorMapType != 0)
-									*p = colors[index];
+								{
+									// P3 fix: colormap index is file-controlled (0..255) but
+									// colors.size() == colorMapLength (also file-controlled,
+									// may be < 256) — unbounded lookup read out of bounds.
+									if (index < colors.size())
+										*p = colors[index];
+									else
+									{
+										p->red = 0;
+										p->green = 0;
+										p->blue = 0;
+										p->alpha = 0xFF;
+									}
+								}
 								else
 								{
 									p->red = (unsigned char)index;
@@ -272,12 +285,24 @@ namespace ad
 					}
 					p++;
 				}
-				if (((unsigned char) (info.attributes & 0xc0) >> 6) == 4)
+				// Interleave (TGA 2.0 spec, attributes byte bits 6-7):
+				// 0 = none, 1 = two-way, 2 = four-way, 3 = reserved.
+				// Old code compared the 2-bit value against 4 (unreachable, max 3)
+				// and treated value 1 (two-way) as none: four-way interleave never
+				// worked, two-way was misapplied as +2-row steps. Fixed per spec.
+				switch ((unsigned char)((info.attributes & 0xc0) >> 6))
+				{
+				case 2: // four-way interleave
 					offset += 4;
-				else if (((unsigned char) (info.attributes & 0xc0) >> 6) == 2)
+					break;
+				case 1: // two-way interleave
 					offset += 2;
-				else
+					break;
+				case 0: // no interleave
+				default: // 3 = reserved: treated as no interleave
 					offset++;
+					break;
+				}
 				if (offset >= info.height)
 				{
 					base++;

@@ -245,6 +245,11 @@ namespace ad
         bool TImage::LoadData(size_t type, const size_t *offsets, IStream *pStream)
         {
             AD_FUNCTION_PERFORMANCE_TEST
+            // P3 fix (truncated data): rows whose read/decode comes up short used to
+            // 'break' out of the loop and LoadData still returned true => a truncated
+            // PSD decoded into a partial image accepted as valid. Track truncation and
+            // reject the file instead (outer TPsd::Load returns no image).
+            bool truncated = false;
             size_t packet_size = 1;
             if (info.depth > 8)
                 packet_size++;
@@ -274,11 +279,17 @@ namespace ad
                     {
                         pStream->Read(&compact_pixels[0], (ULONG)offsets[y], &count);
                         if ((size_t)count != offsets[y])
+                        {
+                            truncated = true;
                             break;
+                        }
                         count = (ULONG)DecodePixels(&compact_pixels[0], offsets[y], (size_t)123456, &pixels[0], length);
                     }
                     if ((size_t)count < length)
+                    {
+                        truncated = true;
                         break;
+                    }
                 }
                 else
                 {
@@ -289,11 +300,17 @@ namespace ad
                     {
                         pStream->Read(&compact_pixels[0], (ULONG)offsets[y], &count);
                         if ((size_t)count != offsets[y])
+                        {
+                            truncated = true;
                             break;
+                        }
                         count = (ULONG)DecodePixels(&compact_pixels[0], offsets[y], info.depth, &pixels[0], length);
                     }
                     if ((size_t)count < length)
+                    {
+                        truncated = true;
                         break;
+                    }
                 }
 
                 TPixel *q = &data[y*info.width];
@@ -336,6 +353,8 @@ namespace ad
                     q++;
                 }
             }
+            if (truncated)
+                return false;
             return true;
         }
 

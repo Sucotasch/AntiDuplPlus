@@ -182,9 +182,8 @@ namespace ad
             return path;
         }
         // Relative path: resolve against exe directory
-        wchar_t buffer[MAX_PATH];
-        GetModuleFileNameW(NULL, buffer, MAX_PATH);
-        std::wstring exePath(buffer);
+        // P3: was a MAX_PATH buffer - see adDatabaseRegistry.cpp
+        std::wstring exePath(GetApplicationPath());
         size_t pos = exePath.find_last_of(L"\\/");
         if (pos != std::wstring::npos) {
             return exePath.substr(0, pos) + L"\\" + path;

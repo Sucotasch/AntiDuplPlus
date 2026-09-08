@@ -18,6 +18,10 @@ jobs:
     
     strategy:
       matrix:
+        # P3 (documented): NvJpegCollector.vcxproj has Release|x64 only — the
+        # .sln maps its Debug/Publish cells to Release. So the Debug matrix cell
+        # builds a Debug DLL/GUI but a RELEASE collector (asymmetric artifact
+        # set; a Debug collector config would be a project-level change).
         configuration: [Debug, Release, Publish]
 
     runs-on: windows-latest
@@ -32,7 +36,9 @@ jobs:
     - name: Read version.txt
       id: version
       shell: pwsh
-      run: echo "content=$(Get-Content src/version.txt)" >> $env:GITHUB_OUTPUT
+      # P3: -Raw + Trim so a future trailing newline/BOM in version.txt can never
+      # leak into artifact names via GITHUB_OUTPUT.
+      run: echo "content=$([IO.File]::ReadAllText('src/version.txt').Trim())" >> $env:GITHUB_OUTPUT
 
     - name: Setup MSBuild.exe
       uses: microsoft/setup-msbuild@v2
@@ -42,10 +48,11 @@ jobs:
       with:
         cuda: '12.8.0'
         method: 'network'
-      
-    - name: Restore NuGet packages
-      working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: nuget restore ${{env.Solution_Name}}
+
+    # P3: the former `nuget restore` step was dead weight — all C# projects are
+    # PackageReference-based net8.0 csproj restored by msbuild/dotnet themselves,
+    # and the C++ projects have no NuGet dependencies. It succeeded trivially and
+    # wasted ~30s per matrix cell.
 
     - name: Run and cache vcpkg dependecies
       uses: lukka/run-vcpkg@v10.7
@@ -111,7 +118,8 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       shell: pwsh
       run: |
-        $version = Get-Content src/version.txt
+        # P3: trimmed read — see the version step note.
+        $version = [IO.File]::ReadAllText('src/version.txt').Trim()
         $pkgDir = "out\Publish\AntiDupl.NET-$version"
         $required = @('AntiDupl.dll', 'cudart64_12.dll')
         $missing = @()
@@ -161,7 +169,8 @@ jobs:
       - name: Read version.txt
         id: version
         shell: pwsh
-        run: echo "content=$(Get-Content src/version.txt)" >> $env:GITHUB_OUTPUT
+        # P3: trimmed read — see the build job note.
+        run: echo "content=$([IO.File]::ReadAllText('src/version.txt').Trim())" >> $env:GITHUB_OUTPUT
 
       - name: Load all artifacts
         uses: actions/download-artifact@v4

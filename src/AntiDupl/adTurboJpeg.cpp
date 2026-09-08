@@ -129,7 +129,11 @@ namespace ad
         {
             const unsigned char * data = (unsigned char*)::GlobalLock(hGlobal);
             size_t size = ::GlobalSize(hGlobal);
-            bool supported = (size >= 4 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF && data[3] == 0xE0);
+            // P3: was data[3] == 0xE0 (JFIF APP0 only) — camera EXIF JPEGs (APP1 0xE1)
+            // silently fell through to the slower GDI+ path. Accept SOI + any APPn
+            // segment marker; libjpeg-turbo handles both JFIF and EXIF headers.
+            bool supported = (size >= 4 && data[0] == 0xFF && data[1] == 0xD8
+                && data[2] == 0xFF && (data[3] == 0xE0 || data[3] == 0xE1));
             ::GlobalUnlock(hGlobal);
             return supported;
         }

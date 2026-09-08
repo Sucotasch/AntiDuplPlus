@@ -507,11 +507,16 @@ namespace AntiDupl.NET.WinForms.Forms
                                 var stderrTask = proc.StandardError.ReadToEndAsync();
 
                                 // Read stdout line-by-line for stage status (no per-frame progress).
+                                // P3: the collector emits a line per progress tick (\r counts as a
+                                // line break for ReadLine) — unbounded string concat was O(n^2) and
+                                // could reach hundreds of MB on huge updates. Cap the accumulation:
+                                // the tail is only used for the error report below.
                                 string stdout = "";
                                 string line;
                                 while ((line = proc.StandardOutput.ReadLine()) != null)
                                 {
-                                    stdout += line + "\n";
+                                    if (stdout.Length < 100_000)
+                                        stdout += line + "\n";
                                     string stage = ParseUpdateStage(line);
                                     if (stage != null)
                                     {

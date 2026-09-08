@@ -1023,17 +1023,28 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                     // Update Count attribute for this database's path.
                     // P1-6: writers now store Path XML-escaped, so match the escaped
                     // form (a bare '&' path would otherwise miss and duplicate).
+                    // P3: was a positional `countPos < pos + 500` window — a path
+                    // containing a literal Count=" or a future attribute reorder
+                    // silently patched the wrong place. Constrain the search to the
+                    // <Database ... /> element that owns the matched Path attribute.
                     std::wstring countStr = std::to_wstring(images.size());
                     std::wstring pathNeedle = L"Path=\"" + EscapeXmlAttr(args.inputPath) + L"\"";
                     size_t pos = 0;
                     while ((pos = xmlContent.find(pathNeedle, pos)) != std::wstring::npos) {
-                        size_t countPos = xmlContent.find(L"Count=\"", pos);
-                        if (countPos != std::wstring::npos && countPos < pos + 500) {
-                            size_t valStart = countPos + 7;
-                            size_t valEnd = xmlContent.find(L"\"", valStart);
-                            if (valEnd != std::wstring::npos) {
-                                xmlContent.replace(valStart, valEnd - valStart, countStr);
-                                break;
+                        size_t tagStart = xmlContent.rfind(L"<Database", pos);
+                        size_t tagEnd = xmlContent.find(L"/>", pos);
+                        size_t nextTag = xmlContent.find(L"<Database", pos);
+                        bool sameTag = (tagStart != std::wstring::npos && tagEnd != std::wstring::npos
+                            && (nextTag == std::wstring::npos || nextTag > tagEnd));
+                        if (sameTag) {
+                            size_t countPos = xmlContent.find(L"Count=\"", pos);
+                            if (countPos != std::wstring::npos && countPos < tagEnd) {
+                                size_t valStart = countPos + 7;
+                                size_t valEnd = xmlContent.find(L"\"", valStart);
+                                if (valEnd != std::wstring::npos && valEnd < tagEnd) {
+                                    xmlContent.replace(valStart, valEnd - valStart, countStr);
+                                    break;
+                                }
                             }
                         }
                         pos++;

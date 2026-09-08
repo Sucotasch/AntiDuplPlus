@@ -71,9 +71,8 @@ namespace ad
         // Truncate both once per process here: the logs then hold exactly the
         // current session, same policy gpu_debug.log already follows per Search().
         {
-            wchar_t exePath[MAX_PATH];
-            if (GetModuleFileNameW(NULL, exePath, MAX_PATH)) {
-                std::wstring dir(exePath);
+            std::wstring dir(GetApplicationPath());
+            if (!dir.empty()) {
                 dir = dir.substr(0, dir.find_last_of(L"\\/"));
                 for (const wchar_t* name : { L"\\trace.log", L"\\gpu_debug.log" }) {
                     FILE* f = _wfopen((dir + name).c_str(), L"w");
@@ -279,9 +278,7 @@ namespace ad
 
         // Log entry
         {
-            wchar_t exePath[MAX_PATH];
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            std::wstring logPath(exePath);
+            std::wstring logPath(GetApplicationPath());
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
             FILE* logFile = _wfopen(logPath.c_str(), L"a");
             if (logFile) {
@@ -361,9 +358,7 @@ namespace ad
 
         // Log valid count
         {
-            wchar_t exePath[MAX_PATH];
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            std::wstring logPath(exePath);
+            std::wstring logPath(GetApplicationPath());
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
             FILE* logFile = _wfopen(logPath.c_str(), L"a");
             if (logFile) {
@@ -499,9 +494,7 @@ namespace ad
 
         // [C#7] Log handle address for comparison
         {
-            wchar_t exePath[MAX_PATH];
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            std::wstring logPath(exePath);
+            std::wstring logPath(GetApplicationPath());
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
             FILE* logFile = _wfopen(logPath.c_str(), L"a");
             if (logFile) {
@@ -513,9 +506,7 @@ namespace ad
 
         // Log search paths size immediately
         {
-            wchar_t exePath[MAX_PATH];
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            std::wstring logPath(exePath);
+            std::wstring logPath(GetApplicationPath());
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
             // Truncate once per Search() session, then all subsequent opens use L"a"
             FILE* logFile = _wfopen(logPath.c_str(), L"w");
@@ -548,9 +539,7 @@ namespace ad
         
         // Log search paths
         {
-            wchar_t exePath[MAX_PATH];
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            std::wstring logPath(exePath);
+            std::wstring logPath(GetApplicationPath());
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
             FILE* logFile = _wfopen(logPath.c_str(), L"a");
             if (logFile) {
@@ -568,9 +557,7 @@ namespace ad
             const TPath& searchPath = m_pOptions->searchPaths[i];
             // Log before LoadDatabase
             {
-                wchar_t exePath[MAX_PATH];
-                GetModuleFileNameW(NULL, exePath, MAX_PATH);
-                std::wstring logPath(exePath);
+                std::wstring logPath(GetApplicationPath());
                 logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
                 FILE* logFile = _wfopen(logPath.c_str(), L"a");
                 if (logFile) {
@@ -586,9 +573,7 @@ namespace ad
         if (!dbLoaded) {
             // Log that SearchImages is being used instead
             {
-                wchar_t exePath[MAX_PATH];
-                GetModuleFileNameW(NULL, exePath, MAX_PATH);
-                std::wstring logPath(exePath);
+                std::wstring logPath(GetApplicationPath());
                 logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
                 FILE* logFile = _wfopen(logPath.c_str(), L"a");
                 if (logFile) {
@@ -618,9 +603,7 @@ namespace ad
 
         // Log GPU status
         {
-            wchar_t exePath[MAX_PATH];
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            std::wstring logPath(exePath);
+            std::wstring logPath(GetApplicationPath());
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
             FILE* logFile = _wfopen(logPath.c_str(), L"a");
             if (logFile) {
@@ -660,9 +643,7 @@ namespace ad
 
         // Step log: entering collection
         {
-            wchar_t exePath[MAX_PATH];
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            std::wstring logPath(exePath);
+            std::wstring logPath(GetApplicationPath());
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
             FILE* logFile = _wfopen(logPath.c_str(), L"a");
             if (logFile) {
@@ -685,9 +666,7 @@ namespace ad
 
         // Step log: collection done
         {
-            wchar_t exePath[MAX_PATH];
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            std::wstring logPath(exePath);
+            std::wstring logPath(GetApplicationPath());
             logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
             FILE* logFile = _wfopen(logPath.c_str(), L"a");
             if (logFile) {
@@ -704,9 +683,7 @@ namespace ad
             AD_DEBUG("Search: Using GPU AllVsAll comparison\n");
             // Log before GPU comparison
             {
-                wchar_t exePath[MAX_PATH];
-                GetModuleFileNameW(NULL, exePath, MAX_PATH);
-                std::wstring logPath(exePath);
+                std::wstring logPath(GetApplicationPath());
                 logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
                 FILE* logFile = _wfopen(logPath.c_str(), L"a");
                 if (logFile) {
@@ -720,9 +697,7 @@ namespace ad
             
             // Log GPU result
             {
-                wchar_t exePath[MAX_PATH];
-                GetModuleFileNameW(NULL, exePath, MAX_PATH);
-                std::wstring logPath(exePath);
+                std::wstring logPath(GetApplicationPath());
                 logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\gpu_debug.log";
                 FILE* logFile = _wfopen(logPath.c_str(), L"a");
                 if (logFile) {

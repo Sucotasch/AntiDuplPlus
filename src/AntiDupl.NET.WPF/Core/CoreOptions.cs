@@ -1,4 +1,4 @@
-﻿/*
+/*
 * AntiDupl.NET Program (http://ermig1979.github.io/AntiDupl).
 *
 * Copyright (c) 2002-2018 Yermalayeu Ihar, 2013-2018 Borisov Dmitry.
@@ -274,13 +274,5 @@ namespace AntiDupl.NET.WPF.Core
                 writer.Close();
         }
 
-        public string GetImageDataBasePath()
-        {
-            string directory = string.Format("{0}\\images\\{1}x{1}", AntiDupl.NET.WPF.Resources.Resources.UserPath, advancedOptions.reducedImageSize);
-            DirectoryInfo directoryInfo = new DirectoryInfo(directory);
-            if (!directoryInfo.Exists)
-                directoryInfo.Create();
-            return directory;
-        }
     }
 }

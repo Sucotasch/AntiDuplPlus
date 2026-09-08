@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -228,12 +228,14 @@ namespace AntiDupl.NET.WPF.Service
 
         public void ClearThumbnailCache()
         {
-            //lock (_queue)
-            //{
-            _thumbnailCache.Clear();
-            _queue.Clear();
-            //    _queue.Clear;
-            //}
+            // P3 (WPF): race — the loader thread iterates/clears the same queue under
+            // lock(_queue) (see loop above); clearing without the lock here corrupted
+            // the queue state while a load was in flight. Lock restored.
+            lock (_queue)
+            {
+                _thumbnailCache.Clear();
+                _queue.Clear();
+            }
         }
 
         string _thumbnailCacheStatus;

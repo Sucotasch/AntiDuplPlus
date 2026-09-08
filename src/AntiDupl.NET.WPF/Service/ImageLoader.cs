@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing.Imaging;
 using System.IO;
@@ -138,8 +138,11 @@ namespace AntiDupl.NET.WPF.Service
             if (File.Exists(path))
             {
                 BitmapImage image;
-                //может считать net Framework
-                if (imageType <= CoreDll.ImageType.Heif)
+                // P3 (WPF): was <= Heif(15) — sent Jp2/Psd/Dds/Tga/Webp (10..14) into the
+                // WPF decoder, which cannot decode them → NotSupportedException silently
+                // swallowed downstream → empty thumbnails. <= Icon(9) matches LoadImage:
+                // everything above goes through the core DLL decoder.
+                if (imageType <= CoreDll.ImageType.Icon)
                 {
                     using (Stream stream = File.OpenRead(path))
                     {
@@ -154,8 +157,6 @@ namespace AntiDupl.NET.WPF.Service
                         image.StreamSource = stream;
                         image.EndInit();
                         image.Freeze();
-
-                        GC.Collect(GC.MaxGeneration);
                     }
                 }
                 else

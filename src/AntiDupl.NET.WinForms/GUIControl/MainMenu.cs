@@ -97,6 +97,27 @@ namespace AntiDupl.NET.WinForms
         // a batch is already running in the background.
         private static bool s_batchRunning = false;
 
+        /// <summary>True while a delete/move batch is executing (P2-11 guard state).</summary>
+        public static bool BatchRunning
+        {
+            get { return s_batchRunning; }
+        }
+
+        /// <summary>
+        /// Phase-4 minor: raised (on the UI thread) when a delete/move batch starts or
+        /// ends, so the toolbar can grey its Delete/Move buttons — the buttons call the
+        /// same handlers as the menu items and the re-entry guard alone gave no visible
+        /// "busy" feedback.
+        /// </summary>
+        public event Action BatchStateChanged;
+
+        private void OnBatchStateChanged()
+        {
+            var handler = BatchStateChanged;
+            if (handler != null)
+                handler();
+        }
+
         public MainMenu(CoreLib core, Options options, CoreOptions coreOptions, MainForm mainForm, MainSplitContainer mainSplitContainer)
         {
             m_core = core;
@@ -405,6 +426,7 @@ namespace AntiDupl.NET.WinForms
 
             s_batchRunning = true;
             m_edit_deleteSelectedMenuItem.Enabled = false;
+            OnBatchStateChanged();
             System.Threading.Thread batchThread = new System.Threading.Thread(() =>
             {
                 AutoSelector.BatchResult result = null;
@@ -418,6 +440,7 @@ namespace AntiDupl.NET.WinForms
                     m_mainSplitContainer.BeginInvoke(new Action(() =>
                     {
                         m_edit_deleteSelectedMenuItem.Enabled = true;
+                        OnBatchStateChanged();
                         if (result == null) return;
                         string msg = $"Deleted {result.Succeeded} images.";
                         if (result.Failed > 0)
@@ -453,6 +476,7 @@ namespace AntiDupl.NET.WinForms
                 if (s_batchRunning) return; // a delete/move batch is already running
                 s_batchRunning = true;
                 m_edit_moveSelectedMenuItem.Enabled = false;
+                OnBatchStateChanged();
                 string targetPath = dialog.SelectedPath;
                 System.Threading.Thread batchThread = new System.Threading.Thread(() =>
                 {
@@ -467,6 +491,7 @@ namespace AntiDupl.NET.WinForms
                         m_mainSplitContainer.BeginInvoke(new Action(() =>
                         {
                             m_edit_moveSelectedMenuItem.Enabled = true;
+                            OnBatchStateChanged();
                             if (result == null) return;
                             string msg = $"Moved {result.Succeeded} images to:\n{targetPath}";
                             if (result.Failed > 0)

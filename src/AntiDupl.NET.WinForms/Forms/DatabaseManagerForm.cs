@@ -1212,11 +1212,14 @@ namespace AntiDupl.NET.WinForms.Forms
                 entry.Path = GetAttr(tag, "Path");
                 entry.Folder = GetAttr(tag, "Folder");
                 entry.RemapFrom = GetAttr(tag, "RemapFrom");
-                entry.ImageCount = int.Parse(GetAttr(tag, "Count") ?? "0");
+                // Phase-4 minor: int.Parse on a malformed Count/ThumbSize/Pool attribute
+                // crashed the whole Database Manager form; fall back to the defaults.
+                int parsed;
+                entry.ImageCount = int.TryParse(GetAttr(tag, "Count"), out parsed) ? parsed : 0;
                 entry.Status = GetAttr(tag, "Status") ?? "Ready";
                 entry.Enabled = GetAttr(tag, "Enabled") != "false";
-                entry.ThumbSize = int.Parse(GetAttr(tag, "ThumbSize") ?? "32");
-                entry.Pool = int.Parse(GetAttr(tag, "Pool") ?? "0");
+                entry.ThumbSize = int.TryParse(GetAttr(tag, "ThumbSize"), out parsed) ? parsed : 32;
+                entry.Pool = int.TryParse(GetAttr(tag, "Pool"), out parsed) ? parsed : 0;
 
                 if (string.IsNullOrEmpty(entry.Name)) {
                     if (!string.IsNullOrEmpty(entry.Path)) {

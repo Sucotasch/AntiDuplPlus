@@ -161,6 +161,11 @@ namespace AntiDupl.NET.WinForms
             m_moveSelectedButton.Text = "Move";
             m_moveSelectedButton.ToolTipText = "Move selected images to folder";
 
+            // Phase-4 minor: grey Delete/Move while a batch runs — the buttons call the
+            // same handlers as the menu items, so without this the only protection was
+            // the invisible re-entry guard.
+            m_mainMenu.BatchStateChanged += UpdateBatchButtonsState;
+
             m_mistakeButton = InitFactory.ToolButton.Create("MistakesButton", CoreDll.LocalActionType.Mistake, MakeAction);
             m_performHintButton = InitFactory.ToolButton.Create("PerformHintButton", CoreDll.LocalActionType.PerformHint, MakeAction);
 
@@ -216,6 +221,14 @@ namespace AntiDupl.NET.WinForms
         private void UpdateResults()
         {
             OnSelectedResultsChanged();
+        }
+
+        /// <summary>Phase-4 minor: reflect the batch state on the toolbar buttons.</summary>
+        private void UpdateBatchButtonsState()
+        {
+            bool batchRunning = MainMenu.BatchRunning;
+            m_deleteSelectedButton.Enabled = !batchRunning;
+            m_moveSelectedButton.Enabled = !batchRunning;
         }
 
         private void MakeAction(object sender, EventArgs e)

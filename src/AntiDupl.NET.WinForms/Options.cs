@@ -62,7 +62,6 @@ namespace AntiDupl.NET.WinForms
 
         public bool onePath = false;
         public bool checkingForUpdates = true;
-        public bool useImageDataBase = true;
         public bool checkResultsAtLoading = true;
         public bool checkMistakesAtLoading = true;
         public bool loadProfileOnLoading = true;
@@ -121,7 +120,6 @@ namespace AntiDupl.NET.WinForms
             Language = options.Language;
             onePath = options.onePath;
             checkingForUpdates = options.checkingForUpdates;
-            useImageDataBase = options.useImageDataBase;
             checkResultsAtLoading = options.checkResultsAtLoading;
             checkMistakesAtLoading = options.checkMistakesAtLoading;
             loadProfileOnLoading = options.loadProfileOnLoading;
@@ -161,7 +159,6 @@ namespace AntiDupl.NET.WinForms
             options.Language = Language;
             options.onePath = onePath;
             options.checkingForUpdates = checkingForUpdates;
-            options.useImageDataBase = useImageDataBase;
             options.checkResultsAtLoading = checkResultsAtLoading;
             options.checkMistakesAtLoading = checkMistakesAtLoading;
             options.loadProfileOnLoading = loadProfileOnLoading;
@@ -220,8 +217,6 @@ namespace AntiDupl.NET.WinForms
             if (checkingForUpdates != options.checkingForUpdates)
                 return false;
             if (onePath != options.onePath)
-                return false;
-            if (useImageDataBase != options.useImageDataBase)
                 return false;
             if (checkResultsAtLoading != options.checkResultsAtLoading)
                 return false;

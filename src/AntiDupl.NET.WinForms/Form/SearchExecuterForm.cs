@@ -46,11 +46,9 @@ namespace AntiDupl.NET.WinForms
             Start,
             ClearResults,
             ClearTemporary,
-            LoadImages,
             Search,
             SetGroup,
             SetHint,
-            SaveImages,
             Stopped,
             Finish,
             Error
@@ -181,22 +179,12 @@ namespace AntiDupl.NET.WinForms
                 m_core.Clear(CoreDll.FileType.Result);
                 m_state = State.ClearTemporary;
                 m_core.Clear(CoreDll.FileType.Temporary);
-                if (m_options.useImageDataBase)
-                {
-                    m_state = State.LoadImages;
-                    m_core.Load(CoreDll.FileType.ImageDataBase, m_coreOptions.GetImageDataBasePath(), false);
-                }
                 m_state = State.Search;
                 m_core.Search();
                 m_state = State.SetGroup;
                 m_core.ApplyToResult(CoreDll.GlobalActionType.SetGroup);
                 m_state = State.SetHint;
                 m_core.ApplyToResult(CoreDll.GlobalActionType.SetHint);
-                if (m_options.useImageDataBase)
-                {
-                    m_state = State.SaveImages;
-                    m_core.Save(CoreDll.FileType.ImageDataBase, m_coreOptions.GetImageDataBasePath());
-                }
                 m_core.Clear(CoreDll.FileType.ImageDataBase);
                 m_core.SortResult((CoreDll.SortType)m_options.resultsOptions.sortTypeDefault, m_options.resultsOptions.increasingDefault);
                 m_state = State.Finish;
@@ -306,14 +294,6 @@ namespace AntiDupl.NET.WinForms
                             EstimateOtherProgress();
                         }
                         break;
-                    case State.LoadImages:
-                        {
-                            m_stopButton.Enabled = false; 
-                            builder.Append(s.StartFinishForm_LoadImages_Text);
-                            builder.Append("...");
-                            EstimateOtherProgress();
-                        }
-                        break;
                     case State.Search:
                         {
                             m_stopButton.Enabled = true;
@@ -327,14 +307,6 @@ namespace AntiDupl.NET.WinForms
                         {
                             m_stopButton.Enabled = false;
                             builder.Append(s.SearchExecuterForm_Result);
-                            builder.Append("...");
-                            EstimateOtherProgress();
-                        }
-                        break;
-                    case State.SaveImages:
-                        {
-                            m_stopButton.Enabled = false;
-                            builder.Append(s.StartFinishForm_SaveImages_Text);
                             builder.Append("...");
                             EstimateOtherProgress();
                         }
@@ -524,7 +496,6 @@ namespace AntiDupl.NET.WinForms
             writer.WriteLine(string.Format("Processed {0} images.", statistic.comparedImageNumber));
             writer.WriteLine(string.Format("Found {0} defects and {1} duples.", statistic.defectImageNumber, statistic.duplImagePairNumber));
             writer.WriteLine(string.Format("Used {0} load and {1} compare threads.", statistic.collectThreadCount, statistic.compareThreadCount));
-            writer.WriteLine(string.Format("Use image database: {0}.", m_options.useImageDataBase));
             writer.WriteLine(string.Format("Use libjpeg-turbo: {0}.", m_coreOptions.advancedOptions.useLibJpegTurbo));
 
             writer.Close();

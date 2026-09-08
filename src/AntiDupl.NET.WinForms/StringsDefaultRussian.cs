@@ -285,11 +285,9 @@ namespace AntiDupl.NET.WinForms
             s.MainMenu_SearchMenuItem_Text = "Поиск";
             s.MainMenu_Search_StartMenuItem_Text = "Начать поиск";
             s.MainMenu_Search_RefreshResultsMenuItem_Text = "Обновить результаты";
-            s.MainMenu_Search_RefreshImagesMenuItem_Text = "Удалить неактуальные записи из базы данных о картинках";
             s.MainMenu_Search_PathsMenuItem_Text = "Пути";
             s.MainMenu_Search_OptionsMenuItem_Text = "Опции";
             s.MainMenu_Search_OnePathMenuItem_Text = "Один путь поиска";
-            s.MainMenu_Search_UseImageDataBaseMenuItem_Text = "Использовать базу данных о картинках";
             s.MainMenu_Search_CheckResultsAtLoadingMenuItem_Text = "Проверять результаты при загрузке";
             s.MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text = "Проверять базу данных об ошибках при загрузке";
 

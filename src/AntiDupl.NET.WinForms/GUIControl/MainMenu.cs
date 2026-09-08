@@ -72,11 +72,9 @@ namespace AntiDupl.NET.WinForms
         private ToolStripMenuItem m_searchMenuItem;
         private ToolStripMenuItem m_search_startMenuItem;
         private ToolStripMenuItem m_search_refreshResultsMenuItem;
-        private ToolStripMenuItem m_search_refreshImagesMenuItem;
         private ToolStripMenuItem m_search_pathsMenuItem;
         private ToolStripMenuItem m_search_optionsMenuItem;
         private ToolStripMenuItem m_search_onePathMenuItem;
-        private ToolStripMenuItem m_search_useImageDataBaseMenuItem;
         private ToolStripMenuItem m_search_checkResultsAtLoadingMenuItem;
         private ToolStripMenuItem m_search_checkMistakesAtLoadingMenuItem;
 
@@ -208,22 +206,18 @@ namespace AntiDupl.NET.WinForms
 
             m_search_startMenuItem = InitFactory.MenuItem.Create("StartMenu", null, StartSearchAction);
             m_search_refreshResultsMenuItem = InitFactory.MenuItem.Create("RefreshMenu", null, RefreshResultsAction);
-            m_search_refreshImagesMenuItem = InitFactory.MenuItem.Create(null, null, RefreshImagesAction);
             m_search_optionsMenuItem = InitFactory.MenuItem.Create("OptionsMenu", null, OptionsAction);
             m_search_onePathMenuItem = InitFactory.MenuItem.Create(null, null, UseOnePathAction, m_options.onePath);
-            m_search_useImageDataBaseMenuItem = InitFactory.MenuItem.Create(null, null, UseImageDataBaseAction, m_options.useImageDataBase);
             m_search_checkResultsAtLoadingMenuItem = InitFactory.MenuItem.Create(null, null, CheckResultsAtLoadingAction, m_options.checkResultsAtLoading);
             m_search_checkMistakesAtLoadingMenuItem = InitFactory.MenuItem.Create(null, null, CheckMistakesAtLoadingAction, m_options.checkMistakesAtLoading);
 
             m_searchMenuItem = new ToolStripMenuItem();
             m_searchMenuItem.DropDownItems.Add(m_search_startMenuItem);
             m_searchMenuItem.DropDownItems.Add(m_search_refreshResultsMenuItem);
-            m_searchMenuItem.DropDownItems.Add(m_search_refreshImagesMenuItem);
             m_searchMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_searchMenuItem.DropDownItems.Add(m_search_optionsMenuItem);
             m_searchMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_searchMenuItem.DropDownItems.Add(m_search_onePathMenuItem);
-            m_searchMenuItem.DropDownItems.Add(m_search_useImageDataBaseMenuItem);
             m_searchMenuItem.DropDownItems.Add(m_search_checkResultsAtLoadingMenuItem);
             m_searchMenuItem.DropDownItems.Add(m_search_checkMistakesAtLoadingMenuItem);
 
@@ -292,10 +286,8 @@ namespace AntiDupl.NET.WinForms
             m_searchMenuItem.Text = s.MainMenu_SearchMenuItem_Text;
             m_search_startMenuItem.Text = s.MainMenu_Search_StartMenuItem_Text;
             m_search_refreshResultsMenuItem.Text = s.MainMenu_Search_RefreshResultsMenuItem_Text;
-            m_search_refreshImagesMenuItem.Text = s.MainMenu_Search_RefreshImagesMenuItem_Text;
             m_search_optionsMenuItem.Text = s.MainMenu_Search_OptionsMenuItem_Text;
             m_search_onePathMenuItem.Text = s.MainMenu_Search_OnePathMenuItem_Text;
-            m_search_useImageDataBaseMenuItem.Text = s.MainMenu_Search_UseImageDataBaseMenuItem_Text;
             m_search_checkResultsAtLoadingMenuItem.Text = s.MainMenu_Search_CheckResultsAtLoadingMenuItem_Text;
             m_search_checkMistakesAtLoadingMenuItem.Text = s.MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text;
 
@@ -366,12 +358,6 @@ namespace AntiDupl.NET.WinForms
         public void RefreshResultsAction(object sender, EventArgs e)
         {
             ProgressForm progressForm = new ProgressForm(ProgressForm.Type.RefreshResults, m_core, m_options, m_coreOptions, m_mainSplitContainer);
-            progressForm.Execute();
-        }
-
-        private void RefreshImagesAction(object sender, EventArgs e)
-        {
-            ProgressForm progressForm = new ProgressForm(ProgressForm.Type.ClearDatabase, m_core, m_options, m_coreOptions, m_mainSplitContainer);
             progressForm.Execute();
         }
 
@@ -606,11 +592,6 @@ namespace AntiDupl.NET.WinForms
         private void UseOnePathAction(object sender, EventArgs e)
         {
             m_options.onePath = m_search_onePathMenuItem.Checked;
-        }
-
-        private void UseImageDataBaseAction(object sender, EventArgs e)
-        {
-            m_options.useImageDataBase = m_search_useImageDataBaseMenuItem.Checked;
         }
 
         private void CheckResultsAtLoadingAction(object sender, EventArgs e)

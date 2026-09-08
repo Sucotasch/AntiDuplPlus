@@ -53,10 +53,6 @@ namespace AntiDupl.NET.WinForms
 
             ClearResults,
             ClearTemporary,
-
-            ClearDatabase,
-            LoadImages,
-            SaveImages,
         }
         private volatile Type m_type;
         
@@ -299,13 +295,6 @@ namespace AntiDupl.NET.WinForms
                         m_updateResults = false;
                         break;
                     }
-               case Type.ClearDatabase:
-                    {
-                        m_type = Type.LoadImages;
-                        m_core.Load(CoreDll.FileType.ImageDataBase, m_coreOptions.GetImageDataBasePath(), true);
-                        m_updateResults = false;
-                        break;
-                    }
                default:
                     throw new Exception("Unknown Action!!!");
             }
@@ -414,18 +403,6 @@ namespace AntiDupl.NET.WinForms
                                 case Type.ClearTemporary:
                                     builder.Append(s.StartFinishForm_ClearTemporary_Text);
                                     m_cancelButton.Enabled = true;
-                                    break;
-                                case Type.ClearDatabase:
-                                    builder.Append(s.StartFinishForm_LoadImages_Text);
-                                    m_cancelButton.Enabled = false;
-                                    break;
-                                case Type.LoadImages:
-                                    builder.Append(s.StartFinishForm_LoadImages_Text);
-                                    m_cancelButton.Enabled = true;
-                                    break;
-                                case Type.SaveImages:
-                                    builder.Append(s.StartFinishForm_SaveImages_Text);
-                                    m_cancelButton.Enabled = false;
                                     break;
                             }
 

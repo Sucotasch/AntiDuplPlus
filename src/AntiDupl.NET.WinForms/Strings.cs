@@ -288,11 +288,9 @@ namespace AntiDupl.NET.WinForms
         public string MainMenu_SearchMenuItem_Text;
         public string MainMenu_Search_StartMenuItem_Text;
         public string MainMenu_Search_RefreshResultsMenuItem_Text;
-        public string MainMenu_Search_RefreshImagesMenuItem_Text;
         public string MainMenu_Search_PathsMenuItem_Text;
         public string MainMenu_Search_OptionsMenuItem_Text;
         public string MainMenu_Search_OnePathMenuItem_Text;
-        public string MainMenu_Search_UseImageDataBaseMenuItem_Text;
         public string MainMenu_Search_CheckResultsAtLoadingMenuItem_Text;
         public string MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text;
 

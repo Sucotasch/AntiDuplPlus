@@ -285,11 +285,9 @@ namespace AntiDupl.NET.WinForms
             s.MainMenu_SearchMenuItem_Text = "Search";
             s.MainMenu_Search_StartMenuItem_Text = "Start search";
             s.MainMenu_Search_RefreshResultsMenuItem_Text = "Refresh results";
-            s.MainMenu_Search_RefreshImagesMenuItem_Text = "Delete irrelevant records from a database of image";
             s.MainMenu_Search_PathsMenuItem_Text = "Paths";
             s.MainMenu_Search_OptionsMenuItem_Text = "Options";
             s.MainMenu_Search_OnePathMenuItem_Text = "One search path";
-            s.MainMenu_Search_UseImageDataBaseMenuItem_Text = "Use database of image";
             s.MainMenu_Search_CheckResultsAtLoadingMenuItem_Text = "Check the results at loading";
             s.MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text = "Check the database of mistakes at loading";
 

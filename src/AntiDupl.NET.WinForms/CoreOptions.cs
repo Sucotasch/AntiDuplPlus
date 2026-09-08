@@ -308,13 +308,6 @@ namespace AntiDupl.NET.WinForms
             }
         }
 
-        public string GetImageDataBasePath()
-        {
-            string directory = string.Format("{0}\\images\\{1}x{1}", Resources.UserPath, advancedOptions.reducedImageSize);
-            DirectoryInfo directoryInfo = new DirectoryInfo(directory);
-            if (!directoryInfo.Exists)
-                directoryInfo.Create();
-            return directory;
-        }
+
     }
 }

@@ -48,9 +48,6 @@ namespace ad
     static uint8_t* g_pQueryBuffer = nullptr; 
     static double* g_pResultBuffer = nullptr; 
     static size_t* g_pIndexBuffer = nullptr; 
-    // P1-4: carries "result buffer overran" out of the SSIM readback block
-    // (that path has no single exit point where a local flag could survive).
-    static bool g_ssimTruncated = false;
 
     // --- Kernels ---
 
@@ -556,7 +553,8 @@ namespace ad
         double addDiffForCrcMismatch,      // Добавка за несовпадение CRC
         void* callbackContext,             // Контекст для callback
         GpuMatchCallback callback,         // Callback для streaming обработки
-        size_t maxMatchesPerBatch)         // Максимум matches за один вызов
+        size_t maxMatchesPerBatch,         // Максимум matches за один вызов (уменьшается по VRAM)
+        size_t* pDroppedMatches)           // §4.12: сколько пар не влезло в буфер (может быть NULL)
     {
         AD_DEBUG("GpuCompareAllVsAll: Starting\n");
 
@@ -583,18 +581,28 @@ namespace ad
         // 1. Выделяем память для thumbnails
         AD_DEBUG("GpuCompareAllVsAll: Allocating VRAM for thumbnails\n");
         
-        // Проверяем доступную VRAM перед выделением
+        // §4.4/§4.12: размер буфера пар берётся из свободной VRAM, а не из фиксированных 5M пар
+        // (60 МБ): сначала миниатюры и CRC, буферу пар — консервативные 80% остатка. Меньший буфер
+        // даёт усечение (число потерянных пар возвращается вызывающему), а не отказ сравнения.
+        const size_t MIN_MATCHES = 1000000; // ~12 МБ записей Match
         size_t freeMem = 0, totalMem = 0;
         cudaMemGetInfo(&freeMem, &totalMem);
-        size_t requiredMem = count * thumbSize + count * sizeof(uint64_t) + maxMatchesPerBatch * sizeof(Match);
-        AD_DEBUG_FMT("GpuCompareAllVsAll: VRAM free=%zu MB, total=%zu MB, required=%zu MB\n", 
-                     freeMem / 1024 / 1024, totalMem / 1024 / 1024, requiredMem / 1024 / 1024);
-        
-        if (requiredMem > freeMem * 9 / 10) {  // Используем максимум 90% свободной VRAM
-            AD_DEBUG_FMT("GpuCompareAllVsAll: Not enough VRAM (need %zu MB, have %zu MB)\n", 
+        size_t fixedMem = count * thumbSize + count * sizeof(uint64_t);
+        size_t budgetMem = freeMem * 4 / 5;
+        size_t byVram = (budgetMem > fixedMem) ? (budgetMem - fixedMem) / sizeof(Match) : 0;
+        size_t maxMatches = (byVram < maxMatchesPerBatch) ? byVram : maxMatchesPerBatch;
+        if (maxMatches < MIN_MATCHES && maxMatchesPerBatch >= MIN_MATCHES)
+            maxMatches = MIN_MATCHES; // ниже минимума — честный отказ (проверка ниже)
+        size_t requiredMem = fixedMem + maxMatches * sizeof(Match);
+        AD_DEBUG_FMT("GpuCompareAllVsAll: VRAM free=%zu MB, total=%zu MB, required=%zu MB (match buffer: %zu)\n",
+                     freeMem / 1024 / 1024, totalMem / 1024 / 1024, requiredMem / 1024 / 1024, maxMatches);
+
+        if (requiredMem > budgetMem) {
+            AD_DEBUG_FMT("GpuCompareAllVsAll: Not enough VRAM (need %zu MB, have %zu MB)\n",
                          requiredMem / 1024 / 1024, freeMem / 1024 / 1024);
             return false;
         }
+        maxMatchesPerBatch = maxMatches; // все выделения и проходы ниже используют фактический размер
 
         err = cudaMalloc(&d_thumbnails, count * thumbSize);
         if (err != cudaSuccess) {
@@ -748,13 +756,13 @@ namespace ad
 
         // Ограничиваем чтение размером буфера
         size_t matchesToRead = (h_matchCount < maxMatchesPerBatch) ? h_matchCount : maxMatchesPerBatch;
-        // P1-4: matches beyond the batch buffer are silently dropped by the kernel
-        // (idx < maxMatches guard) while the counter keeps counting them. Overrun
-        // used to end as "success" with a truncated result set; now it is surfaced
-        // as a comparison failure (the already-read batch is still delivered via
-        // the callback below, so partial results are not lost).
-        bool truncated = (h_matchCount > maxMatchesPerBatch);
-        if (truncated) {
+        // P1-4/§4.12: matches beyond the batch buffer are dropped by the kernel
+        // (idx < maxMatches guard) while the counter keeps counting them. The number is
+        // returned to the caller (engine reports it); the pairs that fit are still delivered
+        // via the callback below.
+        if (pDroppedMatches)
+            *pDroppedMatches = h_matchCount - matchesToRead;
+        if (h_matchCount > matchesToRead) {
             AD_DEBUG_FMT("GpuCompareAllVsAll: WARNING! Match buffer overrun: %zu found, %zu readable, %zu dropped\n",
                          h_matchCount, maxMatchesPerBatch, h_matchCount - maxMatchesPerBatch);
             {
@@ -804,9 +812,9 @@ namespace ad
         cudaFree(d_matchCount);
 
         AD_DEBUG("GpuCompareAllVsAll: Complete\n");
-        // P1-4: buffer overrun means the result set is incomplete — success would
-        // hide the silently dropped tail (see step 10).
-        return !truncated;
+        // §4.12: усечение больше не «тихий успех» и не отказ — движок получает число
+        // потерянных пар через pDroppedMatches и сообщает о них пользователю.
+        return true;
     }
 
     // --- SSIM AllVsAll kernel ---
@@ -906,7 +914,8 @@ namespace ad
         double addDiffForCrcMismatch,
         void* callbackContext,
         GpuMatchCallback callback,
-        size_t maxMatchesPerBatch)
+        size_t maxMatchesPerBatch,          // может быть уменьшен по свободной VRAM
+        size_t* pDroppedMatches)            // §4.12: сколько пар не влезло в буфер (может быть NULL)
     {
         cudaGetLastError();
 
@@ -923,13 +932,21 @@ namespace ad
 
         cudaError_t err;
 
-        // VRAM check
+        // §4.4/§4.12: размер буфера пар из свободной VRAM — та же формула, что в GpuCompareAllVsAll.
+        const size_t MIN_MATCHES = 1000000; // ~12 МБ записей Match
         size_t freeMem = 0, totalMem = 0;
         cudaMemGetInfo(&freeMem, &totalMem);
-        size_t requiredMem = count * thumbSize + count * sizeof(float) * 2 + count * sizeof(uint64_t) + maxMatchesPerBatch * sizeof(Match);
+        size_t fixedMem = count * thumbSize + count * sizeof(float) * 2 + count * sizeof(uint64_t);
+        size_t budgetMem = freeMem * 4 / 5;
+        size_t byVram = (budgetMem > fixedMem) ? (budgetMem - fixedMem) / sizeof(Match) : 0;
+        size_t maxMatches = (byVram < maxMatchesPerBatch) ? byVram : maxMatchesPerBatch;
+        if (maxMatches < MIN_MATCHES && maxMatchesPerBatch >= MIN_MATCHES)
+            maxMatches = MIN_MATCHES; // ниже минимума — честный отказ (проверка ниже)
+        size_t requiredMem = fixedMem + maxMatches * sizeof(Match);
 
-        if (requiredMem > freeMem * 9 / 10)
+        if (requiredMem > budgetMem)
             return false;
+        maxMatchesPerBatch = maxMatches; // выделения и проходы ниже используют фактический размер
 
         // Allocate
         err = cudaMalloc(&d_thumbnails, count * thumbSize);
@@ -1008,11 +1025,10 @@ namespace ad
             }
 
             size_t matchesToRead = (h_matchCount < maxMatchesPerBatch) ? h_matchCount : maxMatchesPerBatch;
-            // P1-4: overrun must surface as failure, not a silently truncated success.
-            if (h_matchCount > maxMatchesPerBatch)
-                g_ssimTruncated = true;
-            else
-                g_ssimTruncated = false;
+            // P1-4/§4.12: число потерянных пар возвращается вызывающему — усечение больше
+            // не молчит и не помечает всё сравнение отказом.
+            if (pDroppedMatches)
+                *pDroppedMatches = h_matchCount - matchesToRead;
 
             if (matchesToRead > 0) {
                 std::vector<Match> h_batch(maxMatchesPerBatch);
@@ -1038,8 +1054,8 @@ namespace ad
         if (d_poolMask) cudaFree(d_poolMask);
         cudaFree(d_results);
         cudaFree(d_matchCount);
-        // P1-4: buffer overrun means an incomplete result set — not a success.
-        return !g_ssimTruncated;
+        // §4.12: усечение отдаётся наружу числом (pDroppedMatches), а не отказом.
+        return true;
 
     ssim_cleanup:
         cudaFree(d_thumbnails);

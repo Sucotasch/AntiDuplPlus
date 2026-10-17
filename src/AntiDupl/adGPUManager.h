@@ -118,12 +118,13 @@ namespace ad
             double addDiffForCrcMismatch,
             void* callbackContext,
             GpuMatchCallback callback,
-            size_t maxMatchesPerBatch) {
+            size_t maxMatchesPerBatch,
+            size_t* pDroppedMatches) {
             if (!m_available) return false;
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return GpuCompareAllVsAll(allThumbnails, allCrcArray, poolMask, poolCompareMode,
                                       count, thumbSize, threshold, maxDifference, addDiffForCrcMismatch,
-                                      callbackContext, callback, maxMatchesPerBatch);
+                                      callbackContext, callback, maxMatchesPerBatch, pDroppedMatches);
         }
 
         // SSIM AllVsAll comparison
@@ -140,13 +141,15 @@ namespace ad
             double addDiffForCrcMismatch,
             void* callbackContext,
             GpuMatchCallback callback,
-            size_t maxMatchesPerBatch) {
+            size_t maxMatchesPerBatch,
+            size_t* pDroppedMatches) {
             if (!m_available) return false;
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
             return GpuCompareAllVsAllSsim(allThumbnails, allAverages, allVariances, allCrcArray,
                                           poolMask, poolCompareMode,
                                           count, thumbSize, ssimThreshold, addDiffForCrcMismatch,
-                                          callbackContext, callback, maxMatchesPerBatch);
+                                          callbackContext, callback, maxMatchesPerBatch,
+                                          pDroppedMatches);
         }
 
     private:

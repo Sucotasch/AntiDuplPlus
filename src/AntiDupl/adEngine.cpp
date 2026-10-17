@@ -218,7 +218,6 @@ namespace ad
         size_t thumbSize;
         double maxDifference;
         size_t totalProcessed;
-        size_t bufferFullCount;
         size_t totalPairs;
     };
 
@@ -379,7 +378,6 @@ namespace ad
         ctx.imageByIndex = &imageByIndex;
         ctx.thumbSize = thumbSize;
         ctx.totalProcessed = 0;
-        ctx.bufferFullCount = 0;
         ctx.totalPairs = validCount * (validCount - 1) / 2;
 
         const size_t BATCH_MATCHES = 5000000;
@@ -417,6 +415,9 @@ namespace ad
             }
         }
 
+        // §4.12: сколько пар не влезло в буфер GPU (0 — не влезло ни одной)
+        size_t droppedMatches = 0;
+
         if (useSsim) {
             // SSIM mode
             double ssimThreshold = (double)m_pOptions->compare.thresholdDifference;
@@ -435,7 +436,7 @@ namespace ad
                 ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32,
                 &ctx,
                 MatchCallback,
-                BATCH_MATCHES);
+                BATCH_MATCHES, &droppedMatches);
         }
         else {
             // Mean Square mode
@@ -460,7 +461,7 @@ namespace ad
                 ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32,
                 &ctx,
                 MatchCallback,
-                BATCH_MATCHES);
+                BATCH_MATCHES, &droppedMatches);
         }
 
         if (success) {
@@ -468,6 +469,21 @@ namespace ad
         }
         else {
             AD_DEBUG("ExecuteGpuAllVsAllComparison: GPU comparison FAILED\n");
+        }
+
+        if (success && droppedMatches > 0) {
+            // §4.12: буфер пар ограничен свободной VRAM — если результаты в него не влезли,
+            // пишем отчёт в trace.log. Строка статуса (m_pStatus->Search) для этого не годится:
+            // TEngine::Search() вызывает m_pStatus->Reset() сразу после сравнения, поэтому текст
+            // до GUI не доходит, а счётчики статистики поиска при этом обнуляются.
+            AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: truncated, %zu pairs dropped\n", droppedMatches);
+            std::wstring logPath(GetApplicationPath());
+            logPath = logPath.substr(0, logPath.find_last_of(L"\\/")) + L"\\trace.log";
+            FILE* logFile = _wfopen(logPath.c_str(), L"a");
+            if (logFile) {
+                fwprintf(logFile, L"GPU comparison truncated: %zu pairs dropped (buffer limit)\n", droppedMatches);
+                fclose(logFile);
+            }
         }
 
         // Освобождаем большую память заранее

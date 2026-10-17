@@ -82,7 +82,8 @@ namespace ad
         double addDiffForCrcMismatch,      // Добавка за несовпадение CRC
         void* callbackContext,             // Контекст для callback
         GpuMatchCallback callback,         // Callback для streaming обработки
-        size_t maxMatchesPerBatch);        // Максимум matches за один вызов
+        size_t maxMatchesPerBatch,          // Максимум matches за один вызов (может быть уменьшен по VRAM)
+        size_t* pDroppedMatches);           // §4.12: сколько пар не влезло в буфер (может быть NULL)
 
     // SSIM AllVsAll comparison с streaming callback
     bool GpuCompareAllVsAllSsim(
@@ -98,7 +99,8 @@ namespace ad
         double addDiffForCrcMismatch,
         void* callbackContext,
         GpuMatchCallback callback,
-        size_t maxMatchesPerBatch);
+        size_t maxMatchesPerBatch,          // может быть уменьшен по свободной VRAM
+        size_t* pDroppedMatches);           // §4.12: сколько пар не влезло в буфер (может быть NULL)
 }
 
 #endif//__adGPU_h__

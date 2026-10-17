@@ -180,19 +180,22 @@ static uint64_t GetFileTime(const fs::path& p) {
     return 0;
 }
 
+// §3.4: lowercase once instead of listing every mixed-case spelling the DLL accepts.
 static uint8_t GetImageType(const std::wstring& ext) {
-    if (ext==L".jpg"||ext==L".jpeg"||ext==L".JPG"||ext==L".JPEG"||ext==L".jpe"||ext==L".JPE"||ext==L".jif"||ext==L".JIF"||ext==L".jfif"||ext==L".JFIF"||ext==L".jfi"||ext==L".JFI") return 3;  // AD_IMAGE_JPEG
-    if (ext==L".png"||ext==L".PNG") return 4;  // AD_IMAGE_PNG
-    if (ext==L".tif"||ext==L".tiff"||ext==L".TIF"||ext==L".TIFF") return 5;  // AD_IMAGE_TIFF
-    if (ext==L".webp"||ext==L".WEBP") return 14; // AD_IMAGE_WEBP
-    if (ext==L".bmp"||ext==L".BMP"||ext==L".dib"||ext==L".DIB") return 1;  // AD_IMAGE_BMP
-    if (ext==L".gif"||ext==L".GIF") return 2;  // AD_IMAGE_GIF
+    std::wstring e = ext;
+    std::transform(e.begin(), e.end(), e.begin(), ::towlower);
+    if (e==L".jpg"||e==L".jpeg"||e==L".jpe"||e==L".jif"||e==L".jfif"||e==L".jfi") return 3;  // AD_IMAGE_JPEG
+    if (e==L".png") return 4;  // AD_IMAGE_PNG
+    if (e==L".tif"||e==L".tiff") return 5;  // AD_IMAGE_TIFF
+    if (e==L".webp") return 14; // AD_IMAGE_WEBP
+    if (e==L".bmp"||e==L".dib") return 1;  // AD_IMAGE_BMP
+    if (e==L".gif") return 2;  // AD_IMAGE_GIF
     return 0;
 }
 
 struct Arguments {
     std::wstring inputPath, outputPath, databaseName;
-    int thumbSize=32, batchSize=64, workers=0; bool help=false, update=false, noPause=false;
+    int thumbSize=32, workers=0; bool help=false, update=false, noPause=false;
 };
 
 Arguments ParseArguments(int argc, wchar_t* argv[]) {
@@ -207,27 +210,28 @@ Arguments ParseArguments(int argc, wchar_t* argv[]) {
         else if ((arg==L"--output"||arg==L"-o")&&i+1<argc) args.outputPath=argv[++i];
         else if ((arg==L"--name"||arg==L"-n")&&i+1<argc) args.databaseName=argv[++i];
         else if ((arg==L"--size"||arg==L"-s")&&i+1<argc) args.thumbSize=parseInt(argv[++i], args.thumbSize);
-        else if ((arg==L"--batch"||arg==L"-b")&&i+1<argc) args.batchSize=parseInt(argv[++i], args.batchSize);
         else if ((arg==L"--workers"||arg==L"-w")&&i+1<argc) args.workers=parseInt(argv[++i], 0);
         else if (arg==L"--update"||arg==L"-u") args.update=true;
         else if (arg==L"--no-pause") args.noPause=true;
         else if (arg==L"--help"||arg==L"-h") args.help=true;
     }
-    // C13: keep thumbSize within the DLL-supported range [REDUCED_IMAGE_SIZE_MIN=16 ..
-    // INITIAL_REDUCED_IMAGE_SIZE/2=128]; a DB outside it is rejected by the DLL loader.
+    // C13 §3.5: the DLL clamps reducedImageSize to [REDUCED_IMAGE_SIZE_MIN=16 ..
+    // INITIAL_REDUCED_IMAGE_SIZE/2=128] and rounds it UP to the next power of two
+    // (TOptions::Validate); a database whose thumb size differs from that value is
+    // rejected by the loader, so `--size 48` used to produce an unloadable DB.
     if (args.thumbSize < 16) args.thumbSize = 16;
     if (args.thumbSize > 128) args.thumbSize = 128;
+    else { int snapped = 16; while (snapped < args.thumbSize) snapped <<= 1; args.thumbSize = snapped; }
     return args;
 }
 
 void PrintHelp() {
     std::wcout << L"NvJpegCollector - GPU-accelerated image pre-processing for AntiDuplPlus\n\n";
-    std::wcout << L"Usage: NvJpegCollector.exe --input <path> [--output <db_root>] [--name <db_name>] [--size 32] [--batch 64] [--update]\n\n";
+    std::wcout << L"Usage: NvJpegCollector.exe --input <path> [--output <db_root>] [--name <db_name>] [--size 32] [--update]\n\n";
     std::wcout << L"  --input, -i       Path to folder with images (shows dialog if omitted)\n";
     std::wcout << L"  --output, -o      Root databases folder (default: program_dir\\databases)\n";
     std::wcout << L"  --name, -n        Database name (default: last folder name)\n";
-    std::wcout << L"  --size, -s        Thumbnail size (default: 32)\n";
-    std::wcout << L"  --batch, -b       Batch size for nvJPEG (default: 64)\n";
+    std::wcout << L"  --size, -s        Thumbnail size: 16, 32, 64 or 128 (default: 32)\n";
     std::wcout << L"  --workers, -w     CPU worker threads for analysis (default: auto = physical cores - 1)\n";
     std::wcout << L"  --update, -u      Update existing database (incremental: add new, remove deleted)\n";
     std::wcout << L"  --no-pause        Non-interactive mode: never show message boxes, log to stdout/stderr\n";
@@ -324,10 +328,18 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 }
 
+// §4.9: grow the buffer until the full path fits — a fixed MAX_PATH buffer truncates an
+// install path longer than MAX_PATH, and truncation also corrupts the directory part.
 static std::wstring GetExeDir() {
-    wchar_t buffer[MAX_PATH];
-    GetModuleFileNameW(NULL, buffer, MAX_PATH);
-    std::wstring path(buffer);
+    std::vector<wchar_t> buffer(MAX_PATH);
+    DWORD len = 0;
+    for (;;) {
+        len = GetModuleFileNameW(NULL, buffer.data(), (DWORD)buffer.size());
+        if (len == 0) return L".";                 // cannot happen in practice
+        if (len < buffer.size()) break;            // len == capacity means "truncated"
+        buffer.resize(buffer.size() * 2);
+    }
+    std::wstring path(buffer.data(), len);
     size_t pos = path.find_last_of(L"\\/");
     return (pos != std::wstring::npos) ? path.substr(0, pos) : L".";
 }
@@ -367,6 +379,124 @@ static std::wstring UnescapeXmlAttr(const std::wstring& s) {
         out += s[i];
     }
     return out;
+}
+
+// §11.3c: set or replace one attribute inside a "<Database .../>" tag. Missing attributes are
+// inserted before "/>"; unknown attributes of the tag are left untouched.
+static std::wstring SetXmlAttr(const std::wstring& tag, const std::wstring& attr, const std::wstring& value)
+{
+    std::wstring needle = attr + L"=\"";
+    size_t pos = tag.find(needle);
+    if (pos == std::wstring::npos) {
+        // Patch fix 2026-10-18: the audit patch called insert() on the const parameter.
+        std::wstring updated = tag;
+        updated.insert(updated.size() - 2, L" " + attr + L"=\"" + EscapeXmlAttr(value) + L"\"");
+        return updated;
+    }
+    size_t start = pos + needle.size();
+    size_t end = tag.find(L'"', start);
+    if (end == std::wstring::npos) return tag;
+    return tag.substr(0, start) + EscapeXmlAttr(value) + tag.substr(end);
+}
+
+// §11.3c: the registry is rewritten by three processes; a half-written ad_database.xml would
+// drop every database registered by the others. Write UTF-8 to a temp file, then replace.
+static bool WriteRegistryAtomic(const std::wstring& path, const std::wstring& xml)
+{
+    int len = WideCharToMultiByte(CP_UTF8, 0, xml.c_str(), (int)xml.size(), NULL, 0, NULL, NULL);
+    if (len <= 0) return false;
+    std::string utf8(len, 0);
+    WideCharToMultiByte(CP_UTF8, 0, xml.c_str(), (int)xml.size(), &utf8[0], len, NULL, NULL);
+
+    std::wstring tmp = path + L".tmp";
+    std::ofstream f(tmp.c_str(), std::ios::binary);
+    if (!f.is_open()) return false;
+    f.write(utf8.c_str(), (std::streamsize)utf8.size());
+    f.flush();
+    if (!f.good()) { f.close(); _wremove(tmp.c_str()); return false; }
+    f.close();
+    if (!MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        _wremove(tmp.c_str());
+        return false;
+    }
+    return true;
+}
+
+static std::wstring ReadRegistryXml(const std::wstring& path)
+{
+    std::wstring xmlContent;
+    std::ifstream rFile(path, std::ios::binary);
+    if (rFile.is_open()) {
+        std::string content((std::istreambuf_iterator<char>(rFile)), std::istreambuf_iterator<char>());
+        if (!content.empty()) {
+            int len = MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), NULL, 0);
+            if (len > 0) { xmlContent.resize(len); MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), &xmlContent[0], len); }
+        }
+    }
+    return xmlContent;
+}
+
+// §11.3c: rebuild the registry, updating this database's entry in place. Matching is
+// case-insensitive; Pool/Enabled/RemapFrom and any other attributes of an existing entry survive
+// (only ThumbSize/Count/Status are refreshed). A missing entry is appended, duplicates are dropped.
+static std::wstring UpdateRegistryXml(const std::wstring& xmlContent, const std::wstring& inputPath,
+    const std::wstring& dbName, const std::wstring& relativeFolder, int thumbSize, size_t count)
+{
+    std::wstring lowerInput = inputPath;
+    std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(), ::towlower);
+
+    std::wstring newXml = L"<DatabaseRegistry>\n";
+    bool found = false;
+    size_t pos = 0;
+    while ((pos = xmlContent.find(L"<Database ", pos)) != std::wstring::npos) {
+        size_t endPos = xmlContent.find(L"/>", pos);
+        if (endPos == std::wstring::npos) break;
+
+        std::wstring tag = xmlContent.substr(pos, endPos - pos + 2);
+        pos = endPos + 2;
+
+        size_t pStart = tag.find(L"Path=\"");
+        size_t pEnd = (pStart == std::wstring::npos) ? std::wstring::npos : tag.find(L"\"", pStart + 6);
+        if (pEnd == std::wstring::npos) { newXml += tag + L"\n"; continue; }
+
+        std::wstring existingPath = UnescapeXmlAttr(tag.substr(pStart + 6, pEnd - pStart - 6));
+        std::wstring lowerExisting = existingPath;
+        std::transform(lowerExisting.begin(), lowerExisting.end(), lowerExisting.begin(), ::towlower);
+        if (lowerExisting != lowerInput) { newXml += tag + L"\n"; continue; }
+        if (found) continue; // second entry for the same path — drop it
+
+        std::wstring updated = tag;
+        // Folder/Name are derived from this run's parameters (the old code always wrote them
+        // fresh); Pool/Enabled/RemapFrom and any unknown attributes stay as they are.
+        updated = SetXmlAttr(updated, L"Folder", relativeFolder);
+        updated = SetXmlAttr(updated, L"Name", dbName);
+        updated = SetXmlAttr(updated, L"ThumbSize", std::to_wstring(thumbSize));
+        updated = SetXmlAttr(updated, L"Count", std::to_wstring(count));
+        updated = SetXmlAttr(updated, L"Status", L"Ready");
+        newXml += updated + L"\n";
+        found = true;
+    }
+
+    if (!found) {
+        newXml += L"  <Database Path=\"" + EscapeXmlAttr(inputPath) + L"\" Folder=\"" + EscapeXmlAttr(relativeFolder)
+            + L"\" Name=\"" + EscapeXmlAttr(dbName) + L"\" ThumbSize=\"" + std::to_wstring(thumbSize)
+            + L"\" Count=\"" + std::to_wstring(count) + L"\" Status=\"Ready\"/>\n";
+    }
+    newXml += L"</DatabaseRegistry>\n";
+    return newXml;
+}
+
+// §3.8: "adii" magic marks a DLL-native database. --update must not touch it: it would replace
+// index.adi/0000.adi and orphan the 0001.adi groups that hold the records.
+static bool IsDllNativeDatabase(const std::wstring& dbFolder)
+{
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, (dbFolder + L"\\index.adi").c_str(), L"rb") != 0 || !f)
+        return false;
+    uint32_t magic = 0;
+    bool ok = (fread(&magic, 4, 1, f) == 1);
+    fclose(f);
+    return ok && magic == 0x69696461u; // "adii"
 }
 
 // Read existing 0000.adi database into a map of path -> ImageInfo
@@ -454,12 +584,25 @@ static ImageInfo ProcessGray(const uint8_t* gray, int w, int h, const fs::path& 
         info.blockiness = ad::GetBlockiness(grayV);
         info.blurring = ad::TBlurringDetector().Detect(grayV);
     }
-    // Thumbnail via SIMD bilinear resize (gray -> gray), same as DLL
+    // §3.1/3.5: thumbnail via the SAME chain as the DLL's TDataCollector::FillPixelData —
+    // Resize to INITIAL_REDUCED_IMAGE_SIZE (256), halve with ReduceGray2x2 down to 2*thumbSize,
+    // then a final ReduceGray2x2 into thumbSize. Measured 2026-10-18 (Audit/Fix-Plan-2026-10-18.md
+    // stage 3.5): the old direct Resize to thumbSize undersamples and differed from the DLL's
+    // live-scan thumbnails on 50-98% of the pixels (maxdiff 144-147); with this chain PNG/WebP
+    // become byte-identical, JPEG differs only through the DLL's own scaled JPEG decode.
     std::vector<uint8_t> thumb(thumbSize * thumbSize);
     {
+        const int initialSize = 256; // = INITIAL_REDUCED_IMAGE_SIZE in the DLL (adConfig.h)
+        std::vector<ad::TView*> buffers;
+        for (int size = initialSize; size > thumbSize; size >>= 1)
+            buffers.push_back(new ad::TView(size, size, size, ad::TView::Gray8, NULL));
         ad::TView srcV(w, h, w, ad::TView::Gray8, const_cast<uint8_t*>(gray));
+        Simd::Resize(srcV, *buffers.front());
+        for (size_t i = 1; i < buffers.size(); ++i)
+            Simd::ReduceGray2x2(*buffers[i - 1], *buffers[i]);
         ad::TView dstV(thumbSize, thumbSize, thumbSize, ad::TView::Gray8, thumb.data());
-        Simd::Resize(srcV, dstV);
+        Simd::ReduceGray2x2(*buffers.back(), dstV);
+        for (size_t i = 0; i < buffers.size(); ++i) delete buffers[i];
     }
     info.thumbnail = std::move(thumb);
     info.crc32c = CalculateCRC32c(info.thumbnail.data(), info.thumbnail.size());
@@ -744,7 +887,6 @@ static std::vector<ImageInfo> ProcessJpegList(const std::vector<fs::path>& files
     return result;
 }
 
-
 int wmain_impl(int argc, wchar_t* argv[]) {
     Arguments args = ParseArguments(argc, argv);
     if (args.help) { PrintHelp(); PauseAndExit(); return 0; }
@@ -782,7 +924,10 @@ int wmain_impl(int argc, wchar_t* argv[]) {
     std::wstring relativeFolder;
     // Check if dbFolder is inside exeDir\databases
     std::wstring defaultBase = exeDir + L"\\databases";
-    if (dbFolder.size() > defaultBase.size() && dbFolder.substr(0, defaultBase.size()) == defaultBase) {
+    // §4.9/§11.3c: compare on a separator boundary, otherwise "...\databases2\X" counts as inside
+    // "...\databases" and the registry stores a wrong relative Folder.
+    if (dbFolder.size() > defaultBase.size() && dbFolder.compare(0, defaultBase.size(), defaultBase) == 0 &&
+        (dbFolder[defaultBase.size()] == L'\\' || dbFolder[defaultBase.size()] == L'/')) {
         relativeFolder = L"databases\\" + dbName;
     } else {
         // Fallback to absolute if user specified a custom path outside exe dir
@@ -801,11 +946,21 @@ int wmain_impl(int argc, wchar_t* argv[]) {
         for (const auto& entry : fs::recursive_directory_iterator(args.inputPath))
             if (entry.is_regular_file()) { std::wstring ext = entry.path().extension().wstring(); if (GetImageType(ext)!=0) imageFiles.push_back(entry.path()); }
     } catch (const std::exception& e) { std::wcerr << L"[ERROR] " << e.what() << std::endl; PauseAndExit(); return 1; }
-    if (imageFiles.empty()) { std::wcout << L"[WARN] No image files." << std::endl; PauseAndExit(); return 0; }
+    // §3.3: an empty folder must still produce a valid (empty) database — an early return here
+    // also blocked the update path, so a DB whose files were all deleted stayed stale.
+    if (imageFiles.empty())
+        std::wcout << L"[WARN] No image files — writing an empty database." << std::endl;
     std::wcout << L"[SCAN] Found " << imageFiles.size() << L" files." << std::endl;
 
     // ========== UPDATE MODE: incremental update of existing database ==========
     if (args.update) {
+        // §3.8: refuse to update a DLL-native ("adii") database — see IsDllNativeDatabase.
+        if (IsDllNativeDatabase(dbFolder)) {
+            std::wcerr << L"[ERROR] This database uses the DLL-native format, which --update "
+                          L"cannot import safely. Rebuild it with a full collection instead." << std::endl;
+            PauseAndExit();
+            return 2;
+        }
         std::wcout << L"[UPDATE] Loading existing database from " << dbFolder << L"..." << std::endl;
         std::map<std::wstring, ImageInfo> existingRecords;
         if (!LoadExistingDatabase(dbFolder, args.thumbSize, existingRecords)) {
@@ -1005,59 +1160,14 @@ int wmain_impl(int argc, wchar_t* argv[]) {
 
                 std::wcout << L"[UPDATE] Saved " << images.size() << L" records to " << dbFolder << std::endl;
 
-                // Update registry count
+                // Update registry: same policy as the full scan (preserve Pool/Enabled/RemapFrom,
+                // refresh ThumbSize/Count/Status, case-insensitive match, atomic write).
                 {
-                    std::wstring exeDir = GetExeDir();
-                    std::wstring regPathW = exeDir + L"\\ad_database.xml";
-                    std::wstring xmlContent;
-                    {
-                        std::ifstream rFile(regPathW, std::ios::binary);
-                        if (rFile.is_open()) {
-                            std::string content((std::istreambuf_iterator<char>(rFile)), std::istreambuf_iterator<char>());
-                            if (!content.empty()) {
-                                int len = MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), NULL, 0);
-                                if (len > 0) { xmlContent.resize(len); MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), &xmlContent[0], len); }
-                            }
-                        }
-                    }
-                    // Update Count attribute for this database's path.
-                    // P1-6: writers now store Path XML-escaped, so match the escaped
-                    // form (a bare '&' path would otherwise miss and duplicate).
-                    // P3: was a positional `countPos < pos + 500` window — a path
-                    // containing a literal Count=" or a future attribute reorder
-                    // silently patched the wrong place. Constrain the search to the
-                    // <Database ... /> element that owns the matched Path attribute.
-                    std::wstring countStr = std::to_wstring(images.size());
-                    std::wstring pathNeedle = L"Path=\"" + EscapeXmlAttr(args.inputPath) + L"\"";
-                    size_t pos = 0;
-                    while ((pos = xmlContent.find(pathNeedle, pos)) != std::wstring::npos) {
-                        size_t tagStart = xmlContent.rfind(L"<Database", pos);
-                        size_t tagEnd = xmlContent.find(L"/>", pos);
-                        size_t nextTag = xmlContent.find(L"<Database", pos);
-                        bool sameTag = (tagStart != std::wstring::npos && tagEnd != std::wstring::npos
-                            && (nextTag == std::wstring::npos || nextTag > tagEnd));
-                        if (sameTag) {
-                            size_t countPos = xmlContent.find(L"Count=\"", pos);
-                            if (countPos != std::wstring::npos && countPos < tagEnd) {
-                                size_t valStart = countPos + 7;
-                                size_t valEnd = xmlContent.find(L"\"", valStart);
-                                if (valEnd != std::wstring::npos && valEnd < tagEnd) {
-                                    xmlContent.replace(valStart, valEnd - valStart, countStr);
-                                    break;
-                                }
-                            }
-                        }
-                        pos++;
-                    }
-                    std::ofstream wFile(regPathW, std::ios::binary);
-                    if (wFile.is_open()) {
-                        int len = WideCharToMultiByte(CP_UTF8, 0, xmlContent.c_str(), (int)xmlContent.size(), NULL, 0, NULL, NULL);
-                        if (len > 0) {
-                            std::string utf8(len, 0);
-                            WideCharToMultiByte(CP_UTF8, 0, xmlContent.c_str(), (int)xmlContent.size(), &utf8[0], len, NULL, NULL);
-                            wFile.write(utf8.c_str(), utf8.size());
-                        }
-                    }
+                    std::wstring regPathW = GetExeDir() + L"\\ad_database.xml";
+                    std::wstring newXml = UpdateRegistryXml(ReadRegistryXml(regPathW), args.inputPath,
+                        dbName, relativeFolder, args.thumbSize, images.size());
+                    if (!WriteRegistryAtomic(regPathW, newXml))
+                        std::wcerr << L"[WARN] Could not update ad_database.xml" << std::endl;
                 }
             }
 
@@ -1155,7 +1265,10 @@ int wmain_impl(int argc, wchar_t* argv[]) {
         fwrite(s.c_str(), sizeof(wchar_t), len, f);
     };
 
-    if (images.empty()) { std::wcerr << L"[ERROR] No images to save" << std::endl; CleanupNvJpeg(); PauseAndExit(); return 1; }
+    // §3.3: an empty result set is a valid database (count = 0) — the update path already
+    // writes one, and the full path used to return an error instead, leaving a stale DB behind.
+    std::wstring firstPath = images.empty() ? L"" : images.front().path;
+    std::wstring lastPath  = images.empty() ? L"" : images.back().path;
 
     // 1. Write index.adi
     std::wstring indexPath = dbFolder + L"\\index.adi";
@@ -1165,8 +1278,8 @@ int wmain_impl(int argc, wchar_t* argv[]) {
     fwrite(&ts32, 4, 1, idxFile);
     uint64_t groupCount = 1; fwrite(&groupCount, 8, 1, idxFile);
     int16_t key = 0; fwrite(&key, 2, 1, idxFile);
-    writeStr(idxFile, images.front().path);
-    writeStr(idxFile, images.back().path);
+    writeStr(idxFile, firstPath);
+    writeStr(idxFile, lastPath);
     uint64_t imgCount = images.size(); fwrite(&imgCount, 8, 1, idxFile);
     fclose(idxFile);
 
@@ -1176,8 +1289,8 @@ int wmain_impl(int argc, wchar_t* argv[]) {
     if (!dataFile) { std::wcerr << L"[ERROR] Cannot create 0000.adi" << std::endl; CleanupNvJpeg(); PauseAndExit(); return 1; }
     fwrite(&ts32, 4, 1, dataFile);  // thumbSize
     fwrite(&key, 2, 1, dataFile);   // key
-    writeStr(dataFile, images.front().path);
-    writeStr(dataFile, images.back().path);
+    writeStr(dataFile, firstPath);
+    writeStr(dataFile, lastPath);
     fwrite(&imgCount, 8, 1, dataFile);  // count
 
     for (const auto& img : images) {
@@ -1204,81 +1317,11 @@ int wmain_impl(int argc, wchar_t* argv[]) {
 
     // Update registry (UTF-8 compatible, portable, relative path if possible)
     {
-        std::wstring exeDir = GetExeDir();
-        std::wstring regPathW = exeDir + L"\\ad_database.xml";
-        std::string regPathA(regPathW.begin(), regPathW.end()); // Path is ASCII
-
-        // 1. Read existing XML as raw bytes (UTF-8)
-        std::wstring xmlContent;
-        {
-            std::ifstream rFile(regPathA, std::ios::binary);
-            if (rFile.is_open()) {
-                std::string content((std::istreambuf_iterator<char>(rFile)), std::istreambuf_iterator<char>());
-                if (!content.empty()) {
-                    int len = MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), NULL, 0);
-                    if (len > 0) {
-                        xmlContent.resize(len);
-                        MultiByteToWideChar(CP_UTF8, 0, content.c_str(), (int)content.size(), &xmlContent[0], len);
-                    }
-                }
-            }
-        }
-
-        // 2. Parse and rebuild XML (preserving other entries)
-        std::wstring newXml = L"<DatabaseRegistry>\n";
-        size_t pos = 0;
-        std::wstring searchTag = L"<Database ";
-        while ((pos = xmlContent.find(searchTag, pos)) != std::wstring::npos) {
-            size_t endPos = xmlContent.find(L"/>", pos);
-            if (endPos == std::wstring::npos) break;
-
-            std::wstring tag = xmlContent.substr(pos, endPos - pos + 2);
-            pos = endPos + 2;
-
-            // Extract Path attribute
-            size_t pStart = tag.find(L"Path=\"");
-            if (pStart != std::wstring::npos) {
-                pStart += 6;
-                size_t pEnd = tag.find(L"\"", pStart);
-                if (pEnd != std::wstring::npos) {
-                    // P1-6: existing entries store Path XML-escaped — decode before
-                    // comparing, otherwise an escaped path never matches the raw
-                    // input path and the entry gets duplicated on re-collect.
-                    std::wstring existingPath = UnescapeXmlAttr(tag.substr(pStart, pEnd - pStart));
-                    // Case-insensitive comparison
-                    std::wstring lowerExisting = existingPath;
-                    std::wstring lowerInput = args.inputPath;
-                    std::transform(lowerExisting.begin(), lowerExisting.end(), lowerExisting.begin(), ::towlower);
-                    std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(), ::towlower);
-
-                    if (lowerExisting != lowerInput) {
-                        newXml += tag + L"\n";
-                    }
-                }
-            } else {
-                newXml += tag + L"\n";
-            }
-        }
-
-        // 3. Add new entry
-        newXml += L"  <Database Path=\"" + EscapeXmlAttr(args.inputPath) + L"\" Folder=\"" + EscapeXmlAttr(relativeFolder)
-            + L"\" Name=\"" + EscapeXmlAttr(dbName) + L"\" ThumbSize=\"" + std::to_wstring(args.thumbSize)
-            + L"\" Count=\"" + std::to_wstring(images.size()) + L"\" Status=\"Ready\"/>\n";
-        newXml += L"</DatabaseRegistry>\n";
-
-        // 4. Write as UTF-8
-        std::string utf8Content;
-        {
-            int len = WideCharToMultiByte(CP_UTF8, 0, newXml.c_str(), (int)newXml.size(), NULL, 0, NULL, NULL);
-            if (len > 0) {
-                utf8Content.resize(len);
-                WideCharToMultiByte(CP_UTF8, 0, newXml.c_str(), (int)newXml.size(), &utf8Content[0], len, NULL, NULL);
-            }
-        }
-        std::ofstream wFile(regPathA, std::ios::binary);
-        if (wFile.is_open()) {
-            wFile.write(utf8Content.c_str(), utf8Content.size());
-        }
+        std::wstring regPathW = GetExeDir() + L"\\ad_database.xml";
+        std::wstring newXml = UpdateRegistryXml(ReadRegistryXml(regPathW), args.inputPath,
+            dbName, relativeFolder, args.thumbSize, images.size());
+        if (!WriteRegistryAtomic(regPathW, newXml))
+            std::wcerr << L"[WARN] Could not update ad_database.xml" << std::endl;
     }
 
     auto totalTime = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - startTime).count();

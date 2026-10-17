@@ -144,8 +144,13 @@ namespace ad
         {
             if(size >= advanced.reducedImageSize)
             {
-                advanced.reducedImageSize = size;
-                advanced.ignoreFrameWidth = int(ceil(size*advanced.ignoreFrameWidth/double(DENOMINATOR*2))/size*DENOMINATOR*2);
+                // §5.6: ignoreFrameWidth was recomputed from its own (already normalized) value
+                // on every Validate() call, so repeated loads drifted the effective frame.
+                if(size != advanced.reducedImageSize)
+                {
+                    advanced.reducedImageSize = size;
+                    advanced.ignoreFrameWidth = int(ceil(size*advanced.ignoreFrameWidth/double(DENOMINATOR*2))/size*DENOMINATOR*2);
+                }
                 break;
             }
         }

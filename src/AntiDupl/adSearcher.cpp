@@ -98,12 +98,17 @@ namespace ad
                 TString path = CreatePath(directory, name);
                 if((findData.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY) != 0 && enableSubFolder)
                 {
-                    SearchImages(path, true);
+                    // §4.2: a junction/symlink below the root can form a cycle or duplicate
+                    // the subtree; recursive_directory_iterator in the collector skips them too.
+                    if((findData.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT) == 0)
+                        SearchImages(path, true);
                 }
                 else if(IsWanted(path.c_str()) && m_pOptions->ignorePaths.IsHasPath(path) == AD_IS_NOT_EXIST)
                 {
                     adUInt64 imageSize = adUInt64(findData.nFileSizeLow) + adUInt64(findData.nFileSizeHigh) * adUInt64(0x100000000);
-                    m_pImageDataPtrs->push_back(m_pImageDataStorage->Get(TImageInfo(path, imageSize, *(TUInt64*)&findData.ftLastWriteTime)));
+                    TUInt64 imageTime = 0;
+                    memcpy(&imageTime, &findData.ftLastWriteTime, sizeof(imageTime));
+                    m_pImageDataPtrs->push_back(m_pImageDataStorage->Get(TImageInfo(path, imageSize, imageTime)));
                     m_searchedImageSize += imageSize;
                 }
             } while(FindNextFile(hFind, &findData) != 0 && !m_pStatus->Stopped()); 

@@ -52,6 +52,12 @@ namespace ad
 
 	class TInputFileStream : public TFileStream
 	{
+	private:
+		// §4.3: the file cannot grow during a load, so its size is queried once in the
+		// constructor and the current position is tracked here instead of per string.
+		ULONGLONG m_fileSize;
+		mutable ULONGLONG m_offset;
+
 	public:
 		TInputFileStream(const TChar * fileName, const char * format);
 

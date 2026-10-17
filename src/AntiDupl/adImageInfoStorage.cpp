@@ -106,6 +106,16 @@ namespace ad
 
     void TImageInfoStorage::RemoveUnlinked()
     {
+        // §4.8: m_addMap is keyed by the caller's pointer and valued by the stored copy, so an
+        // entry outliving the copy made a later Add() return freed memory. Drop map entries first.
+        for(TAddMap::iterator it = m_addMap.begin(); it != m_addMap.end(); )
+        {
+            if(it->second->links == 0)
+                it = m_addMap.erase(it);
+            else
+                ++it;
+        }
+
         for(TMainList::iterator it = m_mainList.begin(); it != m_mainList.end();)
         {
             if((*it)->links == 0)

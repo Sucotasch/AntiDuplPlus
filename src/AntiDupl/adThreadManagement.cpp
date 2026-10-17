@@ -215,6 +215,8 @@ namespace ad
 
     void TThreadManager::Finish()
     {
+        if(m_pThreads == NULL)
+            return;
         for(TThreads::iterator i = m_pThreads->begin(); i != m_pThreads->end(); i++)
         {
             i->task->Queue()->Finish();
@@ -229,6 +231,9 @@ namespace ad
 
     bool TThreadManager::SetPriority(int priority)
     {
+        // §4.7: Finish() may already have run; a second call must not dereference NULL.
+        if(m_pThreads == NULL)
+            return true;
         bool result = true;
         for(TThreads::iterator it = m_pThreads->begin(); it != m_pThreads->end(); it++)
             result = result && it->thread->SetPriority(priority);
@@ -237,6 +242,8 @@ namespace ad
 
     void TThreadManager::SetSleepInterval(TUInt32 sleepInterval)
     {
+        if(m_pThreads == NULL)
+            return;
         for(TThreads::iterator it = m_pThreads->begin(); it != m_pThreads->end(); it++)
             it->task->SetSleepInterval(sleepInterval);
     }

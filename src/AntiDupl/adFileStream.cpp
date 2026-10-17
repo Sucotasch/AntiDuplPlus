@@ -50,6 +50,8 @@ namespace ad
 
 	TInputFileStream::TInputFileStream(const TChar * fileName, const char * format_)
 		:TFileStream(fileName, format_)
+		, m_fileSize((ULONGLONG)-1)
+		, m_offset(0)
 	{
 		if(!IsFileExists(fileName))
 			throw TException(AD_ERROR_FILE_IS_NOT_EXIST);
@@ -57,6 +59,10 @@ namespace ad
 		m_hFile = CreateFile(m_fileName.c_str(), GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 		if (m_hFile == INVALID_HANDLE_VALUE)
 			throw TException(AD_ERROR_CANT_OPEN_FILE);
+
+		LARGE_INTEGER fileSize;
+		if(GetFileSizeEx(m_hFile, &fileSize) && fileSize.QuadPart >= 0)
+			m_fileSize = (ULONGLONG)fileSize.QuadPart;
 
 		try
 		{
@@ -96,15 +102,24 @@ namespace ad
 
 	void TInputFileStream::Load(void * buffer, size_t size) const
 	{
+		// §4.3: a corrupt length field would otherwise push the read past the end of the file
+		// and only fail after the caller has allocated the buffer.
+		if(m_offset > m_fileSize || (ULONGLONG)size > m_fileSize - m_offset)
+			throw TException(AD_ERROR_INVALID_FILE_FORMAT);
+
 		DWORD byte_was_read; 
 		BOOL result = ReadFile(m_hFile, buffer, (DWORD)size, &byte_was_read, NULL); 
 		if(result != TRUE || byte_was_read < (DWORD)size) 
 			throw TException(AD_ERROR_CANT_READ_FILE);
+		m_offset += size;
 	}
 
 	void TInputFileStream::Load(TString & string) const
 	{
 		size_t size = LoadSizeChecked(SIZE_CHECK_LIMIT);
+		// §4.3: bound the allocation by the bytes actually left in the file.
+		if(m_offset > m_fileSize || (ULONGLONG)size * sizeof(TChar) > m_fileSize - m_offset)
+			throw TException(AD_ERROR_INVALID_FILE_FORMAT);
 		string.resize(size, 0);
 		Load((void*)string.c_str(), size*sizeof(TChar));
 	}

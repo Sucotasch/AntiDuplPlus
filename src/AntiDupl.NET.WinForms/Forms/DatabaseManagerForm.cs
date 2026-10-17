@@ -48,6 +48,9 @@ namespace AntiDupl.NET.WinForms.Forms
         private const string RegistryFileName = "ad_database.xml";
         private const string PoolModeRegKey = @"Software\AntiDupl.NET\DatabaseManager";
         private List<DbEntry> m_allEntries = new List<DbEntry>();
+        // Paths removed while this form is open; the merge in SaveDatabases() must not
+        // resurrect them from disk.
+        private readonly HashSet<string> m_deletedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool m_dirty = false;
         private int m_reducedImageSize = 32;
         private static int s_poolCompareMode = -1;
@@ -363,6 +366,19 @@ namespace AntiDupl.NET.WinForms.Forms
         private void LoadDatabases()
         {
             m_allEntries = LoadRegistry("");
+            m_deletedPaths.Clear();
+
+            // Count in the registry is only a hint (deletions no longer update it, see
+            // plan 1.1): refresh it from index.adi so the grid shows the real record
+            // count. The XML value is kept when the index cannot be read.
+            foreach (var entry in m_allEntries)
+            {
+                if (string.IsNullOrEmpty(entry.Folder)) continue;
+                int thumbSize, imageCount;
+                ParseAdiInfo(Path.Combine(ResolvePath(entry.Folder), "index.adi"), out thumbSize, out imageCount);
+                if (imageCount > 0) entry.ImageCount = imageCount;
+            }
+
             RefreshAllGrids();
             m_dirty = false;
         }
@@ -727,6 +743,9 @@ namespace AntiDupl.NET.WinForms.Forms
 
                 entry.RemapFrom = oldPath;
                 entry.Path = newPath;
+                // The registry on disk still holds the entry under the old path; without
+                // this the merge would write both the old and the new entry.
+                m_deletedPaths.Add(oldPath);
                 SaveDatabases();
                 RefreshAllGrids();
 
@@ -825,6 +844,7 @@ namespace AntiDupl.NET.WinForms.Forms
                     }
                 }
 
+                m_deletedPaths.Add(entry.Path);
                 m_allEntries.Remove(entry);
                 SaveDatabases();
                 RefreshAllGrids();
@@ -1010,21 +1030,48 @@ namespace AntiDupl.NET.WinForms.Forms
             string filePath = Path.Combine(GetRegistryDir(), RegistryFileName);
             Directory.CreateDirectory(GetRegistryDir());
 
-            string content = "<DatabaseRegistry>\n";
-            foreach (var entry in m_allEntries) {
-                content += "  <Database";
-                content += $" Path=\"{EscapeXmlAttr(entry.Path)}\"";
-                if (!string.IsNullOrEmpty(entry.Folder)) content += $" Folder=\"{EscapeXmlAttr(entry.Folder)}\"";
-                if (!string.IsNullOrEmpty(entry.Name)) content += $" Name=\"{EscapeXmlAttr(entry.Name)}\"";
-                if (!string.IsNullOrEmpty(entry.RemapFrom)) content += $" RemapFrom=\"{EscapeXmlAttr(entry.RemapFrom)}\"";
-                content += $" Enabled=\"{(entry.Enabled ? "true" : "false")}\"";
-                content += $" ThumbSize=\"{entry.ThumbSize}\"";
-                content += $" Count=\"{entry.ImageCount}\" Status=\"{EscapeXmlAttr(entry.Status)}\"";
-                if (entry.Pool != 0) content += $" Pool=\"{entry.Pool}\"";
-                content += "/>\n";
+            // The collector rewrites this file too. Serializing the in-memory snapshot
+            // alone deletes any database it added after this form loaded the registry.
+            var merged = new List<DbEntry>(m_allEntries);
+            foreach (var diskEntry in LoadRegistry(""))
+            {
+                if (m_deletedPaths.Contains(diskEntry.Path)) continue;
+                if (!merged.Any(e => string.Equals(e.Path, diskEntry.Path, StringComparison.OrdinalIgnoreCase)))
+                    merged.Add(diskEntry);
             }
-            content += "</DatabaseRegistry>\n";
-            File.WriteAllText(filePath, content);
+
+            var sb = new StringBuilder();
+            sb.Append("<DatabaseRegistry>\n");
+            foreach (var entry in merged)
+            {
+                sb.Append("  <Database");
+                sb.Append($" Path=\"{EscapeXmlAttr(entry.Path)}\"");
+                string folder = ToPortableFolder(entry.Folder);
+                if (!string.IsNullOrEmpty(folder)) sb.Append($" Folder=\"{EscapeXmlAttr(folder)}\"");
+                if (!string.IsNullOrEmpty(entry.Name)) sb.Append($" Name=\"{EscapeXmlAttr(entry.Name)}\"");
+                if (!string.IsNullOrEmpty(entry.RemapFrom)) sb.Append($" RemapFrom=\"{EscapeXmlAttr(entry.RemapFrom)}\"");
+                sb.Append($" Enabled=\"{(entry.Enabled ? "true" : "false")}\"");
+                sb.Append($" ThumbSize=\"{entry.ThumbSize}\"");
+                sb.Append($" Count=\"{entry.ImageCount}\" Status=\"{EscapeXmlAttr(entry.Status)}\"");
+                if (entry.Pool != 0) sb.Append($" Pool=\"{entry.Pool}\"");
+                sb.Append("/>\n");
+            }
+            sb.Append("</DatabaseRegistry>\n");
+
+            string tmpPath = filePath + ".tmp";
+            File.WriteAllText(tmpPath, sb.ToString());
+            File.Move(tmpPath, filePath, true); // atomic replace; no half-written registry
+        }
+
+        // Registry stores the portable form; only filesystem access resolves it.
+        private static string ToPortableFolder(string folder)
+        {
+            if (string.IsNullOrEmpty(folder)) return folder;
+            string exeDir = GetExeDir().TrimEnd('\\', '/');
+            if (folder.StartsWith(exeDir + "\\", StringComparison.OrdinalIgnoreCase) ||
+                folder.StartsWith(exeDir + "/", StringComparison.OrdinalIgnoreCase))
+                return folder.Substring(exeDir.Length + 1);
+            return folder;
         }
 
         // P1-6: attribute values must be XML-escaped — a path containing & < > "
@@ -1110,6 +1157,7 @@ namespace AntiDupl.NET.WinForms.Forms
                 };
 
                 m_allEntries.Add(db);
+                m_deletedPaths.Remove(db.Path);
                 SaveDatabases();
                 RefreshAllGrids();
                 MessageBox.Show($"Database \"{db.Name}\" attached.\n\n{imageCount} images, thumb {thumbSize}x{thumbSize}.",
@@ -1138,8 +1186,30 @@ namespace AntiDupl.NET.WinForms.Forms
                     bool dllNative = (firstBytes == 0x69696461u); // "adii"
                     if (dllNative)
                     {
-                        // DLL-native index layout is more complex; only count records by scanning
-                        // the 0000.adi sibling file is unreliable here, so leave defaults.
+                        // DLL-native index: "adii"(4) + version(u32) + reducedImageSize(u32)
+                        // + recordCount(u64) + per record: key(i16) + first + last + imgCount.
+                        fs.Seek(4, SeekOrigin.Current);           // version
+                        thumbSize = reader.ReadInt32();           // reducedImageSize
+                        if (thumbSize <= 0 || thumbSize > 1024) thumbSize = 32;
+
+                        ulong recordCount = reader.ReadUInt64();
+                        if (recordCount > 1000000) return;
+
+                        long sum = 0;
+                        for (ulong g = 0; g < recordCount; g++)
+                        {
+                            reader.ReadInt16();                   // key
+                            ulong len = reader.ReadUInt64();
+                            if (len > 10000) return;
+                            fs.Seek((long)len * 2, SeekOrigin.Current);
+                            len = reader.ReadUInt64();
+                            if (len > 10000) return;
+                            fs.Seek((long)len * 2, SeekOrigin.Current);
+                            ulong count = reader.ReadUInt64();
+                            if (count > 100000000) return;
+                            sum += (long)count;
+                        }
+                        imageCount = (int)Math.Min(sum, int.MaxValue);
                         return;
                     }
 
@@ -1280,17 +1350,6 @@ namespace AntiDupl.NET.WinForms.Forms
                 if (entry.Enabled && entry.Status == "Ready" && !string.IsNullOrEmpty(entry.Path))
                     paths.Add(entry.Path);
             }
-            
-            // Debug: log to file
-            try {
-                string logPath = System.IO.Path.Combine(GetExeDir(), "cs_debug.log");
-                using (var sw = new System.IO.StreamWriter(logPath, true))
-                {
-                    sw.WriteLine($"GetEnabledDatabasePaths: {entries.Count} entries, {paths.Count} enabled");
-                    foreach (var p in paths)
-                        sw.WriteLine($"  {p}");
-                }
-            } catch { }
             
             return paths;
         }

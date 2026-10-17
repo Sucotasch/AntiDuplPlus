@@ -604,18 +604,7 @@ namespace AntiDupl.NET.Core
             }
             set
             {
-                if (!SetPath(CoreDll.PathType.Search, value))
-                {
-                    try {
-                        string logPath = System.IO.Path.Combine(
-                            System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
-                            "path_debug.log");
-                        using (var sw = new System.IO.StreamWriter(logPath, true))
-                        {
-                            sw.WriteLine($"searchPath setter: SetPath FAILED for {value.Length} paths");
-                        }
-                    } catch { }
-                }
+                SetPath(CoreDll.PathType.Search, value);
             }
         }
 

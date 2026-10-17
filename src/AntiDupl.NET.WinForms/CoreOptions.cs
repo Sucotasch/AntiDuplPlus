@@ -121,17 +121,6 @@ namespace AntiDupl.NET.WinForms
         /// <param name="onePath"></param>
         public void Set(CoreLib core, bool onePath)
         {
-            // [C#2] Log Set() entry
-            try {
-                string logPath = System.IO.Path.Combine(
-                    System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
-                    "trace.log");
-                using (var sw = new System.IO.StreamWriter(logPath, true))
-                {
-                    sw.WriteLine($"[C#2] CoreOptions.Set: onePath={onePath}, searchPath.Length={searchPath.Length}, coreType={core?.GetType().Name}");
-                }
-            } catch { }
-
             try
             {
                 core.searchOptions = searchOptions.Clone();
@@ -159,18 +148,10 @@ namespace AntiDupl.NET.WinForms
                     core.deletePath = deletePath;
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                try {
-                    string logPath = System.IO.Path.Combine(
-                        System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
-                        "path_debug.log");
-                    using (var sw = new System.IO.StreamWriter(logPath, true))
-                    {
-                        sw.WriteLine($"Set() EXCEPTION: {ex.GetType().Name}: {ex.Message}");
-                        sw.WriteLine($"  StackTrace: {ex.StackTrace}");
-                    }
-                } catch { }
+                // Failed path set did not abort Set() before either; the debug write
+                // (path_debug.log, audit 4.11) was the only body and is gone.
             }
         }
 

@@ -167,6 +167,11 @@ namespace ad
 			{
 				delete it->second;
 				it->second = new TImageData(imageInfo, m_pOptions->advanced.reducedImageSize);
+				// Same slot assignment as Insert() (Insert itself cannot be used here:
+				// the map key would change under this iterator). A replaced record must
+				// not keep its old globalIdx - the GPU buffer still holds the old data.
+				it->second->globalIdx = m_nextGlobalIdx++;
+				it->second->pEngine = m_pEngine;
 				m_needToSave = true;
 			}
 		}
@@ -185,57 +190,70 @@ namespace ad
 
 		// Detect format: check first 4 bytes of index.adi
 		TString indexPath = CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION);
+		TString backupPath = CreatePath(path, TString(BACKUP_FILE_NAME) + FILE_EXTENSION);
 		uint32_t firstBytes = 0;
 		bool isDllNative = false;
-		
+		bool indexReadable = false;
+
 		FILE* f = _wfopen(indexPath.c_str(), L"rb");
 		if (f) {
-			fread(&firstBytes, 4, 1, f);
+			indexReadable = (fread(&firstBytes, 4, 1, f) == 1);
 			fclose(f);
-			// DLL-native format starts with "adii" (0x69696461)
-			// Collector-native starts with ThumbSize (e.g., 0x00000020 = 32)
-			isDllNative = (firstBytes == 0x69696461u);
+			isDllNative = indexReadable && (firstBytes == 0x69696461u);
 		}
 
-		if (isDllNative) {
-			// DLL-native format: use existing LoadIndex flow
+		auto loadDllNative = [&](const TChar *indexFile) -> adError
+		{
 			TIndex index;
-			if( LoadIndex(index, indexPath.c_str(), allLoad, remapFrom, remapTo) || 
-				LoadIndex(index, CreatePath(path, TString(BACKUP_FILE_NAME) + FILE_EXTENSION).c_str(), allLoad, remapFrom, remapTo))
+			if(!LoadIndex(index, indexFile, allLoad, remapFrom, remapTo))
+				return AD_ERROR_UNKNOWN;
+
+			size_t size = 0;
+			for(TIndex::iterator it = index.begin(); it != index.end(); ++it)
+				if(it->second.type == TData::Old)
+					size += it->second.size;
+
+			m_pStatus->Reset();
+			size_t i = 0;
+			for(TIndex::iterator it = index.begin(); it != index.end(); ++it)
 			{
-				size_t size = 0;
-				for(TIndex::iterator it = index.begin(); it != index.end(); ++it)
-					if(it->second.type == TData::Old)
-						size += it->second.size;
-
-				m_pStatus->Reset();
-				size_t i = 0;
-				for(TIndex::iterator it = index.begin(); it != index.end(); ++it)
+				if(m_pStatus->Stopped())
 				{
-					if(m_pStatus->Stopped())
-					{
-						m_pStatus->Reset();
-						return AD_ERROR_UNKNOWN;
-					}
-
-					if(it->second.type == TData::Old)
-					{
-						if (!LoadData(it->second, path, it->second.key, remapFrom, remapTo))
-							return AD_ERROR_UNKNOWN;
-						m_pStatus->SetProgress(i, size);
-						i += it->second.size;
-					}
+					m_pStatus->Reset();
+					return AD_ERROR_UNKNOWN;
 				}
-				m_pStatus->Reset();
-				return AD_OK;
+				if(it->second.type == TData::Old)
+				{
+					if (!LoadData(it->second, path, it->second.key, remapFrom, remapTo))
+						return AD_ERROR_UNKNOWN;
+					m_pStatus->SetProgress(i, size);
+					i += it->second.size;
+				}
 			}
+			m_pStatus->Reset();
+			return AD_OK;
+		};
+
+		if (isDllNative)
+		{
+			// Keep the original retry: a readable but corrupt adii index must still
+			// fall back to backup.adi (pre-patch was `LoadIndex(idx) || LoadIndex(backup)`).
+			if (loadDllNative(indexPath.c_str()) == AD_OK)
+				return AD_OK;
+			return loadDllNative(backupPath.c_str());
+		}
+
+		if (!indexReadable)
+		{
+			// The old code fell into the collector loader, which can never succeed —
+			// making backup.adi, the file that exists for exactly this failure,
+			// unreachable. Try it before giving up.
+			if (loadDllNative(backupPath.c_str()) == AD_OK)
+				return AD_OK;
 			return AD_ERROR_UNKNOWN;
 		}
-		else
-		{
-			// Collector-native format (NvJpegCollector): ThumbSize + raw data
-			return LoadCollectorNative(path, firstBytes, allLoad, remapFrom, remapTo);
-		}
+
+		return LoadCollectorNative(path, firstBytes, allLoad, remapFrom, remapTo);
 	}
 
 	adError TImageDataStorage::Save(const TChar *path)
@@ -243,24 +261,25 @@ namespace ad
 		if(!IsDirectoryExists(path))
 			return AD_ERROR_DIRECTORY_IS_NOT_EXIST;
 
-		if (m_needToSave)
-		{
-			TIndex index;
-			if(!LoadIndex(index, CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION).c_str()))
-				LoadIndex(index, CreatePath(path, TString(BACKUP_FILE_NAME) + FILE_EXTENSION).c_str());
-			UpdateIndex(index);
-			if(SaveIndex(index, path))
-			{
-				DeleteOldIndex(index, path);
-				::CopyFile(
-					CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION).c_str(),
-					CreatePath(path, TString(BACKUP_FILE_NAME) + FILE_EXTENSION).c_str(),
-					FALSE);
-				m_needToSave = false;
-				return AD_OK;
-			}
-		}
-		
+		if (!m_needToSave)
+			return AD_OK;
+
+		TString indexPath = CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION);
+		TString backupPath = CreatePath(path, TString(BACKUP_FILE_NAME) + FILE_EXTENSION);
+
+		TIndex index;
+		if(!LoadIndex(index, indexPath.c_str()))
+			LoadIndex(index, backupPath.c_str());
+		UpdateIndex(index);
+
+		if(!SaveIndex(index, path))
+			return AD_ERROR_CANT_WRITE_FILE;
+
+		DeleteOldIndex(index, path);
+		// The backup is a recovery aid; a failed copy must not turn a successfully
+		// written database into a reported failure.
+		::CopyFile(indexPath.c_str(), backupPath.c_str(), FALSE);
+		m_needToSave = false;
 		return AD_OK;
 	}
 
@@ -407,18 +426,40 @@ namespace ad
 			}
 		}
 
-		bool dataSaveResult = true;
 		m_pStatus->Reset();
+
+		// 1. Write data files first. The old order wrote index.adi before the data
+		// files, so a failed data write left an index referencing records that were
+		// never written. New keys never collide with keys already present in the
+		// loaded index (`UpdateIndex` skips occupied keys), so a failure leaves the
+		// previous index + previous data files consistent.
+		size_t i = 0;
+		for(TIndex::const_iterator it = index.begin(); it != index.end(); ++it)
+		{
+			if(it->second.type == TData::New)
+			{
+				if(!SaveData(it->second, path))
+				{
+					m_pStatus->Reset();
+					return false;
+				}
+				m_pStatus->SetProgress(i, dataSize);
+				i += it->second.size;
+			}
+		}
+
+		// 2. Write the index to a temporary file and replace index.adi atomically.
+		TString fileName = CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION);
+		TString tmpName = fileName + TString(TEXT(".tmp"));
+		bool dataSaveResult = false;
 		try
 		{
-			TString fileName = CreatePath(path, TString(INDEX_FILE_NAME) + FILE_EXTENSION);
 			// Файл индекса
-			TOutputFileStream outputFile(fileName.c_str(), INDEX_CONTROL_BYTES);
+			TOutputFileStream outputFile(tmpName.c_str(), INDEX_CONTROL_BYTES);
 
 			outputFile.Save(m_pOptions->advanced.reducedImageSize);
 			outputFile.SaveSize(size);
 
-			size_t i = 0;
 			for(TIndex::const_iterator it = index.begin(); it != index.end(); ++it)
 			{
 				if(it->second.type == TData::New || it->second.type == TData::Skip)
@@ -427,20 +468,20 @@ namespace ad
 					outputFile.Save(it->second.first);
 					outputFile.Save(it->second.last);
 					outputFile.SaveSize(it->second.size);
-					if(it->second.type == TData::New)
-					{
-						dataSaveResult = SaveData(it->second, path) && dataSaveResult;
-						m_pStatus->SetProgress(i, dataSize);
-						i += it->second.size;
-					}
 				}
 			}
+			dataSaveResult = true;
 		}
 		catch (TException e)
 		{
-			dataSaveResult = e.Error == AD_OK;
+			dataSaveResult = false; // any exception means the .tmp index is not trustworthy
 		}
 		m_pStatus->Reset();
+
+		if(dataSaveResult)
+			dataSaveResult = ::MoveFileEx(tmpName.c_str(), fileName.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+		if(!dataSaveResult && IsFileExists(tmpName.c_str()))
+			::DeleteFile(tmpName.c_str());
 
 		return dataSaveResult;
 	}

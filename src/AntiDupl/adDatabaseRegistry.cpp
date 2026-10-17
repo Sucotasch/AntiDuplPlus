@@ -94,6 +94,12 @@ namespace ad
         return out;
     }
 
+    // Locale-independent, case-insensitive ordinal path comparison (same class of
+    // match the C# side and the collector use). See plan 2a / audit 11.3a.
+    static bool SamePathNoCase(const std::wstring& a, const std::wstring& b) {
+        return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_EQUAL;
+    }
+
     bool TDatabaseRegistry::Load(std::vector<TDatabaseInfo>& databases, const std::wstring& userPath) {
         databases.clear();
         // P1-8: the registry is UTF-8 (written as UTF-8 by the C# GUI via
@@ -201,10 +207,11 @@ namespace ad
         std::vector<TDatabaseInfo> databases;
         Load(databases, userPath);
 
-        // Check if exists and update
+        // Check if exists and update. Match by Path only: a rebuilt DB with another
+        // ThumbSize must replace its record, not add a second one for the same folder.
         bool found = false;
         for (auto& existing : databases) {
-            if (existing.Path == db.Path && existing.ThumbSize == db.ThumbSize) {
+            if (SamePathNoCase(existing.Path, db.Path)) {
                 existing = db;
                 found = true;
                 break;
@@ -223,7 +230,7 @@ namespace ad
         Load(databases, userPath);
 
         auto it = std::remove_if(databases.begin(), databases.end(), [&path](const TDatabaseInfo& db) {
-            return db.Path == path;
+            return SamePathNoCase(db.Path, path);
         });
 
         if (it != databases.end()) {
@@ -236,44 +243,13 @@ namespace ad
     bool TDatabaseRegistry::FindByPath(const std::wstring& path, TDatabaseInfo& out, const std::wstring& userPath) {
         std::vector<TDatabaseInfo> databases;
         Load(databases, userPath);
-        
-        // Normalize path for comparison (case-insensitive)
-        std::wstring searchPath = path;
-        std::transform(searchPath.begin(), searchPath.end(), searchPath.begin(), ::towlower);
-        
+
         for (const auto& db : databases) {
-            std::wstring dbPath = db.Path;
-            std::transform(dbPath.begin(), dbPath.end(), dbPath.begin(), ::towlower);
-            
-            if (searchPath == dbPath) {
+            if (SamePathNoCase(db.Path, path)) {
                 out = db;
                 return true;
             }
         }
         return false;
-    }
-
-    bool TDatabaseRegistry::UpdateCount(const std::wstring& imagePath, int delta, const std::wstring& userPath) {
-        std::vector<TDatabaseInfo> databases;
-        Load(databases, userPath);
-
-        std::wstring searchPath = imagePath;
-        std::transform(searchPath.begin(), searchPath.end(), searchPath.begin(), ::towlower);
-
-        bool found = false;
-        for (auto& db : databases) {
-            std::wstring dbPath = db.Path;
-            std::transform(dbPath.begin(), dbPath.end(), dbPath.begin(), ::towlower);
-
-            if (ad::PathStartsWith(searchPath, dbPath) || ad::PathStartsWith(dbPath, searchPath)) {
-                int newCount = (int)db.ImageCount + delta;
-                if (newCount < 0) newCount = 0;
-                db.ImageCount = (size_t)newCount;
-                found = true;
-                break;
-            }
-        }
-
-        return found ? Save(databases, userPath) : false;
     }
 }

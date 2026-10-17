@@ -394,33 +394,54 @@ namespace ad
 
     adError TResultStorage::Save(const TChar* fileName) const
     {
-		try
-		{
-			m_pStatus->Reset();
-			TOutputFileStream outputFile(fileName, RESULT_CONTROL_BYTES);
+        TString tmpName = TString(fileName) + TString(TEXT(".tmp"));
+        try
+        {
+            m_pStatus->Reset();
+            if (m_pStatus->Stopped())
+            {
+                m_pStatus->Reset();
+                return AD_ERROR_UNKNOWN;
+            }
 
-			m_pImageInfoStorage->Save(outputFile);
+            {
+                TOutputFileStream outputFile(tmpName.c_str(), RESULT_CONTROL_BYTES);
 
-			TResultPtrVector &results = m_pUndoRedoEngine->Current()->results;
-			outputFile.SaveSize(results.size());
+                m_pImageInfoStorage->Save(outputFile);
+                if (m_pStatus->Stopped())
+                    throw TException(AD_ERROR_UNKNOWN);
 
-			m_pStatus->SetProgress(0, 0);
-			size_t i = 0;
-			for(TResultPtrVector::iterator it = results.begin(); it != results.end(); it++, i++)
-			{
-				outputFile.Save(**it);
-				m_pStatus->SetProgress(i, results.size());
-				if(m_pStatus->Stopped())
-					break;
-			}
-			m_pStatus->Reset();
-		}
-		catch (TException e)
-		{
-			m_pStatus->Reset();
-			return e.Error;
-		}
-        return AD_OK;
+                TResultPtrVector &results = m_pUndoRedoEngine->Current()->results;
+                outputFile.SaveSize(results.size());
+
+                m_pStatus->SetProgress(0, 0);
+                size_t i = 0;
+                for(TResultPtrVector::iterator it = results.begin(); it != results.end(); it++, i++)
+                {
+                    if (m_pStatus->Stopped())
+                        throw TException(AD_ERROR_UNKNOWN);
+                    outputFile.Save(**it);
+                    m_pStatus->SetProgress(i, results.size());
+                }
+            }
+
+            if (!::MoveFileEx(tmpName.c_str(), fileName,
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            {
+                ::DeleteFile(tmpName.c_str());
+                m_pStatus->Reset();
+                return AD_ERROR_CANT_WRITE_FILE;
+            }
+            m_pStatus->Reset();
+            return AD_OK;
+        }
+        catch (TException e)
+        {
+            m_pStatus->Reset();
+            if (IsFileExists(tmpName.c_str()))
+                ::DeleteFile(tmpName.c_str());
+            return e.Error;
+        }
     }
 
     bool TResultStorage::CanApply(adActionEnableType actionEnableType) const

@@ -57,6 +57,9 @@ namespace ad
         TResultPtrList mistakenResults;
         TImageInfoPtrList deletedImages;
         TRenameList renamedImages;
+        // True when at least one file was really deleted (Recycle Bin / permanent).
+        // MarkRemoved() leaves it false: those stages only hide records and stay undoable.
+        bool hasRealDeletes = false;
     };
     //-------------------------------------------------------------------------
     struct TUndoRedoStage

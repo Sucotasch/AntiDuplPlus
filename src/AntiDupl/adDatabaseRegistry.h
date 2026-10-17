@@ -48,7 +48,6 @@ namespace ad
         static bool AddOrUpdate(const TDatabaseInfo& db, const std::wstring& userPath);
         static bool Remove(const std::wstring& path, const std::wstring& userPath);
         static bool FindByPath(const std::wstring& path, TDatabaseInfo& out, const std::wstring& userPath);
-        static bool UpdateCount(const std::wstring& imagePath, int delta, const std::wstring& userPath);
     };
 }
 

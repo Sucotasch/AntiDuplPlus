@@ -28,7 +28,6 @@
 #include "adResult.h"
 #include "adRecycleBin.h"
 #include "adMistakeStorage.h"
-#include "adDatabaseRegistry.h"
 #include "adImageInfoStorage.h"
 #include "adUndoRedoTypes.h"
 #include "adUndoRedoEngine.h"
@@ -310,9 +309,20 @@ namespace ad
         return false;
     }
 
+    bool TUndoRedoEngine::UndoEnable() const
+    {
+        return !m_pUndoDeque->empty() && !m_pUndoDeque->back()->change->hasRealDeletes;
+    }
+
     bool TUndoRedoEngine::Undo()
     {
         if(m_pUndoDeque->empty())
+            return false;
+
+        // Refuse before mutating any state: a real deletion cannot be undone. The old
+        // code called Restore(), ignored its result, never cleared `removed`, and
+        // returned true.
+        if(m_pUndoDeque->back()->change->hasRealDeletes)
             return false;
 
 		// Возврашаем прошлое состояние в хранилишах.
@@ -346,7 +356,11 @@ namespace ad
         TImageInfoPtrList & deletedImages = m_pCurrent->change->deletedImages;
         for(TImageInfoPtrList::iterator it = deletedImages.begin(); it != deletedImages.end(); ++it, ++current)
         {
-            m_pRecycleBin->Restore(*it);
+            // MarkRemoved() only hid the record; the file itself was moved by the caller
+            // (AutoSelector), so the undo here is a list-state restore. Real-delete stages
+            // are refused above, and the statistic must not be touched: it is incremented
+            // only by a successful real Delete() (adRecycleBin.cpp).
+            (*it)->removed = false;
             m_pStatus->SetProgress(current, total);
         }
 
@@ -387,7 +401,11 @@ namespace ad
         TImageInfoPtrList & deletedImages = m_pCurrent->change->deletedImages;
         for(TImageInfoPtrList::iterator it = deletedImages.begin(); it != deletedImages.end(); ++it, ++current)
         {
-            m_pRecycleBin->Delete(*it);
+            // Was m_pRecycleBin->Delete(*it): after Undo cleared `removed`, that call
+            // really deleted a file that had reappeared at its path. Redo of a
+            // mark-removed stage must only hide the record again. Stages with real
+            // deletes cannot reach Redo (refused at Undo).
+            (*it)->removed = true;
             m_pStatus->SetProgress(current, total);
         }
 
@@ -571,8 +589,10 @@ namespace ad
         if(m_pRecycleBin->Delete(pImageInfo))
         {
             m_pCurrent->change->deletedImages.push_back(pImageInfo);
-            // Update database count
-            TDatabaseRegistry::UpdateCount(pImageInfo->path.Original(), -1, m_pOptions->userPath);
+            // `removed` is set only by a real deletion (TRecycleBin::Delete), never by
+            // MarkRemoved(); such a stage can no longer be undone.
+            if(pImageInfo->removed)
+                m_pCurrent->change->hasRealDeletes = true;
             return true;
         }
         return false;
@@ -585,7 +605,6 @@ namespace ad
             return true;
         pImageInfo->removed = true;
         m_pCurrent->change->deletedImages.push_back(pImageInfo);
-        TDatabaseRegistry::UpdateCount(pImageInfo->path.Original(), -1, m_pOptions->userPath);
         return true;
     }
 

@@ -56,7 +56,7 @@ namespace ad
         bool Undo();
         bool Redo();
 
-        bool UndoEnable() const {return !m_pUndoDeque->empty();} // A read-only function
+        bool UndoEnable() const; // A read-only function
         bool RedoEnable() const {return !m_pRedoDeque->empty();}
 
         void Clear();

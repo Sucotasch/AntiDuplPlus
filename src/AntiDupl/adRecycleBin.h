@@ -43,7 +43,6 @@ namespace ad
         ~TRecycleBin();
 
         bool Delete(TImageInfo *pImageInfo);
-        bool Restore(TImageInfo *pImageInfo);
         bool Free(TImageInfo *pImageInfo);
         bool ClearTemporaryFiles(bool permanent);
     };

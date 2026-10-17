@@ -54,13 +54,6 @@ namespace ad
         return false;
     }
 
-    bool TRecycleBin::Restore(TImageInfo *pImageInfo)
-    {
-        // Files are deleted immediately to Recycle Bin.
-        // Restore is not supported — user recovers from Recycle Bin manually.
-        return false;
-    }
-
     bool TRecycleBin::Free(TImageInfo *pImageInfo)
     {
         // No temp files to free — deletion is immediate.

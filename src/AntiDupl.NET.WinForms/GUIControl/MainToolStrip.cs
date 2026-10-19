@@ -45,18 +45,16 @@ namespace AntiDupl.NET.WinForms
         private MainForm m_mainForm;
         private MainSplitContainer m_mainSplitContainer;
 
-        private ToolStripButton m_profileOpenButton;
-        private ToolStripButton m_profileSaveAsButton;
+        private ToolStripButton m_gpuCollectorButton;
+        private ToolStripButton m_dbManagerButton;
         private ToolStripButton m_startButton;
         private ToolStripButton m_refreshButton;
         private ToolStripButton m_optionsButton;
         private ToolStripComboBox m_thresholdDifferenceComboBox;
         private ToolStripComboBox m_algorithmComparingComboBox;
 
-        private ToolStripButton m_undoButton;
-        private ToolStripButton m_redoButton;
         private ToolStripDropDownButton m_autoSelectButton;
-        private ToolStripMenuItem m_presetsMenuItem;
+        private ToolStripDropDownButton m_presetsButton;
         private ToolStripMenuItem m_presetExactCopiesMenuItem;
         private ToolStripMenuItem m_presetRecompressionMenuItem;
         private ToolStripMenuItem m_presetTransformationsMenuItem;
@@ -102,8 +100,12 @@ namespace AntiDupl.NET.WinForms
             BackColor = SystemColors.Control;
             GripStyle = ToolStripGripStyle.Hidden;
 
-            m_profileOpenButton = InitFactory.ToolButton.Create("ProfileOpenButton", null, m_mainMenu.ProfileOpenAction);
-            m_profileSaveAsButton = InitFactory.ToolButton.Create("ProfileSaveAsButton", null, m_mainMenu.ProfileSaveAsAction);
+            // Вместо кнопок профилей (дублируют File, почти не используются) — действия с базами (2026-10-19).
+            // DisplayStyle=Image: как у остальных кнопок тулбара; названия — в ToolTipText (UpdateStrings).
+            m_gpuCollectorButton = InitFactory.ToolButton.Create("NewDatabaseButton", null, m_mainMenu.GpuCollectorAction);
+            m_gpuCollectorButton.DisplayStyle = ToolStripItemDisplayStyle.Image;
+            m_dbManagerButton = InitFactory.ToolButton.Create("DbManagerButton", null, m_mainMenu.DbManagerAction);
+            m_dbManagerButton.DisplayStyle = ToolStripItemDisplayStyle.Image;
 
             m_startButton = InitFactory.ToolButton.Create("StartButton", null, m_mainMenu.StartSearchAction);
             m_refreshButton = InitFactory.ToolButton.Create("RefreshButton", null, m_mainMenu.RefreshResultsAction);
@@ -132,9 +134,6 @@ namespace AntiDupl.NET.WinForms
             m_algorithmComparingComboBox.Items.Add(Resources.Strings.Current.CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum);
             m_algorithmComparingComboBox.Items.Add("SSIM");
             m_algorithmComparingComboBox.Items.Add(Resources.Strings.Current.CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash);
-
-            m_undoButton = InitFactory.ToolButton.Create("UndoButton", null, m_mainMenu.UndoAction);
-            m_redoButton = InitFactory.ToolButton.Create("RedoButton", null, m_mainMenu.RedoAction);
 
             // Auto-Select dropdown button
             m_autoSelectButton = new ToolStripDropDownButton("Auto-Select");
@@ -167,19 +166,19 @@ namespace AntiDupl.NET.WinForms
             });
 
             // Пресеты поиска (этап 4 плана дубль-поиска): те же три опции сравнения, что у комбо выше.
-            m_presetsMenuItem = new ToolStripMenuItem("Search presets");
+            // Отдельная кнопка (2026-10-19): пресет меняет настройки поиска, а не работу с результатами.
+            m_presetsButton = new ToolStripDropDownButton("Search presets");
+            m_presetsButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
             m_presetExactCopiesMenuItem = new ToolStripMenuItem("Exact copies", null, (s, e) => ApplyPreset(AlgorithmComparing.SquaredSum, 5, false));
             m_presetRecompressionMenuItem = new ToolStripMenuItem("Compression and resize", null, (s, e) => ApplyPreset(AlgorithmComparing.SSIM, 20, false));
             m_presetTransformationsMenuItem = new ToolStripMenuItem("Transformations", null, (s, e) => ApplyPreset(AlgorithmComparing.SquaredSum, 10, true));
             m_presetSimilarStrictMenuItem = new ToolStripMenuItem("Similar: strict", null, (s, e) => ApplyPreset(AlgorithmComparing.PerceptualHash, 33, true));
             m_presetSimilarWiderMenuItem = new ToolStripMenuItem("Similar: wider", null, (s, e) => ApplyPreset(AlgorithmComparing.PerceptualHash, 35, true));
-            m_presetsMenuItem.DropDownItems.Add(m_presetExactCopiesMenuItem);
-            m_presetsMenuItem.DropDownItems.Add(m_presetRecompressionMenuItem);
-            m_presetsMenuItem.DropDownItems.Add(m_presetTransformationsMenuItem);
-            m_presetsMenuItem.DropDownItems.Add(m_presetSimilarStrictMenuItem);
-            m_presetsMenuItem.DropDownItems.Add(m_presetSimilarWiderMenuItem);
-            m_autoSelectButton.DropDownItems.Add(new ToolStripSeparator());
-            m_autoSelectButton.DropDownItems.Add(m_presetsMenuItem);
+            m_presetsButton.DropDownItems.Add(m_presetExactCopiesMenuItem);
+            m_presetsButton.DropDownItems.Add(m_presetRecompressionMenuItem);
+            m_presetsButton.DropDownItems.Add(m_presetTransformationsMenuItem);
+            m_presetsButton.DropDownItems.Add(m_presetSimilarStrictMenuItem);
+            m_presetsButton.DropDownItems.Add(m_presetSimilarWiderMenuItem);
 
             // Фильтр результатов (этап 6): разобранные / неразмеченные пары + подстрока пути.
             m_filterHideProcessedButton = new ToolStripButton();
@@ -238,8 +237,10 @@ namespace AntiDupl.NET.WinForms
         {
             Strings s = Resources.Strings.Current;
 
-            m_profileOpenButton.ToolTipText = s.MainMenu_File_OpenProfileMenuItem_Text;
-            m_profileSaveAsButton.ToolTipText = s.MainMenu_File_SaveProfileAsMenuItem_Text;
+            m_gpuCollectorButton.Text = s.MainMenu_Tools_GpuCollectorMenuItem_Text;
+            m_gpuCollectorButton.ToolTipText = s.MainMenu_Tools_GpuCollectorMenuItem_Text;
+            m_dbManagerButton.Text = s.MainMenu_Tools_DbManagerMenuItem_Text;
+            m_dbManagerButton.ToolTipText = s.MainMenu_Tools_DbManagerMenuItem_Text;
 
             m_startButton.ToolTipText = s.MainMenu_Search_StartMenuItem_Text;
             m_refreshButton.ToolTipText = s.MainMenu_Search_RefreshResultsMenuItem_Text;
@@ -248,7 +249,7 @@ namespace AntiDupl.NET.WinForms
             m_thresholdDifferenceComboBox.ToolTipText = s.CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text;
             m_algorithmComparingComboBox.ToolTipText = s.CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text;
 
-            m_presetsMenuItem.Text = s.MainToolStrip_Presets_Text;
+            m_presetsButton.Text = s.MainToolStrip_Presets_Text;
             m_presetExactCopiesMenuItem.Text = s.MainToolStrip_PresetExactCopies_Text;
             m_presetRecompressionMenuItem.Text = s.MainToolStrip_PresetRecompression_Text;
             m_presetTransformationsMenuItem.Text = s.MainToolStrip_PresetTransformations_Text;
@@ -259,9 +260,6 @@ namespace AntiDupl.NET.WinForms
             m_filterOnlyUnmarkedButton.Text = s.MainToolStrip_FilterOnlyUnmarked_Text;
             m_filterTextBox.ToolTipText = s.MainToolStrip_FilterText_ToolTipText;
             m_filterResetButton.Text = s.MainToolStrip_FilterReset_Text;
-
-            m_undoButton.ToolTipText = s.MainMenu_Edit_UndoMenuItem_Text;
-            m_redoButton.ToolTipText = s.MainMenu_Edit_RedoMenuItem_Text;
 
             m_mistakeButton.ToolTipText = s.ResultsListViewContextMenu_MistakeItem_Text;
             m_performHintButton.ToolTipText = s.ResultsListViewContextMenu_PerformHintItem_Text;
@@ -312,9 +310,6 @@ namespace AntiDupl.NET.WinForms
             m_deleteSecondButton.Enabled = duplPair;
             m_deleteBothButton.Enabled = duplPair;
             m_deleteDefectButton.Enabled = defect;
-
-            m_undoButton.Enabled = m_core.CanApply(CoreDll.ActionEnableType.Undo);
-            m_redoButton.Enabled = m_core.CanApply(CoreDll.ActionEnableType.Redo);
         }
 
         /// <summary>
@@ -354,17 +349,15 @@ namespace AntiDupl.NET.WinForms
         {
             Items.Clear();
 
-            Items.Add(m_profileOpenButton);
-            Items.Add(m_profileSaveAsButton);
+            Items.Add(m_gpuCollectorButton);
+            Items.Add(m_dbManagerButton);
             Items.Add(new ToolStripSeparator());
             Items.Add(m_startButton);
             Items.Add(m_refreshButton);
             Items.Add(m_optionsButton);
             Items.Add(m_thresholdDifferenceComboBox);
             Items.Add(m_algorithmComparingComboBox);
-            Items.Add(new ToolStripSeparator());
-            Items.Add(m_undoButton);
-            Items.Add(m_redoButton);
+            Items.Add(m_presetsButton);
             Items.Add(new ToolStripSeparator());
             Items.Add(m_autoSelectButton);
             Items.Add(m_deleteSelectedButton);

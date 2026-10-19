@@ -221,6 +221,8 @@
   <MainMenu_Search_UseImageDataBaseMenuItem_Text>Utilizar base de datos de imagen</MainMenu_Search_UseImageDataBaseMenuItem_Text>
   <MainMenu_Search_CheckResultsAtLoadingMenuItem_Text>Comprobar resultados al iniciar</MainMenu_Search_CheckResultsAtLoadingMenuItem_Text>
   <MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text>Comprobar base de datos de errores al iniciar</MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text>
+  <MainMenu_Tools_GpuCollectorMenuItem_Text>Nueva base de datos</MainMenu_Tools_GpuCollectorMenuItem_Text>
+  <MainMenu_Tools_DbManagerMenuItem_Text>Administrador de bases de datos</MainMenu_Tools_DbManagerMenuItem_Text>
   <MainMenu_HelpMenuItem_Text>Ayuda</MainMenu_HelpMenuItem_Text>
   <MainMenu_Help_HelpMenuItem_Text>Ayuda (ENG)</MainMenu_Help_HelpMenuItem_Text>
   <MainMenu_Help_AboutProgramMenuItem_Text>Sobre el programa...</MainMenu_Help_AboutProgramMenuItem_Text>

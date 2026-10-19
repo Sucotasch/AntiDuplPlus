@@ -381,20 +381,6 @@ namespace AntiDupl.NET.WinForms
         /// <param name="hotKey"></param>
         private void MakeAction(Keys hotKey)
         {
-            if (hotKey == (Keys.Z | Keys.Control) && m_core.CanApply(CoreDll.ActionEnableType.Undo))
-            {
-                ProgressForm progressForm = new ProgressForm(ProgressForm.Type.Undo, m_core, m_options, m_coreOptions, m_mainSplitContainer);
-                progressForm.Execute();
-                return;
-            }
-
-            if (hotKey == (Keys.Y | Keys.Control) && m_core.CanApply(CoreDll.ActionEnableType.Redo))
-            {
-                ProgressForm progressForm = new ProgressForm(ProgressForm.Type.Redo, m_core, m_options, m_coreOptions, m_mainSplitContainer);
-                progressForm.Execute();
-                return;
-            }
-
             if (m_currentRowIndex >= 0 && m_currentRowIndex < m_results.Length)
             {
                 if (m_results[m_currentRowIndex].type == CoreDll.ResultType.DefectImage)

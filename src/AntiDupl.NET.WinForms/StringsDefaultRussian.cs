@@ -354,7 +354,7 @@ namespace AntiDupl.NET.WinForms
             s.MainMenu_Edit_ProcessedEmpty_Text = "Ни одна пара не была выделена.";
 
             s.MainMenu_ToolsMenuItem_Text = "Инструменты";
-            s.MainMenu_Tools_GpuCollectorMenuItem_Text = "Сбор базы (GPU)";
+            s.MainMenu_Tools_GpuCollectorMenuItem_Text = "Новая база";
             s.MainMenu_Tools_DbManagerMenuItem_Text = "Менеджер баз";
         }
 

@@ -185,12 +185,11 @@ namespace AntiDupl.NET.WinForms
             return true;
         }
         
+        // Ctrl+Z / Ctrl+Y больше не зарезервированы: Undo/Redo движка убраны из UI (2026-10-19).
         private static Keys[] m_reservedKeyCombinations =
         {
             Keys.A | Keys.Control,
-            Keys.C | Keys.Control,
-            Keys.Z | Keys.Control,
-            Keys.Y | Keys.Control
+            Keys.C | Keys.Control
         };
 
         private static Keys[] m_reservedKeys =

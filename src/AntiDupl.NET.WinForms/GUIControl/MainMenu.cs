@@ -51,8 +51,6 @@ namespace AntiDupl.NET.WinForms
         private ToolStripMenuItem m_file_exitMenuItem;
 
         private ToolStripMenuItem m_editMenuItem;
-        private ToolStripMenuItem m_edit_undoMenuItem;
-        private ToolStripMenuItem m_edit_redoMenuItem;
         private ToolStripMenuItem m_edit_selectAllMenuItem;
         private ToolStripMenuItem m_edit_undoMarkingMenuItem;
         private ToolStripMenuItem m_edit_autoSelectMenuItem;
@@ -161,8 +159,6 @@ namespace AntiDupl.NET.WinForms
             m_fileMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_fileMenuItem.DropDownItems.Add(m_file_exitMenuItem);
 
-            m_edit_undoMenuItem = InitFactory.MenuItem.Create("UndoMenu", null, UndoAction);
-            m_edit_redoMenuItem = InitFactory.MenuItem.Create("RedoMenu", null, RedoAction);
             m_edit_selectAllMenuItem = InitFactory.MenuItem.Create(null, null, SelectAllAction);
 
             // Auto-Select submenu
@@ -208,10 +204,9 @@ namespace AntiDupl.NET.WinForms
             m_edit_clearProcessedMenuItem = InitFactory.MenuItem.Create(null, null, ClearProcessedAction);
             m_edit_autoMarkProcessedMenuItem = InitFactory.MenuItem.Create(null, null, AutoMarkProcessedCheckChangeAction, m_options.markProcessedAfterBatch);
 
+            // Undo/Redo движка не выведены в UI (2026-10-19): удаления и пакетные перемещения не откатываются
+            // (корзина Windows / сам файл в новой папке), разметку отменяет Ctrl-U, поиск — перезапуск.
             m_editMenuItem = new ToolStripMenuItem();
-            m_editMenuItem.DropDownItems.Add(m_edit_undoMenuItem);
-            m_editMenuItem.DropDownItems.Add(m_edit_redoMenuItem);
-            m_editMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_editMenuItem.DropDownItems.Add(m_edit_selectAllMenuItem);
             m_editMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_editMenuItem.DropDownItems.Add(m_edit_autoSelectMenuItem);
@@ -310,8 +305,6 @@ namespace AntiDupl.NET.WinForms
             m_file_exitMenuItem.Text = s.MainMenu_File_ExitMenuItem_Text;
 
             m_editMenuItem.Text = s.MainMenu_EditMenuItem_Text;
-            m_edit_undoMenuItem.Text = s.MainMenu_Edit_UndoMenuItem_Text;
-            m_edit_redoMenuItem.Text = s.MainMenu_Edit_RedoMenuItem_Text;
             m_edit_selectAllMenuItem.Text = s.MainMenu_Edit_SelectAllMenuItem_Text;
             m_edit_undoMarkingMenuItem.Text = s.MainMenu_Edit_UndoMarkingMenuItem_Text;
             m_edit_markProcessedMenuItem.Text = s.MainMenu_Edit_MarkProcessedMenuItem_Text;
@@ -407,18 +400,6 @@ namespace AntiDupl.NET.WinForms
         public void RefreshResultsAction(object sender, EventArgs e)
         {
             ProgressForm progressForm = new ProgressForm(ProgressForm.Type.RefreshResults, m_core, m_options, m_coreOptions, m_mainSplitContainer);
-            progressForm.Execute();
-        }
-
-        public void UndoAction(object sender, EventArgs e)
-        {
-            ProgressForm progressForm = new ProgressForm(ProgressForm.Type.Undo, m_core, m_options, m_coreOptions, m_mainSplitContainer);
-            progressForm.Execute();
-        }
-
-        public void RedoAction(object sender, EventArgs e)
-        {
-            ProgressForm progressForm = new ProgressForm(ProgressForm.Type.Redo, m_core, m_options, m_coreOptions, m_mainSplitContainer);
             progressForm.Execute();
         }
 
@@ -808,8 +789,6 @@ namespace AntiDupl.NET.WinForms
             bool hasResults = m_core.GetResultSize() > 0;
             bool hasDuplPairs = m_core.CanApply(CoreDll.ActionEnableType.DuplPair);
 
-            m_edit_undoMenuItem.Enabled = m_core.CanApply(CoreDll.ActionEnableType.Undo);
-            m_edit_redoMenuItem.Enabled = m_core.CanApply(CoreDll.ActionEnableType.Redo);
             m_edit_selectAllMenuItem.Enabled = hasResults;
             m_edit_autoSelectMenuItem.Enabled = hasDuplPairs;
             m_edit_deleteSelectedMenuItem.Enabled = hasDuplPairs;

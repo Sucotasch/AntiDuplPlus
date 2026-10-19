@@ -221,6 +221,8 @@
   <MainMenu_Search_UseImageDataBaseMenuItem_Text>Χρήση βάσης δεδομένων εικόνων</MainMenu_Search_UseImageDataBaseMenuItem_Text>
   <MainMenu_Search_CheckResultsAtLoadingMenuItem_Text>Έλεγχος αποτελεσμάτων κατά τη φόρτωση</MainMenu_Search_CheckResultsAtLoadingMenuItem_Text>
   <MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text>Έλεγχος βάσης δεδομένων σφαλμάτων κατά τη φόρτωση</MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text>
+  <MainMenu_Tools_GpuCollectorMenuItem_Text>Νέα βάση δεδομένων</MainMenu_Tools_GpuCollectorMenuItem_Text>
+  <MainMenu_Tools_DbManagerMenuItem_Text>Διαχείριση βάσεων δεδομένων</MainMenu_Tools_DbManagerMenuItem_Text>
   <MainMenu_HelpMenuItem_Text>Βοήθεια</MainMenu_HelpMenuItem_Text>
   <MainMenu_Help_HelpMenuItem_Text>Βοήθεια</MainMenu_Help_HelpMenuItem_Text>
   <MainMenu_Help_AboutProgramMenuItem_Text>Σχετικά με το πρόγραμμα...</MainMenu_Help_AboutProgramMenuItem_Text>

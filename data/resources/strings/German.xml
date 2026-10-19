@@ -218,6 +218,8 @@
   <MainMenu_Search_UseImageDataBaseMenuItem_Text>Bilddatenbank verwenden</MainMenu_Search_UseImageDataBaseMenuItem_Text>
   <MainMenu_Search_CheckResultsAtLoadingMenuItem_Text>Ergebnisse beim Laden überprüfen</MainMenu_Search_CheckResultsAtLoadingMenuItem_Text>
   <MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text>Datenbank beim Laden auf Fehler überprüfen</MainMenu_Search_CheckMistakesAtLoadingMenuItem_Text>
+  <MainMenu_Tools_GpuCollectorMenuItem_Text>Neue Datenbank</MainMenu_Tools_GpuCollectorMenuItem_Text>
+  <MainMenu_Tools_DbManagerMenuItem_Text>Datenbankverwaltung</MainMenu_Tools_DbManagerMenuItem_Text>
   <MainMenu_HelpMenuItem_Text>Hilfe</MainMenu_HelpMenuItem_Text>
   <MainMenu_Help_HelpMenuItem_Text>Hilfe</MainMenu_Help_HelpMenuItem_Text>
   <MainMenu_Help_AboutProgramMenuItem_Text>Über das Programm...</MainMenu_Help_AboutProgramMenuItem_Text>

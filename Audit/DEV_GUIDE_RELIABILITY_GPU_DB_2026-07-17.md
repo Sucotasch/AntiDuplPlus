@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Created** | 2026-07-17 |
-| **Updated** | 2026-10-19 (dupsearch этапы 1–6: pHASH, атомарность/лок DB, ratio, пресеты, безопасный batch, отметки «разобрано») · 2026-08-16 (BUG-01…07, 09, 11 + WP-A filter parity) |
+| **Updated** | 2026-10-19 (dupsearch этапы 1–6: pHASH, атомарность/лок DB, ratio, пресеты, безопасный batch, отметки «разобрано»; Undo/Redo убраны из UI) · 2026-08-16 (BUG-01…07, 09, 11 + WP-A filter parity) |
 | **Track** | Надёжность GPU-поиска, dual `.adi`, lifecycle результатов · dupsearch (pHASH, пороги, безопасный разбор результатов) · дальше — UX без обязательной DB |
 | **Audit** | `Audit/FULL_AUDIT_2026-07-17.md` (исторический снимок; **код новее**) + корневой `Audit.md` (полный аудит 2026-08-16, актуальные P1: C1, N2, N3, S1, S4, B1) |
 | **Status source** | `PROJECT_CONTEXT.md` (обновлён 19.10.2026, статусы dupsearch 1–6) + re-check кода |
@@ -112,7 +112,7 @@ Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release. Ед�
 1. **BUG-08 — реальная тихая обрезка результатов (повышен до P1, аудит 16.08)** — лимит 5M считается по кандидат-парам ДО фильтров `MatchCallback` («стриминговый» цикл вычитки делает ровно один проход, т.е. мёртв); `ctx.bufferFullCount` не заполняется ядром. Фикс-план (полосы строк в ядре) — `Audit.md` N1.
 2. **BUG-03 fail-soft** — bad thumb: `fseek` + continue, load всё равно `true` (не OOB, но запись может быть «пустой»).
 3. **Shutdown 10s** — лучше, чем 2s; при очень большом `.adr` теоретически всё ещё race.
-4. **MarkRemoved** — после move путь в FS новый, в result storage пара снимается; image DB чистится `CheckImageData` (файл «пропал» со старого path). Не путать с true rename-in-DB.
+4. **MarkRemoved** — после move путь в FS новый, в result storage пара снимается; image DB чистится `CheckImageData` (файл «пропал» со старого path). Не путать с true rename-in-DB. Стадии MarkRemoved откату не подлежат: Undo/Redo убраны из UI (19.10).
 
 ### Что появилось после аудита 17.07 (re-check 16.08; dupsearch — 19.10)
 
@@ -121,13 +121,15 @@ Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release. Ед�
 | **dupsearch 1 — pHASH**: 256-битный DCT-хэш, порог в % (дефолт 33, UI 0–50), GPU-ядро `GpuCompareAllVsAllHash`, пресеты «Похожие: строго/полнее» | `adPhash.cpp`, `adImageComparer.cpp`, `adEngine.cpp`, `adGPU.cu` |
 | **dupsearch 2 — надёжность DB**: атомарная запись (temp + rename, `0000.adi` → `index.adi`), per-DB lock, защита записей от повторного декодирования | `adImageDataStorage.cpp`, `NvJpegCollector/main.cpp` |
 | **dupsearch 3 — ratio по разрешению**: целочисленно, `ratioResolution = 32`, пара отбрасывается только если `|r1-r2| > 1` **и** `|r1+r2| > 1` | `adEngine.cpp` |
-| **dupsearch 4 — пресеты поиска** в тулбаре: алгоритм + порог + трансформации в один клик | `MainToolStrip.cs`, `data/resources/strings/*` |
+| **dupsearch 4 — пресеты поиска** в тулбаре: алгоритм + порог + трансформации в один клик (отдельная кнопка «Пресеты поиска» рядом с комбо алгоритма/порога — 19.10) | `MainToolStrip.cs`, `data/resources/strings/*` |
 | **dupsearch 5 — безопасный batch**: удаление через выборку ядра (`SetSelection` + `ApplyToResult(*, Selected)`, две серии по сторонам), «Не удалять» (protected paths) с предупреждением о пропущенных файлах, «Оставить только это», Ctrl-U отмена разметки | `AutoSelector.cs`, `CorePathsForm.cs`, `MainMenu.cs` |
 | **dupsearch 6 — «разобрано»**: отметки пар в `<user>/processed.tsv`, фильтр в тулбаре, счётчики `Разобрано` / `Показано: X из Y`; скрытые пары сохраняют пометки | `ProcessedPairs.cs`, `ResultFilter.cs`, `ResultsListView.cs`, `MainToolStrip.cs`, `MainStatusStrip.cs` |
+| **Undo/Redo убраны из UI** (19.10): отменяемыми оставались только пометка «Ошибка» и откат переименований (файловый откат с дефектами: fail-fast + потеря стадии `adUndoRedoEngine.cpp:329-348`, `MOVEFILE_REPLACE_EXISTING` `:343`). Восстановление файлов — корзина/Explorer, разметки — Ctrl-U; движок остаётся исполнителем действий | `MainMenu.cs`, `MainToolStrip.cs`, `ResultsListView.cs`, `HotKeyOptions.cs` |
+| **Тулбар: действия с базами вместо профилей** (19.10): две первые кнопки (профили дублируют File и почти не используются) заменены на «New Database» (`GpuCollectorAction` — диалог папки + `NvJpegCollector.exe`) и «Database Manager» (`DbManagerAction`); иконки `NewDatabaseButton.img` / `DbManagerButton.img` нарисованы под палитру набора (синий цилиндр: зелёный «+» / серебряная шестерёнка); пункт Tools переименован в «New Database» (имя ключа `MainMenu_Tools_GpuCollectorMenuItem_Text` оставлено); ключи есть во всех 5 XML-локалях | `MainToolStrip.cs`, `docs/data/resources/images/*`, `data/resources/strings/*` |
 | **DB source folder remap** — БД «переезжает» за перемещённой папкой: `RemapFrom` пишется в registry, DLL транслирует пути при загрузке; позже `Update` переписывает пути | `DatabaseManagerForm.cs` (`RemapFrom`, col. `RemapIndicator`), `adDatabaseRegistry.cpp` / `adSearcher.cpp` |
 | **Collector переписан**: Y-decode, async pipeline с worker pool, Simd-детекторы, single sequential reader (anti HDD-thrash), фикс hang на недекодируемых файлах, per-file stats + failed-file log | `NvJpegCollector/main.cpp` (коммиты `4ddd1cd`…`f6aecaa`) |
 | **GUI передаёт `reducedImageSize` в collector (`--size`)** — thumb size DB синхронен с options; VRAM hint + pre-check размера БД | `MainMenu.cs` / `DatabaseManagerForm.cs`, `main.cpp` (`--size, -s`) |
-| Версия | `src/version.txt` = **2.6.0** |
+| Версия | `src/version.txt` = **2.7.0** |
 
 ---
 

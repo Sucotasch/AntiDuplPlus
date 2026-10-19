@@ -354,7 +354,7 @@ namespace AntiDupl.NET.WinForms
             s.MainMenu_Edit_ProcessedEmpty_Text = "No pair was selected.";
 
             s.MainMenu_ToolsMenuItem_Text = "Tools";
-            s.MainMenu_Tools_GpuCollectorMenuItem_Text = "Gpu Collector";
+            s.MainMenu_Tools_GpuCollectorMenuItem_Text = "New Database";
             s.MainMenu_Tools_DbManagerMenuItem_Text = "Database Manager";
         }
 

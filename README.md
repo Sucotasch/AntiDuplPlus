@@ -6,7 +6,7 @@
 >
 > **RU:** GPU-ускоренный поисковик дубликатов/похожих изображений для Windows x64. Форк [AntiDupl.NET](https://github.com/ermig1979/AntiDupl) с CUDA/nvJPEG ускорением.
 
-![AntiDupl screenshot](https://ermig1979.github.io/AntiDupl/data/help/english/files/MainForm.png)
+![AntiDuplPlus main window — duplicate search results](docs/images/main-window.png)
 
 ---
 
@@ -22,6 +22,7 @@
 | Pool comparison / Сравнение пулов | N/A | **Pool1 vs Pool2** — cross-pool comparison |
 | Auto-Select / Автовыбор | Basic | **Extended** — time, size, quality, resolution, pools (AND-logic) |
 | Delete files / Удаление файлов | Recycle Bin only | **Recycle Bin + move** to a chosen folder |
+| Undo / Redo — Отмена / Повтор | Engine undo of deletes and renames | **Not in the UI** — restore files from the Recycle Bin or with Explorer; **Ctrl-U** clears the Auto-Select marking |
 | Image quality / Качество изображений | blockiness + blurring (CPU) | **Same algorithms, GPU/CPU** — computed at DB creation |
 | SSIM | CPU SSIM (full algorithm) | **GPU SSIM** — same algorithm, GPU-accelerated |
 | Perceptual hash (pHASH) / Перцептивный хэш | N/A | **Fast near-duplicate pass** — 256-bit DCT hash per image, tolerance in % (default **33**) |
@@ -62,7 +63,7 @@
 
 ### Step 1: Create a database — Шаг 1: Создание базы данных
 
-1. Open **Tools → GPU Collector** (or the toolbar button) / Откройте **Tools → GPU Collector**
+1. Open **Tools → New Database** or the **New Database** toolbar button / Откройте **Tools → New Database** или кнопку **New Database** в тулбаре
 2. Select a folder with images / Выберите папку с изображениями
 3. NvJpegCollector decodes via GPU (JPEG) or CPU (PNG/BMP/TIFF/WebP/GIF)
 4. Computes **blockiness** and **blurring** for each image
@@ -71,7 +72,7 @@
 
 ### Step 2: Manage databases — Шаг 2: Управление базами
 
-1. Open **Tools → Database Manager** / Откройте **Tools → Database Manager**
+1. Open **Tools → Database Manager** or the **Database Manager** toolbar button / Откройте **Tools → Database Manager** или кнопку **Database Manager** в тулбаре
 2. Enable/disable databases for search (check **On**)
 3. Assign databases to **Pool1** (Reference) and **Pool2** (Target) for cross-pool comparison
 4. Choose **Pool Comparison Mode**: None / Pool1 Internal / Pool2 Internal / Cross / All Pools
@@ -92,7 +93,7 @@ If the source folder was moved, you don't need to rebuild the database:
 3. GPU compares all images (AllVsAll)
 4. Results appear in the table and are saved for the next run
 
-**Comparison mode**: pick **Squared Sum** (fast), **SSIM** (precise) or **Perceptual hash** (fast near-duplicate pass, tolerance in %, default 33) in the toolbar. **Auto-Select ▸ Search presets** sets algorithm + tolerance + transformations in one click (exact copies / compression and resize / transformations / similar: strict / wider).
+**Comparison mode**: pick **Squared Sum** (fast), **SSIM** (precise) or **Perceptual hash** (fast near-duplicate pass, tolerance in %, default 33) in the toolbar. The **Search presets** dropdown (next to the algorithm and tolerance boxes) sets algorithm + tolerance + transformations in one click (exact copies / compression and resize / transformations / similar: strict / wider).
 
 ### Step 4: Handle results — Шаг 4: Обработка результатов
 
@@ -108,7 +109,7 @@ If the source folder was moved, you don't need to rebuild the database:
 - **Keep Only This One** (context menu) marks the other images of the group as worse — nothing is deleted
 - **Do not delete** (Search → Paths) lists folders that batch and Auto-Select must never touch
 
-> Deleting moves files to the **Recycle Bin** (or the target folder), but a real delete cannot be undone inside the app — only the marking can. Filtered-out pairs keep their marks, so hiding them loses nothing.
+> Deleting moves files to the **Recycle Bin** (or the target folder) and batch moves put them into the target folder — the app has **no Undo/Redo**: bring files back from the Recycle Bin or with Explorer; **Ctrl-U** undoes the Auto-Select marking. Filtered-out pairs keep their marks, so hiding them loses nothing.
 
 ### Step 5: Update a database — Шаг 5: Обновление базы
 

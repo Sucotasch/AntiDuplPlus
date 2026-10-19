@@ -15,7 +15,7 @@
 | Component / Компонент | Original / Оригинал AntiDupl.NET | AntiDuplPlus |
 |---|---|---|
 | JPEG decoding / Декодирование JPEG | CPU (libjpeg-turbo) | **GPU (nvJPEG)** — 5-10x faster |
-| Image comparison / Сравнение изображений | CPU (AllVsAll + OneVsList) | **GPU AllVsAll** (Squared Sum + SSIM) |
+| Image comparison / Сравнение изображений | CPU (AllVsAll + OneVsList) | **GPU AllVsAll** (Squared Sum + SSIM + **Perceptual hash**) |
 | Databases / Базы данных | One built-in DB of normalized images | **Multiple pluggable DBs** created by **NvJpegCollector** (GPU decode + thumbnails), managed in **Database Manager** |
 | Database update / Обновление базы | Single built-in DB updated on search | **`--update`** — incremental add/remove of changed files per DB |
 | **Source folder remap** / **Смена папки-источника** | N/A | **Change Source Folder** — re-point a DB after its folder is moved |
@@ -24,6 +24,11 @@
 | Delete files / Удаление файлов | Recycle Bin only | **Recycle Bin + move** to a chosen folder |
 | Image quality / Качество изображений | blockiness + blurring (CPU) | **Same algorithms, GPU/CPU** — computed at DB creation |
 | SSIM | CPU SSIM (full algorithm) | **GPU SSIM** — same algorithm, GPU-accelerated |
+| Perceptual hash (pHASH) / Перцептивный хэш | N/A | **Fast near-duplicate pass** — 256-bit DCT hash per image, tolerance in % (default **33**) |
+| Search presets / Пресеты поиска | N/A | **Five one-click configs** — exact copies, compression+resize, transformations, similar: strict / wider |
+| Protected paths / Пути «не удалять» | N/A | **Do not delete** tab — batch and Auto-Select skip these files and report how many were skipped |
+| Keep Only This One / Оставить только это | N/A | Group-wise marking from the context menu; **Ctrl-U** clears the marking (no files are deleted) |
+| Processed marks / Отметки «разобрано» | N/A | Mark pairs as processed, **hide them** with the toolbar filter, counters in the status bar, marks persist in `user/processed.tsv` |
 
 ---
 
@@ -87,6 +92,8 @@ If the source folder was moved, you don't need to rebuild the database:
 3. GPU compares all images (AllVsAll)
 4. Results appear in the table and are saved for the next run
 
+**Comparison mode**: pick **Squared Sum** (fast), **SSIM** (precise) or **Perceptual hash** (fast near-duplicate pass, tolerance in %, default 33) in the toolbar. **Auto-Select ▸ Search presets** sets algorithm + tolerance + transformations in one click (exact copies / compression and resize / transformations / similar: strict / wider).
+
 ### Step 4: Handle results — Шаг 4: Обработка результатов
 
 - Context menu → Delete First / Delete Second / Delete Both
@@ -95,6 +102,13 @@ If the source folder was moved, you don't need to rebuild the database:
 - **Auto-Select Advanced**: combined criteria (AND-logic) — known issue: time/pool criteria are ignored while a quality criterion is set (Audit.md S1)
 - Edit → Delete Selected / Move Selected to Folder
 - Manual: click **Target** column to switch 1st / 2nd / (empty)
+- **Filter** (toolbar): hide processed pairs, show only unmarked, or filter by path text; the status bar shows `Processed: N` and `Shown: X of Y`
+- **Mark as Processed** (Edit menu / context menu) hides a pair from the list without touching files; **Mark Processed After Operations** does it automatically after a batch; **Clear Processed Marks** resets everything
+- **Undo Marking** (Edit → Ctrl-U) clears the Auto-Select marking; it does **not** bring deleted files back
+- **Keep Only This One** (context menu) marks the other images of the group as worse — nothing is deleted
+- **Do not delete** (Search → Paths) lists folders that batch and Auto-Select must never touch
+
+> Deleting moves files to the **Recycle Bin** (or the target folder), but a real delete cannot be undone inside the app — only the marking can. Filtered-out pairs keep their marks, so hiding them loses nothing.
 
 ### Step 5: Update a database — Шаг 5: Обновление базы
 
@@ -118,15 +132,18 @@ AntiDuplPlus/
 │   ├── AntiDupl/                    # C++/CUDA core (AntiDupl.dll)
 │   │   ├── adEngine.cpp             # Search engine
 │   │   ├── adImageDataStorage.cpp   # DB load/save (.adi, .adr)
-│   │   ├── adGPU.cu                 # CUDA kernels (Squared Sum + SSIM)
+│   │   ├── adGPU.cu                 # CUDA kernels (Squared Sum + SSIM + pHASH)
+│   │   ├── adPhash.cpp              # Perceptual hash (pHASH) computation
 │   │   ├── adSearcher.cpp           # Multi-DB load + file scan
-│   │   ├── adNvJpeg.cpp             # GPU JPEG decoding
+│   │   ├── adNvJpeg.cpp             # Legacy nvJPEG path (not compiled in the DLL)
 │   │   └── adResultStorage.cpp      # Result storage
 │   ├── NvJpegCollector/             # GPU database collector
 │   │   └── main.cpp                 # nvJPEG decode + blockiness/blurring + .adi
 │   ├── AntiDupl.NET.Core/           # C# bindings (P/Invoke)
 │   ├── AntiDupl.NET.WinForms/       # Main GUI
 │   │   ├── Form/MainForm.cs         # Main form
+│   │   ├── AutoSelector.cs          # Auto-Select + batch delete/move
+│   │   ├── ProcessedPairs.cs        # "processed" marks (user/processed.tsv)
 │   │   └── Forms/DatabaseManagerForm.cs  # Database Manager (pools, remap)
 │   └── AntiDupl.NET.WPF/            # Secondary GUI (less maintained)
 ├── bin/Release/                     # Run-ready files (build output)
@@ -227,15 +244,15 @@ msbuild src\AntiDupl.sln /p:Configuration=Release /p:Platform=x64
 # 3. Single C++ project (VS Developer Command Prompt)
 msbuild src\AntiDupl\AntiDupl.vcxproj /p:Configuration=Release /p:Platform=x64 /m:1
 
-# 4. Single C# project
-dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj /p:SolutionDir="src\\" -c Release
+# 4. Single C# project (/p:Platform=x64 is required - otherwise the output lands in src\...\bin)
+dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj /p:SolutionDir="src\\" /p:Platform=x64 -c Release
 ```
 
 Notes / Замечания:
-- Output goes to `bin/<Configuration>/` (shared by C++ and C#)
+- Output goes to `bin/<Configuration>/` (shared by C++ and C#); building a C# project without `/p:Platform=x64` falls back to the default `AnyCPU` output path under `src/`
 - `adExternal.h` / `External.cs` are auto-generated from `src/version.txt` — never edit by hand
 - vcpkg installs under `src/vcpkg_installed/x64-windows-static/`; first build can be slow
-- The GUI only runs from `bin/Release/AntiDupl.NET.WinForms.exe`
+- The GUI only runs from `bin/Release/AntiDupl.NET.WinForms.exe` — and check that it actually starts before shipping it (no automated test covers GUI construction)
 
 ---
 

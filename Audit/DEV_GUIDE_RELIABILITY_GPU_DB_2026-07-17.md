@@ -3,10 +3,11 @@
 | Field | Value |
 |-------|--------|
 | **Created** | 2026-07-17 |
-| **Updated** | 2026-08-16 (после фиксов BUG-01…07, 09, 11 + WP-A filter parity; re-check кода) |
-| **Track** | Надёжность GPU-поиска, dual `.adi`, lifecycle результатов; дальше — UX без обязательной DB |
+| **Updated** | 2026-10-19 (dupsearch этапы 1–6: pHASH, атомарность/лок DB, ratio, пресеты, безопасный batch, отметки «разобрано») · 2026-08-16 (BUG-01…07, 09, 11 + WP-A filter parity) |
+| **Track** | Надёжность GPU-поиска, dual `.adi`, lifecycle результатов · dupsearch (pHASH, пороги, безопасный разбор результатов) · дальше — UX без обязательной DB |
 | **Audit** | `Audit/FULL_AUDIT_2026-07-17.md` (исторический снимок; **код новее**) + корневой `Audit.md` (полный аудит 2026-08-16, актуальные P1: C1, N2, N3, S1, S4, B1) |
-| **Status source** | `PROJECT_CONTEXT.md` (18.07.2026) + re-check кода |
+| **Status source** | `PROJECT_CONTEXT.md` (обновлён 19.10.2026, статусы dupsearch 1–6) + re-check кода |
+| **Dupsearch** | план и журнал гейтов: `Research/2026-10-18-dupsearch/` (локальная папка, вне git) |
 | **Rules** | `AGENTS.md`, `.agents/skills/karpathy/SKILL.md` |
 | **Code in this doc** | **None** — только документация |
 
@@ -20,7 +21,7 @@
 
 1. **NvJpegCollector** строит portable DB (`index.adi` + `0000.adi`).  
 2. **Database Manager** — multi-DB, Pool1/Pool2.  
-3. **GPU AllVsAll** (SqSum / SSIM) ищет near-duplicates.  
+3. **GPU AllVsAll** (SqSum / SSIM / pHASH) ищет near-duplicates.  
 4. WinForms — primary UI; delete/move/auto-select; данные рядом с exe.
 
 Не делать: cloud, отказ от collector-формата, замена WinForms «по пути», silent breaking change wire-layout `.adi`.
@@ -36,32 +37,35 @@ msbuild src\AntiDupl.sln /p:Configuration=Release /p:Platform=x64
 ```
 
 Prereqs: VS2022 v143, CUDA 12.8+, vcpkg `x64-windows-static`, .NET 8.  
-Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release.
+Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release. Единый правильный путь сборки — `cmd\Deploy.cmd`.
 
-**Важно:** C# output часто в `src/AntiDupl.NET.WinForms/bin/Release/` — при ручной сборке копировать exe/dll в `bin/Release/` рядом с `AntiDupl.dll`.
+**Важно:** при ручной сборке C# добавь `/p:Platform=x64` — иначе output уходит в `src/AntiDupl.NET.WinForms/bin/Release/` и его надо копировать в `bin/Release/` рядом с `AntiDupl.dll`.
 
-### Smoke (после любой правки в search/DB)
+### Smoke (после любой правки в search/DB/GUI)
 
 1. Collector: папка → `databases/<Name>/`  
-2. Database Manager: On → Search (SqSum и SSIM)  
+2. Database Manager: On → Search (SqSum, SSIM, pHASH)  
 3. Delete pair → Recycle Bin  
 4. Auto-Select → Move → файл на месте, пара исчезла из списка  
 5. Restart → `.adr` результаты на месте  
+6. **GUI стартует**: окно из `bin/Release/` поднимается и держится ~10 с — конструирование GUI не покрыто ни одним автотестом, краш старта (меню-пункт `null`, 19.10) проходил все гейты  
 
-Автотестов **нет**. CI только build.
+Автотестов в solution нет; CI только build. Дополнительно: контрактные тесты interop (66 проверок, `tests/AntiDupl.Contract.Tests`) и локальный харнесс гейтов dupsearch (§7).
 
 ### Must-read files
 
 | Роль | Путь |
 |------|------|
 | Search / GPU pack / MatchCallback | `src/AntiDupl/adEngine.cpp` |
-| Dual `.adi` load/save | `src/AntiDupl/adImageDataStorage.cpp` |
-| Kernels / VRAM | `src/AntiDupl/adGPU.cu` |
+| pHASH / кэш хэшей | `src/AntiDupl/adPhash.cpp`, `adImageData.cpp` (`phashValid`/`phashVariants`), `adImageComparer.cpp` |
+| Dual `.adi` load/save + atomic write | `src/AntiDupl/adImageDataStorage.cpp` |
+| Kernels / VRAM (в т.ч. `GpuCompareAllVsAllHash`) | `src/AntiDupl/adGPU.cu` |
 | Collector write | `src/NvJpegCollector/main.cpp` |
 | Multi-DB entry | `src/AntiDupl/adSearcher.cpp` |
 | MarkRemoved | `src/AntiDupl/adUndoRedoEngine.cpp`, `AntiDupl.h` |
 | Search UI | `src/AntiDupl.NET.WinForms/Form/SearchExecuterForm.cs` |
-| Batch delete/move | `src/AntiDupl.NET.WinForms/AutoSelector.cs` |
+| Batch delete/move, protected paths, разметка пар | `src/AntiDupl.NET.WinForms/AutoSelector.cs` |
+| Отметки «разобрано» / фильтр | `src/AntiDupl.NET.WinForms/ProcessedPairs.cs`, `ResultFilter.cs` |
 | Interop enum | `src/AntiDupl.NET.Core/Original/CoreDll.cs` |
 | Core wrapper | `src/AntiDupl.NET.Core/CoreLib.cs` |
 
@@ -75,6 +79,9 @@ Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release.
 | I4 | Portable paths: `ad_database.xml`, `databases/<Name>/` |
 | I5 | Interop: `LocalActionType` / native enum синхронны (`MarkRemovedFirst=14`, `Second=15`) |
 | I6 | Surgical diffs (Karpathy) |
+| I7 | Запись DB атомарна (temp + rename; порядок `0000.adi` → `index.adi`), per-DB lock во всех режимах; неполная запись не должна попадать на диск |
+| I8 | pHASH: 256-битный DCT-хэш (64×64 → блок 16×16), порог в % (`best*100 > threshold*256` ⇔ `best > maxHamming`, `maxHamming = threshold*256/100`), 8 D4-вариантов при `transformedImage`; в pHASH-режиме трансформации не уводят на CPU-путь (в SqSum/SSIM — уводят), GPU-путь требует `checkOnEquality == TRUE` |
+| I9 | Скрытые фильтром пары не участвуют в batch/авто-выборе; `processed.tsv` (`Resources.UserPath`) — необязательный кэш отметок, его потеря не портит данные |
 
 ---
 
@@ -87,7 +94,7 @@ Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release.
 | BUG-01 | P0 | ✅ | `adEngine.cpp` pack: `data->side == reducedImageSize` |
 | BUG-02 | P1 | ✅ | `Load()`: `0x69696461u` (`"adii"`) |
 | BUG-03 | P1 | ✅ | `LoadCollectorData`: `thumbBytes == side*side` else skip thumb |
-| BUG-04 | P1 | ✅ partial | `MatchCallback`: type/size/folder/searchPath; **нет ratio / min-max / transforms** |
+| BUG-04 | P1 | ✅ | `MatchCallback`: type/size/folder/searchPath + ratio (WP-A); min/max — в pack; transforms → CPU (кроме pHASH-режима, где трансформации считает ядро) |
 | BUG-05 | P1 | ✅ | `File.Move` + `MarkRemovedFirst/Second` |
 | BUG-06 | P1 | ✅ | shutdown timeout 10s (`MainForm`) |
 | BUG-07 | P2 | ✅ | `validCount < 2` → `return true` |
@@ -107,14 +114,20 @@ Simd path quirk и publish: `AGENTS.md` / `PROJECT_CONTEXT.md` § release.
 3. **Shutdown 10s** — лучше, чем 2s; при очень большом `.adr` теоретически всё ещё race.
 4. **MarkRemoved** — после move путь в FS новый, в result storage пара снимается; image DB чистится `CheckImageData` (файл «пропал» со старого path). Не путать с true rename-in-DB.
 
-### Что появилось после аудита 17.07 (re-check 16.08)
+### Что появилось после аудита 17.07 (re-check 16.08; dupsearch — 19.10)
 
 | Фича | Где |
 |------|-----|
+| **dupsearch 1 — pHASH**: 256-битный DCT-хэш, порог в % (дефолт 33, UI 0–50), GPU-ядро `GpuCompareAllVsAllHash`, пресеты «Похожие: строго/полнее» | `adPhash.cpp`, `adImageComparer.cpp`, `adEngine.cpp`, `adGPU.cu` |
+| **dupsearch 2 — надёжность DB**: атомарная запись (temp + rename, `0000.adi` → `index.adi`), per-DB lock, защита записей от повторного декодирования | `adImageDataStorage.cpp`, `NvJpegCollector/main.cpp` |
+| **dupsearch 3 — ratio по разрешению**: целочисленно, `ratioResolution = 32`, пара отбрасывается только если `|r1-r2| > 1` **и** `|r1+r2| > 1` | `adEngine.cpp` |
+| **dupsearch 4 — пресеты поиска** в тулбаре: алгоритм + порог + трансформации в один клик | `MainToolStrip.cs`, `data/resources/strings/*` |
+| **dupsearch 5 — безопасный batch**: удаление через выборку ядра (`SetSelection` + `ApplyToResult(*, Selected)`, две серии по сторонам), «Не удалять» (protected paths) с предупреждением о пропущенных файлах, «Оставить только это», Ctrl-U отмена разметки | `AutoSelector.cs`, `CorePathsForm.cs`, `MainMenu.cs` |
+| **dupsearch 6 — «разобрано»**: отметки пар в `<user>/processed.tsv`, фильтр в тулбаре, счётчики `Разобрано` / `Показано: X из Y`; скрытые пары сохраняют пометки | `ProcessedPairs.cs`, `ResultFilter.cs`, `ResultsListView.cs`, `MainToolStrip.cs`, `MainStatusStrip.cs` |
 | **DB source folder remap** — БД «переезжает» за перемещённой папкой: `RemapFrom` пишется в registry, DLL транслирует пути при загрузке; позже `Update` переписывает пути | `DatabaseManagerForm.cs` (`RemapFrom`, col. `RemapIndicator`), `adDatabaseRegistry.cpp` / `adSearcher.cpp` |
 | **Collector переписан**: Y-decode, async pipeline с worker pool, Simd-детекторы, single sequential reader (anti HDD-thrash), фикс hang на недекодируемых файлах, per-file stats + failed-file log | `NvJpegCollector/main.cpp` (коммиты `4ddd1cd`…`f6aecaa`) |
 | **GUI передаёт `reducedImageSize` в collector (`--size`)** — thumb size DB синхронен с options; VRAM hint + pre-check размера БД | `MainMenu.cs` / `DatabaseManagerForm.cs`, `main.cpp` (`--size, -s`) |
-| Версия | `src/version.txt` = 2.5.3 |
+| Версия | `src/version.txt` = **2.6.0** |
 
 ---
 
@@ -128,17 +141,26 @@ Search (WinForms)
        for path: LoadDatabase → Storage::Load
             magic adii → DLL-native
             else → LoadCollectorNative (thumb bounds check)
+       useGpu = GPU && algo ∈ {SqSum, SSIM, pHASH} && !ignoreFrameWidth &&
+                (transformedImage == FALSE || algo == pHASH) && checkOnEquality
        useGpu? set m_skipComparisonDuringCollection
        CollectManager.Start()   // threads count sees skip flag
        collect loop → Finish
-       if useGpu: ExecuteGpuAllVsAll
+       if useGpu && algo == pHASH: ExecuteGpuAllVsAll
+            EnsurePhash (кэш в adImageData) → pack hashes (×8 при transformedImage)
+            kernel GpuCompareAllVsAllHash → порог % (maxHamming = thr*256/100)
+                 → MatchCallback (metadata filters) → AddDuplImagePair
+       else if useGpu: ExecuteGpuAllVsAll
             pack only side==reducedImageSize
             kernel → MatchCallback (metadata filters) → AddDuplImagePair
-       else: CompareManager (full CPU filters)
+       else: CompareManager (full CPU filters; pHASH — тот же порог, adImageComparer)
        optional FilterByPool
 
-Batch move
-  File.Move → ApplyToResult(MarkRemoved*) → CheckImageData
+Batch (AutoSelector.ExecuteBatch, этап 5)
+  цели собираются по файлам один раз
+  delete: SetSelection + ApplyToResult(DeleteFirst/Second, TargetType.Selected), две серии (первая/вторая сторона)
+  move:   File.Move → ApplyToResult(MarkRemovedFirst/Second, Selected) → CheckImageData
+  успех — по File.Exists; пометки «разобрано» — по клавишам выживших пар
 ```
 
 ### Dual format
@@ -164,11 +186,11 @@ Batch move
 
 ## 5. Work packages (что делать дальше)
 
-WP-0…2 из старого guide **закрыты**. WP-A (GPU filter parity) **тоже закрыт** (re-check 16.08: ratio — `adEngine.cpp` `MatchCallback`; min/max — pack loop; transforms → CPU через `transformedImage == FALSE` в условии `useGpu`). Ниже — актуальный backlog.
+WP-0…2 из старого guide **закрыты**. WP-A (GPU filter parity) **тоже закрыт** (re-check 16.08: ratio — `adEngine.cpp` `MatchCallback`; min/max — pack loop; transforms → CPU через `transformedImage == FALSE` в условии `useGpu`, **кроме pHASH-режима** — там трансформации считает ядро вариантов D4).
 
 ### ~~WP-A — Дожать GPU filter parity~~ ✅ ЗАКРЫТ (16.08)
 
-Реализовано в `adEngine.cpp`: ratio check в `MatchCallback`, min/max size при pack, `useGpu=false` при `transformedImage == TRUE`.
+Реализовано в `adEngine.cpp`: ratio check в `MatchCallback`, min/max size при pack, `useGpu=false` при `transformedImage == TRUE` для SqSum/SSIM (в pHASH — `useGpu` разрешён).
 
 ### WP-B — Batch cancel (FIND-8)
 
@@ -202,7 +224,7 @@ WP-0…2 из старого guide **закрыты**. WP-A (GPU filter parity) 
 
 | Item | Notes |
 |------|--------|
-| BUG-08 warn | Если `bufferFullCount>0` — status/log, не silent |
+| BUG-08 warn | **Отклонено 19.10** (dupsearch этап 7): усечение только пропускает пары (ложных срабатываний нет), строка `GPU comparison truncated: N pairs dropped` уже пишется в `trace.log`, прогонов на 10⁶ пар нет |
 | BUG-13 hash | `SimpleCRC32(path)` в collector — только perf multimap |
 | BUG-14 tests | Минимальный native/C# fixture: magic detect, thumb bounds, MarkRemoved enum size |
 | Shutdown Join | `WaitForWorker` до Finish без жёсткого 10s, или cancel save |
@@ -232,15 +254,20 @@ WP-B (cancel)  →  WP-C (no-DB UX, с явным выбором A/B/C)  →  WP
 
 ### Manual smoke (обязательно)
 
-См. §1. Дополнительно для WP-A:
+См. §1. Дополнительно:
 
-- Options: ratio control on; GPU search  
-- Options: min size high; tiny images excluded  
-- `transformedImage` on: document behavior after change  
+- WP-A: Options → ratio control on, GPU search; min size high → tiny images excluded; `transformedImage` on → поведение задокументировано (кроме pHASH: трансформации считает ядро)  
+- dupsearch: pHASH-порог 33 % на корпусе с известной истиной; batch на **копии** папки (удаление — в корзину, файлы protected-путей пропускаются); фильтр «разобрано» (скрытые пары не участвуют в batch)  
+- GUI: окно поднимается и держится ~10 с (см. §1 п.6)  
 
 ### Runtime notes already used
 
-- ~7.3k images, SqSum + SSIM, GPU SUCCESS (после ae1e450 / 4c915df)
+- ~7.3k images, SqSum + SSIM, GPU SUCCESS (после ae1e450 / 4c915df)  
+- 19.10: корпус A, pHASH 33/35 %, прогоны g61–g65 (см. журнал гейтов)  
+
+### dupsearch gates (локальный харнесс)
+
+`Research/2026-10-18-dupsearch/work/gates5` — подкоманды `g61`, `g61b`, `g62`, `g62b/s/t`, `g63`, `g64`, `g65` (синтетические корпуса и реальный корпус A), `ggui <userPath>` — smoke старта GUI. Результаты и допуски — `.../work/bench/results/gates-log.md`. Контрактные тесты interop — `tests/AntiDupl.Contract.Tests` (66 проверок; гонять после правок `AntiDupl.h` / `adOptions.h` / `CoreDll.cs`).
 
 ### Unit (желательно WP-D)
 
@@ -257,16 +284,19 @@ WP-B (cancel)  →  WP-C (no-DB UX, с явным выбором A/B/C)  →  WP
 ```
 adEngine.cpp
   MatchCallback          ← WP-A filters (done: ratio, type/size/folder/searchPath)
-  ExecuteGpuAllVsAll     ← pack side + min/max (done)
-  Search()               ← useGpu / skip flag order + transformedImage→CPU (done)
+  ExecuteGpuAllVsAll     ← pack side + min/max (done); pHASH: EnsurePhash + pack хэшей + maxHamming (dupsearch 1)
+  Search()               ← useGpu / skip flag order + transformedImage→CPU для SqSum/SSIM (done; pHASH остаётся на GPU)
+adPhash.cpp / adImageComparer.cpp
+  EnsurePhash, варианты D4, порог в % (dupsearch 1)
 adImageDataStorage.cpp
-  Load / LoadCollectorData  ← magic + thumbBytes (done)
+  Load / LoadCollectorData  ← magic + thumbBytes (done); атомарная запись + lock (dupsearch 2)
 adGPU.cu
-  poolMask cleanup (done); match cap (BUG-08 open — bufferFullCount не заполняется)
+  poolMask cleanup (done); match cap (BUG-08 — warn отклонён 19.10); GpuCompareAllVsAllHash (dupsearch 1)
 adUndoRedoEngine.*
-  MarkRemoved (done) — pattern for non-delete result updates
+  MarkRemoved (done) — pattern for non-delete result updates; TargetType.Selected — база batch-удаления (dupsearch 5)
 AutoSelector.ExecuteBatch
-  delete ApplyToResult; move File.Move+MarkRemoved (done)
+  delete через выборку ядра (SetSelection + ApplyToResult(*, Selected)); move File.Move + MarkRemoved (dupsearch 5)
+  protected paths + KeepOnlyOne / UndoMarking (dupsearch 5); фильтр и отметки ProcessedPairs / ResultFilter (dupsearch 6)
   ← WP-B cancel (не реализовано — нет CancellationToken)
 SearchExecuterForm / DatabaseManager
   ← WP-C empty-state / quick scan (не реализовано)
@@ -287,9 +317,9 @@ SearchExecuterForm / DatabaseManager
 
 A (ratio), B (min/max), C (transforms→CPU) — **реализованы** в `adEngine.cpp` (см. §5).
 
-### D. Match cap warning (WP-D) — единственный оставшийся
+### D. Match cap warning (WP-D) — ❌ отклонено 19.10
 
-Сейчас `ctx.bufferFullCount` не заполняется ядром и не проверяется. Нужно: счётчик в kernel → после GPU success `if (ctx.bufferFullCount > 0)` → status/log, не silent.
+Сейчас `ctx.bufferFullCount` не заполняется ядром и не проверяется. Решение (dupsearch этап 7): не делать — усечение только пропускает пары, ложных срабатываний не даёт, а строка `GPU comparison truncated: N pairs dropped` уже попадает в `trace.log`. Если появится сценарий на 10⁶+ пар — вернуться к этому пункту.
 
 ---
 
@@ -315,6 +345,9 @@ A (ratio), B (min/max), C (transforms→CPU) — **реализованы** в `
 |--------|--------|
 | P0/P1 из аудита 17.07 | ✅ closed (кроме intentional skips) |
 | GPU ratio/min-max | ✅ = CPU-фильтры (WP-A closed) |
+| dupsearch 1–6 | ✅ закрыты, гейты — `gates-log.md`: pHASH, атомарность/лок DB, ratio, пресеты, безопасный batch, «разобрано» |
+| dupsearch 7 | ✅ не требуется (решение 19.10): sidecar-хэши ≈ MS по времени, тайлинг для 10⁶ не нужен, warn об усечении отклонён |
+| GUI старт | ✅ окно поднимается (краш 19.10 пофиксен; проверка ручная — §1 п.6) |
 | Batch cancel | Partial progress + no crash (WP-B) |
 | No-DB path | User can search folder without manual DB steps (WP-C) |
 | Collector DBs | Existing load unchanged |
@@ -326,11 +359,12 @@ A (ratio), B (min/max), C (transforms→CPU) — **реализованы** в `
 
 - [ ] Один WP  
 - [ ] Нет unrelated format  
-- [ ] I1–I5 invariants  
-- [ ] Smoke §1  
-- [ ] Interop enum sync если трогали actions  
+- [ ] I1–I9 invariants  
+- [ ] Smoke §1 (включая старт GUI)  
+- [ ] Interop enum sync если трогали actions (+ контрактные тесты, 66)  
 - [ ] Не коммитить `bin/`, local DBs, hand-edited External  
 - [ ] Обновить `PROJECT_CONTEXT.md` статусы если closed new items  
+- [ ] User-facing фичи — обновить `README.md` (RU+EN) и локали `data/resources/strings/*.xml`  
 
 ---
 
@@ -340,6 +374,7 @@ A (ratio), B (min/max), C (transforms→CPU) — **реализованы** в `
 |------|------|
 | Исторический bug list | `Audit/FULL_AUDIT_2026-07-17.md` |
 | Живой статус продукта | `PROJECT_CONTEXT.md` |
+| User-facing docs (RU+EN) | `README.md` |
 | Build / invariants | `AGENTS.md` |
 | Этот guide | `Audit/DEV_GUIDE_RELIABILITY_GPU_DB_2026-07-17.md` |
 | Discipline | `.agents/skills/karpathy/SKILL.md` |
@@ -350,19 +385,26 @@ A (ratio), B (min/max), C (transforms→CPU) — **реализованы** в `
 
 Большая часть reliability-аудита **уже в master**, включая WP-A (GPU filter parity). Не начинай с WP-0/magic/OOB/ratio — это сделано. BUG-13 (hash=0) всё ещё открыт — `SimpleCRC32` в collector сейчас идёт только на имя файла, записи пишутся с `hash=0`.
 
+**dupsearch (18–19.10): этапы 1–6 в master** — pHASH (порог в %, дефолт 33, GPU-ядро хэшей), атомарность и лок DB, целочисленный ratio, пресеты поиска, безопасный batch (удаление через выборку ядра, protected paths, KeepOnlyOne, Ctrl-U), отметки «разобрано» с фильтром и счётчиками. Этап 7 закрыт как «не требуется» (решение пользователя 19.10); этап 8 — **Р2: верификация пикселями поверх хэшей** (дизайн — §11 плана, не реализовано). Статусы — `PROJECT_CONTEXT.md`, гейты — `Research/2026-10-18-dupsearch/work/bench/results/gates-log.md`.
+
+**Проверка перед выдачей сборки:** `cmd\Deploy.cmd` + вручную убедиться, что GUI стартует (§1 п.6) — конструирование GUI не покрыто автотестами: 19.10 краш старта прошёл все гейты.
+
 **Следующие осмысленные шаги:**
 
-1. **WP-B** — cancel для batch (в `AutoSelector.cs` нет отмены).  
-2. **WP-C** — «сравнение без ручной DB» (сначала согласовать A/B/C с человеком).  
-3. **WP-D** — BUG-08: `bufferFullCount` сейчас мёртвое поле (не заполняется ядром); tests — по остатку.
+1. **dupsearch этап 8 (Р2)** — если нужна более строгая верификация совпадений pHASH.  
+2. **WP-B** — cancel для batch (в `AutoSelector.cs` нет отмены).  
+3. **WP-C** — «сравнение без ручной DB» (сначала согласовать A/B/C с человеком).  
+4. **WP-D** — BUG-13/BUG-14; match-cap warn отклонён 19.10.  
 
 Не redesign. Не ломать collector format. Маленькие патчи + smoke.
 
 **Suggested next user command:**  
 `implement WP-B only`  
 или  
+`design dupsearch stage 8: pixel verification`  
+или  
 `design WP-C: quick scan vs classic SearchImages` (если нужен product direction).
 
 ---
 
-*End of dev guide — updated 2026-08-16*
+*End of dev guide — updated 2026-10-19*

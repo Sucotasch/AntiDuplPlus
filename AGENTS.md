@@ -59,8 +59,8 @@ msbuild src\AntiDupl.sln /p:Configuration=Release /p:Platform=x64
 # Single C++ project (VS Developer Command Prompt)
 msbuild src\AntiDupl\AntiDupl.vcxproj /p:Configuration=Release /p:Platform=x64 /m:1
 
-# Single C# project (platform defaults to x64 via csproj Platforms)
-dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj /p:SolutionDir="src\\" -c Release
+# Single C# project (/p:Platform=x64 is required - a plain `dotnet build` writes to src\...\bin, not bin\)
+dotnet build src\AntiDupl.NET.WinForms\AntiDupl.NET.WinForms.csproj /p:SolutionDir="src\\" /p:Platform=x64 -c Release
 ```
 
 ### Deploying for testing (MANDATORY)
@@ -71,6 +71,8 @@ After ANY code change, run **`cmd\Deploy.cmd`** and verify it ends with `[OK] De
 4. Verifies all artifacts exist in `bin/Release/`.
 
 **Rule: a task is NOT done until `cmd\Deploy.cmd` passes.** Test the GUI from `bin/Release/AntiDupl.NET.WinForms.exe` — that is the ONLY folder the GUI runs from and launches `NvJpegCollector.exe` from (`MainMenu.cs` uses `Application.StartupPath`).
+
+**Also smoke-check that the GUI starts**: launch the exe, wait ~10 s, confirm the window is up. Nothing in the build verifies GUI construction (the harness drives `CoreLib` directly), so a startup crash — e.g. a menu item added to a menu before it is created, which happened once (2026-10-19) — passes Deploy and every gate.
 
 ### Configurations & output
 - **Debug|x64**, **Release|x64**, **Publish|x64** (AntiDupl DLL and C# projects); NvJpegCollector: **Release only** (`.sln` maps its Debug/Publish to Release)
@@ -149,7 +151,7 @@ Standalone: `tests/AntiDupl.Contract.Tests/` — dependency-free console runner 
 dotnet run --project tests\AntiDupl.Contract.Tests\AntiDupl.Contract.Tests.csproj   # exit 0 = OK, 1 = contract drift
 ```
 
-Run it after any change to `AntiDupl.h`, `adOptions.h` or `CoreDll.cs` (65 checks, last verified passing 2026-09-05). Legacy root comparison utilities (`test_ssim.cs`, `benchmark_ssim.cs`) were removed in this fork; the csproj comment referencing them is stale.
+Run it after any change to `AntiDupl.h`, `adOptions.h` or `CoreDll.cs` (66 checks, last verified passing 2026-10-19). Legacy root comparison utilities (`test_ssim.cs`, `benchmark_ssim.cs`) were removed in this fork; the csproj comment referencing them is stale.
 
 ## Key files
 

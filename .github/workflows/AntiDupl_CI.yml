@@ -90,6 +90,28 @@ jobs:
         "@ | Set-Content -Path $force -Encoding UTF8
         Get-Content $force
 
+    # A fresh checkout has no install tree, and the MSBuild manifest install is hooked
+    # BeforeTargets="ClCompile" while the CUDA BuildCustomizations compile the .cu files
+    # (which include Simd) earlier -> the build died with
+    # "adSimd.h(28): fatal error C1083: Cannot open include file: 'Simd/SimdLib.hpp'".
+    # Install the manifest up front, with the same command vcpkg.targets runs.
+    - name: Install vcpkg manifest dependencies
+      shell: pwsh
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: |
+        $root = $env:VCPKG_ROOT
+        $triplet = $env:VCPKG_DEFAULT_TRIPLET
+        $manifest = Join-Path $env:GITHUB_WORKSPACE 'src'
+        # vcpkg appends the triplet to --x-install-root (verified 2026-10-19), so the
+        # tree lands in <manifest>\vcpkg_installed\<triplet>\<triplet> - the directory
+        # the targets consume as _ZVcpkgCurrentInstalledDir.
+        $installRoot = Join-Path $manifest "vcpkg_installed\$triplet"
+        & "$root\vcpkg.exe" install --x-wait-for-lock --clean-after-build --triplet $triplet --vcpkg-root "$root\" "--x-manifest-root=$manifest\" "--x-install-root=$installRoot\"
+        if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed (exit $LASTEXITCODE)" }
+        $header = Join-Path $installRoot "$triplet\include\Simd\SimdLib.hpp"
+        if (-not (Test-Path $header)) { throw "vcpkg install did not produce $header" }
+        Write-Host "vcpkg install tree ready: $header"
+
     - if: matrix.configuration == 'Release' || matrix.configuration == 'Debug'
       name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}

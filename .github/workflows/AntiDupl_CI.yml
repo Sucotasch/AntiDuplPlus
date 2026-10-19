@@ -65,26 +65,41 @@ jobs:
         runVcpkgInstall: false
         appendedCacheKey: '${{matrix.configuration}}'
 
-    - name: Integrate vcpkg
+    # `vcpkg integrate install` writes vcpkg.system.props into "Program Files" and dies
+    # with Access Denied on hosted runners, so the build got no vcpkg include paths.
+    # Import the same two files through Microsoft.Cpp.props' ForceImportBeforeCppProps
+    # hook instead (works without elevation, and identical to what the integration
+    # does). VcpkgInstalledDir stays default: manifest mode installs into
+    # <manifest root>\vcpkg_installed\<triplet>\<triplet>, which is the path the targets
+    # compute - overriding it breaks openjpeg/Simd includes.
+    - name: Set up vcpkg MSBuild integration
       shell: pwsh
-      working-directory: ${{env.VCPKG_ROOT}}
-      # vcpkg writes the system-wide props into "Program Files" - needs elevation.
-      # The hosted runner has UAC disabled, so -Verb RunAs elevates non-interactively.
+      working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
-        $p = Start-Process -FilePath "${{ github.workspace }}\vcpkg\vcpkg.exe" -ArgumentList 'integrate','install' -Verb RunAs -Wait -PassThru
-        if ($p.ExitCode -ne 0) { Write-Host "vcpkg integrate install failed: $($p.ExitCode)"; exit 1 }
+        $vcpkg = $env:VCPKG_ROOT
+        $force = Join-Path $env:GITHUB_WORKSPACE 'vcpkg-force.props'
+        @"
+        <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+          <Import Condition="Exists('$vcpkg\scripts\buildsystems\msbuild\vcpkg.props')" Project="$vcpkg\scripts\buildsystems\msbuild\vcpkg.props" />
+          <Import Condition="Exists('$vcpkg\scripts\buildsystems\msbuild\vcpkg.targets')" Project="$vcpkg\scripts\buildsystems\msbuild\vcpkg.targets" />
+        </Project>
+        "@ | Set-Content -Path $force -Encoding UTF8
+        Get-Content $force
 
     - if: matrix.configuration == 'Release' || matrix.configuration == 'Debug'
       name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=$env:Configuration /p:Platform=x64 $env:Solution_Name
+      run: msbuild /m /p:Configuration=$env:Configuration /p:Platform=x64 /p:ForceImportBeforeCppProps=${{ github.workspace }}\vcpkg-force.props $env:Solution_Name
       env: 
         Configuration: ${{ matrix.configuration }}
 
     - if: matrix.configuration == 'Publish'
       name: Build native (Publish)
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m src\AntiDupl\AntiDupl.vcxproj /p:Configuration=$env:Configuration /p:Platform=x64 /p:VcpkgManifestInstall=false
+      # manifest install stays enabled: this cell is a fresh checkout, nothing is
+      # installed under src\vcpkg_installed yet (locally Deploy.cmd passes
+      # /p:VcpkgManifestInstall=false because the ports are already there).
+      run: msbuild /m src\AntiDupl\AntiDupl.vcxproj /p:Configuration=$env:Configuration /p:Platform=x64 /p:ForceImportBeforeCppProps=${{ github.workspace }}\vcpkg-force.props
       env:
         Configuration: ${{ matrix.configuration }}
 

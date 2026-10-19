@@ -24,7 +24,11 @@ jobs:
         # set; a Debug collector config would be a project-level change).
         configuration: [Debug, Release, Publish]
 
-    runs-on: windows-latest
+    # Windows Server 2022 image = Visual Studio 2022 (v143, VCTargetsPath ...\VC\v170),
+    # which is what the projects require. `windows-latest` now ships VS 2026 (v180),
+    # where CUDA 12.8's BuildCustomizations do not exist -> the build died with
+    # MSB4019 on "CUDA 12.8.props". Pin the image instead of chasing VS 18 support.
+    runs-on: windows-2022
 
     env:
       Solution_Name: ./src/AntiDupl.sln
@@ -210,8 +214,8 @@ jobs:
   create-draft-release:
     if: startsWith(github.ref, 'refs/tags/')
     needs: build
-    
-    runs-on: windows-latest
+    # Same VS 2022 requirement as the build job (CUDA 12.8 BuildCustomizations).
+    runs-on: windows-2022
 
     env:
       # Пустой секрет (VT_API_KEY не задан) -> шаг VirusTotal пропускается,

@@ -40,7 +40,10 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_CONSOLE;_UNICODE;UNICODE;NDEBUG;ENABLE_CUDA;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\vcpkg_installed\x64-windows-static\include;$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- Manifest mode installs into <install root>\<triplet>, and vcpkg.targets uses
+           ..\vcpkg_installed\x64-windows-static\ as that root, so the headers and libs
+           live one triplet level deeper than this project used to look. -->
+      <AdditionalIncludeDirectories>$(ProjectDir)..\vcpkg_installed\x64-windows-static\x64-windows-static\include;$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
@@ -50,7 +53,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>Simd.lib;Base.lib;Sse41.lib;Avx2.lib;Avx512bw.lib;Avx512vnni.lib;AmxBf16.lib;nvjpeg.lib;cudart.lib;shlwapi.lib;libwebp.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(ProjectDir)..\vcpkg_installed\x64-windows-static\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\vcpkg_installed\x64-windows-static\x64-windows-static\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

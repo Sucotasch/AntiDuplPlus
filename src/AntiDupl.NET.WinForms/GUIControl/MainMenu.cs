@@ -184,6 +184,8 @@ namespace AntiDupl.NET.WinForms
             m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_edit_autoSelectMenuItem.DropDownItems.Add("Invert Selection", null, (s, e) => { AutoSelector.InvertSides(m_core); m_mainSplitContainer.UpdateResults(); });
             m_edit_autoSelectMenuItem.DropDownItems.Add("Deselect All", null, (s, e) => { AutoSelector.ClearAll(m_core); m_mainSplitContainer.UpdateResults(); });
+            m_edit_undoMarkingMenuItem = InitFactory.MenuItem.Create(null, null, UndoMarkingAction);
+            m_edit_undoMarkingMenuItem.ShortcutKeys = Keys.Control | Keys.U;
             m_edit_autoSelectMenuItem.DropDownItems.Add(m_edit_undoMarkingMenuItem);
             m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_edit_autoSelectMenuItem.DropDownItems.Add("Advanced...", null, (s, e) =>
@@ -194,9 +196,6 @@ namespace AntiDupl.NET.WinForms
                     DoAutoSelect(dlg.ResultCriteria);
                 }
             });
-
-            m_edit_undoMarkingMenuItem = InitFactory.MenuItem.Create(null, null, UndoMarkingAction);
-            m_edit_undoMarkingMenuItem.ShortcutKeys = Keys.Control | Keys.U;
 
             m_edit_deleteSelectedMenuItem = InitFactory.MenuItem.Create(null, null, DeleteSelectedAction);
             m_edit_deleteSelectedMenuItem.Text = "Delete Selected";

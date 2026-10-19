@@ -49,6 +49,8 @@ jobs:
       with:
         cuda: '12.8.0'
         method: 'network'
+        # Required for matrix builds: the action uploads its install log as an artifact.
+        log-file-suffix: '${{ matrix.configuration }}.txt'
 
     # P3: the former `nuget restore` step was dead weight — all C# projects are
     # PackageReference-based net8.0 csproj restored by msbuild/dotnet themselves,
@@ -64,9 +66,13 @@ jobs:
         appendedCacheKey: '${{matrix.configuration}}'
 
     - name: Integrate vcpkg
+      shell: pwsh
       working-directory: ${{env.VCPKG_ROOT}}
+      # vcpkg writes the system-wide props into "Program Files" - needs elevation.
+      # The hosted runner has UAC disabled, so -Verb RunAs elevates non-interactively.
       run: |
-        ${{ github.workspace }}/vcpkg/vcpkg.exe integrate install
+        $p = Start-Process -FilePath "${{ github.workspace }}\vcpkg\vcpkg.exe" -ArgumentList 'integrate','install' -Verb RunAs -Wait -PassThru
+        if ($p.ExitCode -ne 0) { Write-Host "vcpkg integrate install failed: $($p.ExitCode)"; exit 1 }
 
     - if: matrix.configuration == 'Release' || matrix.configuration == 'Debug'
       name: Build
@@ -94,12 +100,43 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: dotnet run --project tests\AntiDupl.Contract.Tests\AntiDupl.Contract.Tests.csproj
 
+    # Deploy.cmd stages the CUDA runtime into bin/Release locally; CI has no Deploy
+    # step, and a package without those DLLs starts but cannot do "New Database".
+    # The collector links nvjpeg via $(CUDA_PATH) (12.8 here), AntiDupl.dll links cudart 12.8.
+    - if: matrix.configuration == 'Release'
+      name: Stage CUDA runtime DLLs (Release)
+      shell: pwsh
+      run: |
+        $bin = Join-Path $env:GITHUB_WORKSPACE 'bin\Release'
+        Copy-Item (Join-Path $env:CUDA_PATH 'bin\x64\nvjpeg64_12.dll') $bin -Force
+        Copy-Item (Join-Path $env:CUDA_PATH 'bin\x64\cudart64_12.dll') $bin -Force
+        Get-ChildItem $bin -Filter '*64_*.dll' | Select-Object -ExpandProperty Name
+
     - if: matrix.configuration == 'Release'
       name: Make release binary and source files
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |
         cd cmd
         .\MakeBin.cmd
+
+    - if: matrix.configuration == 'Release'
+      name: Verify Release package (CUDA runtime)
+      shell: pwsh
+      # Same fail-early idea as the Publish check below: a zip without the CUDA
+      # runtime ships a GUI that cannot run the collector.
+      run: |
+        $version = [IO.File]::ReadAllText('src/version.txt').Trim()
+        $zip = "out\bin\AntiDupl.NET-$version.zip"
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $names = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip)).Entries.FullName
+        $missing = @()
+        foreach ($f in @('AntiDupl.dll', 'cudart64_12.dll', 'NvJpegCollector.exe')) {
+          if (-not ($names -contains $f)) { $missing += $f }
+        }
+        if (-not ($names | Where-Object { $_ -like 'nvjpeg64_*.dll' })) { $missing += 'nvjpeg64_*.dll' }
+        if ($missing.Count -gt 0) { Write-Host "Missing in $zip : $($missing -join ', ')"; exit 1 }
+        $cuda = $names | Where-Object { $_ -like '*64_*.dll' }
+        Write-Host "Release package verified: $($cuda -join ', ') + NvJpegCollector.exe"
       
     - if: matrix.configuration == 'Publish'
       name: Make release binary and source files

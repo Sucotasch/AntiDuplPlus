@@ -40,7 +40,9 @@ xcopy %RELEASE_DIR%\AntiDupl.NET.Core.dll %TMP_DIR%\* /y /i
 xcopy %RELEASE_DIR%\AntiDupl.dll %TMP_DIR%\* /y /i
 
 REM === CUDA / nvJPEG runtime ===
-xcopy %RELEASE_DIR%\nvjpeg64_13.dll %TMP_DIR%\* /y /i
+REM Коллектор линкуется с nvjpeg по $(CUDA_PATH): 13.1 локально, 12.8 в CI. Копируем ровно
+REM тот nvjpeg64_*.dll, который импортирует собранный exe (иначе пакет без DLL не работает).
+for %%v in (13 12) do findstr /M /C:"nvjpeg64_%%v.dll" %RELEASE_DIR%\NvJpegCollector.exe >nul 2>nul && xcopy %RELEASE_DIR%\nvjpeg64_%%v.dll %TMP_DIR%\* /y /i
 if exist %RELEASE_DIR%\cudart64_12.dll xcopy %RELEASE_DIR%\cudart64_12.dll %TMP_DIR%\* /y /i
 
 REM === GPU collector utility ===

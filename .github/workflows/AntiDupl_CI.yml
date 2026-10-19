@@ -159,6 +159,11 @@ jobs:
     needs: build
     
     runs-on: windows-latest
+
+    env:
+      # Пустой секрет (VT_API_KEY не задан) -> шаг VirusTotal пропускается,
+      # релиз создаётся без отчёта. Добавьте секрет - скан включится сам.
+      VT_API_KEY: ${{ secrets.VT_API_KEY }}
     
     steps:
       - uses: msys2/setup-msys2@v2
@@ -184,6 +189,7 @@ jobs:
           
       - name: Virus Total Scan
         id: scan_files
+        if: ${{ env.VT_API_KEY != '' }}
         uses: crazy-max/ghaction-virustotal@v3
         with:
           vt_api_key: ${{ secrets.VT_API_KEY }}
@@ -193,16 +199,19 @@ jobs:
             AntiDupl.NET-${{ steps.version.outputs.content }}_SingleFilePortable.exe
             AntiDupl.NET-${{ steps.version.outputs.content }}_SingleFilePortable.zip
             
-      - name: Generate VirusTotal Body
+      - name: Generate release body
         shell: msys2 {0}
         run: |
-          echo "🛡 [VirusTotal GitHub Action](https://github.com/crazy-max/ghaction-virustotal) analysis:" >> body.txt
-          echo "" >> body.txt
+          : > body.txt
           analysis="${{ steps.scan_files.outputs.analysis }}"
-          while read -d, -r pair; do
-            IFS='=' read -r filename analysisURL <<<"$pair"
-            echo "* [$(basename $filename)]($analysisURL)" >> body.txt
-          done <<<"$analysis,"
+          if [ -n "$analysis" ]; then
+            echo "🛡 [VirusTotal GitHub Action](https://github.com/crazy-max/ghaction-virustotal) analysis:" >> body.txt
+            echo "" >> body.txt
+            while read -d, -r pair; do
+              IFS='=' read -r filename analysisURL <<<"$pair"
+              echo "* [$(basename $filename)]($analysisURL)" >> body.txt
+            done <<<"$analysis,"
+          fi
         
       - name: GitHub Release
         uses: softprops/action-gh-release@v2

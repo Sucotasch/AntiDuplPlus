@@ -97,7 +97,7 @@ Several call sites originally relied on a space-free path; they are now quote-sa
 - `dotnet publish` does **not** copy native P/Invoke DLLs — copy `AntiDupl.dll` + `cudart64_12.dll` + `nvjpeg64_13.dll` manually.
 
 ### CI
-`.github/workflows/AntiDupl_CI.yml` — Debug/Release/Publish matrix on `windows-latest` with CUDA 12.8, vcpkg (pinned commit), solution build; Release job also runs `MakeBin.cmd`, Publish job runs native vcxproj build + WinForms single-file publish (`AntiDuplPublishSingleFile` profile) + `MakePublish.cmd`. Version tags (`v*`) create **pre-release** GitHub releases (the `create-draft-release` job is `prerelease: true`) with a VirusTotal scan — that step needs the `VT_API_KEY` repo secret, which is currently **not set** (no workflow run has ever completed, so tagging alone does not publish a release). CI runs the contract tests (Release cell) but does **not** run `Deploy.cmd`.
+`.github/workflows/AntiDupl_CI.yml` — Debug/Release/Publish matrix on `windows-latest` with CUDA 12.8, vcpkg (pinned commit), solution build; Release job also runs `MakeBin.cmd`, Publish job runs native vcxproj build + WinForms single-file publish (`AntiDuplPublishSingleFile` profile) + `MakePublish.cmd`. Version tags (`v*`) create **pre-release** GitHub releases (the `create-draft-release` job is `prerelease: true`). The VirusTotal step is optional: it runs only when the `VT_API_KEY` repo secret is set (not set today), otherwise the release body is empty. CI runs the contract tests (Release cell) but does **not** run `Deploy.cmd`.
 
 ## Hard invariants (do not break)
 

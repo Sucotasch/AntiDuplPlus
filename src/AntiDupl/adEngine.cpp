@@ -41,11 +41,14 @@
 #include "adFileUtils.h"
 #include "adGPUManager.h"
 #include "adGPU.h"
+#include "adPhash.h"
 #include "adStatus.h"
 #include <windows.h>
 #include <vector>
 #include <sstream>
 #include <cmath>
+#include <algorithm>
+#include <thread>
 
 #define AD_DEBUG(msg) OutputDebugStringA(msg)
 #define AD_DEBUG_FMT(msg, ...) \
@@ -241,25 +244,39 @@ namespace ad
                 continue;
             }
 
+            // «Проверено» × «Проверено» — пара не проверяется повторно.
+            // CPU-путь делает так же (CompareWithSet: set.valid только для непроверенной картинки).
+            if (pImage1->valid && pImage2->valid)
+                continue;
+
             // Apply CPU-equivalent metadata filters (pixel threshold already checked by GPU)
             TOptions* opts = ctx->engine->Options();
+
+            // Хэш-путь: transform bit0 = транспонирование (поворот 90/270), т.е. пара проверяется
+            // как turn-версия: обмен ширины/высоты и смена знака ratio (см. TImageData::Turn).
+            TUInt32 width1 = pImage1->width;
+            TUInt32 height1 = pImage1->height;
+            double ratio1 = pImage1->ratio;
+            if ((matches[i].transform & 1) != 0)
+            {
+                std::swap(width1, height1);
+                ratio1 = -ratio1;
+            }
+
             if (opts->compare.typeControl == TRUE && pImage1->type != pImage2->type)
                 continue;
             if (opts->compare.sizeControl == TRUE &&
-                (pImage1->height != pImage2->height || pImage1->width != pImage2->width))
+                (height1 != pImage2->height || width1 != pImage2->width))
                 continue;
             if (opts->compare.compareInsideOneFolder == FALSE && TPath::EqualByDirectory(pImage1->path, pImage2->path))
                 continue;
             if (opts->compare.compareInsideOneSearchPath == FALSE && pImage1->index == pImage2->index)
                 continue;
-            if (opts->compare.ratioControl == TRUE)
-            {
-                if (Simd::Square(pImage1->ratio - pImage2->ratio) >
-                    Simd::Square(RATIO_THRESHOLD_DIFFERENCE))
-                    continue;
-            }
+            if (opts->compare.ratioControl == TRUE &&
+                !IsRatioCompatible((TInt32)ratio1, pImage2->ratio))
+                continue;
 
-            ctx->engine->Result()->AddDuplImagePair(pImage1, pImage2, matches[i].difference, AD_TRANSFORM_TURN_0);
+            ctx->engine->Result()->AddDuplImagePair(pImage1, pImage2, matches[i].difference, (adTransformType)matches[i].transform);
             ctx->totalProcessed++;
             
             // Обновляем прогресс для GPU режима
@@ -313,6 +330,7 @@ namespace ad
         
         // SSIM-specific arrays
         bool useSsim = (m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM);
+        bool useHash = (m_pOptions->compare.algorithmComparing == AD_COMPARING_PERCEPTUAL_HASH);
         std::vector<float> averageArray;
         std::vector<float> varianceArray;
         if (useSsim) {
@@ -332,11 +350,15 @@ namespace ad
                     pImageData->width > (TUInt32)cmp.maximalImageSize ||
                     pImageData->height < (TUInt32)cmp.minimalImageSize ||
                     pImageData->height > (TUInt32)cmp.maximalImageSize)
+                {
                     continue;
-                allThumbnails.resize(validThumbBytes + thumbSize);
-                memcpy(&allThumbnails[validThumbBytes], pImageData->data->main, thumbSize);
-                validThumbBytes += thumbSize;
-                
+                }
+                if (!useHash) {
+                    allThumbnails.resize(validThumbBytes + thumbSize);
+                    memcpy(&allThumbnails[validThumbBytes], pImageData->data->main, thumbSize);
+                    validThumbBytes += thumbSize;
+                }
+                                
                 // Копируем CRC
                 allCrcArray.push_back(pImageData->crc32c);
                 
@@ -370,6 +392,37 @@ namespace ad
         if (validCount < 2) {
             AD_DEBUG("ExecuteGpuAllVsAllComparison: Not enough valid images for comparison, returning success\n");
             return true;
+        }
+
+        // pHASH: параллельно считаем хэши (варианты D4 выводятся из одного DCT, см. adPhash.h)
+        std::vector<uint64_t> allHashes;
+        int hashVariantCount = 1;
+        int hashMaxHamming = 0;
+        if (useHash) {
+            hashVariantCount = (m_pOptions->compare.transformedImage == TRUE) ? PHASH_VARIANT_MAX : 1;
+            allHashes.resize((size_t)validCount * hashVariantCount * 4);
+            const int threadCount = (int)std::max(1u, std::thread::hardware_concurrency());
+            const size_t chunk = (validCount + threadCount - 1) / threadCount;
+            std::vector<std::thread> workers;
+            workers.reserve(threadCount);
+            for (int t = 0; t < threadCount; ++t) {
+                const size_t begin = (size_t)t * chunk;
+                const size_t end = std::min(validCount, begin + chunk);
+                if (begin >= end) break;
+                workers.emplace_back([&imageByIndex, begin, end, hashVariantCount, &allHashes]() {
+                    for (size_t k = begin; k < end; ++k) {
+                        TImageDataPtr pImageData = imageByIndex[k];
+                        pImageData->EnsurePhash(hashVariantCount);
+                        memcpy(&allHashes[k * hashVariantCount * 4], pImageData->phash,
+                               (size_t)hashVariantCount * 4 * sizeof(TUInt64));
+                    }
+                });
+            }
+            for (size_t t = 0; t < workers.size(); ++t)
+                workers[t].join();
+            hashMaxHamming = (int)((long long)m_pOptions->compare.thresholdDifference * 256 / 100);
+            AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: pHASH mode, variants=%d, maxHamming=%d\n",
+                         hashVariantCount, hashMaxHamming);
         }
 
         // Streaming processing context
@@ -418,7 +471,24 @@ namespace ad
         // §4.12: сколько пар не влезло в буфер GPU (0 — не влезло ни одной)
         size_t droppedMatches = 0;
 
-        if (useSsim) {
+        if (useHash) {
+            // pHASH mode
+            AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: pHASH mode, poolMode=%d\n", poolCompareMode);
+
+            success = m_pGpuManager->CompareAllVsAllHash(
+                allHashes.data(),
+                hashVariantCount,
+                allCrcArray.data(),
+                poolMask.empty() ? nullptr : poolMask.data(),
+                poolCompareMode,
+                validCount,
+                hashMaxHamming,
+                ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32,
+                &ctx,
+                MatchCallback,
+                BATCH_MATCHES, &droppedMatches);
+        }
+        else if (useSsim) {
             // SSIM mode
             double ssimThreshold = (double)m_pOptions->compare.thresholdDifference;
             AD_DEBUG_FMT("ExecuteGpuAllVsAllComparison: SSIM mode, threshold=%f, poolMode=%d\n", ssimThreshold, poolCompareMode);
@@ -601,11 +671,15 @@ namespace ad
         }
 
         // 2. Determine GPU mode and set collection flag BEFORE starting collect threads
+        // pHASH считает трансформации внутри ядра (варианты D4), поэтому transformedImage
+        // не переводит его на CPU-путь, в отличие от MS/SSIM.
         bool useGpu = (m_pGpuManager && m_pGpuManager->IsAvailable() &&
                        (m_pOptions->compare.algorithmComparing == AD_COMPARING_SQUARED_SUM ||
-                        m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM) &&
+                        m_pOptions->compare.algorithmComparing == AD_COMPARING_SSIM ||
+                        m_pOptions->compare.algorithmComparing == AD_COMPARING_PERCEPTUAL_HASH) &&
                        m_pOptions->advanced.ignoreFrameWidth == 0 &&
-                       m_pOptions->compare.transformedImage == FALSE &&
+                       (m_pOptions->compare.transformedImage == FALSE ||
+                        m_pOptions->compare.algorithmComparing == AD_COMPARING_PERCEPTUAL_HASH) &&
                        m_pOptions->compare.checkOnEquality == TRUE);
 
         if (useGpu)

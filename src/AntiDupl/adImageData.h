@@ -26,6 +26,7 @@
 
 #include "adConfig.h"
 #include "adImageInfo.h"
+#include "adPhash.h"
 #include "adPixelData.h"
 
 namespace ad
@@ -45,6 +46,12 @@ namespace ad
 		TPixelDataPtr data;
 		HGLOBAL hGlobal; 
 
+		// Кэш перцептивного хэша (режим AD_COMPARING_PERCEPTUAL_HASH). Считается лениво из
+		// тамба через EnsurePhash; phashVariants — сколько вариантов D4 посчитано (0/1/8).
+		TUInt64 phash[PHASH_VARIANT_MAX][4];
+		TUInt8 phashVariants;
+		bool phashValid;
+
 		TImageData(size_t reducedImageSize);
 		TImageData(const TImageInfo& fileInfo, size_t reducedImageSize);
 		TImageData(const TImageData& imageData);
@@ -56,6 +63,12 @@ namespace ad
 		bool DefectCheckingNeed(const TOptions *pOptions) const;
 
 		void FillOther(TOptions *pOptions);
+
+		// §3.1: ratio/valid заполняются и в файловом скане (FillOther), и при загрузке БД —
+		// иначе «контроль пропорций» и категория «Проверено» в режиме БД молча не работают.
+		void FillRatioAndValid(TOptions *pOptions);
+
+		void EnsurePhash(int variantCount);
 
 		TDefectType GetDefect(const TOptions *pOptions) const;
 

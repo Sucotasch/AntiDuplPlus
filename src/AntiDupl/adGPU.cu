@@ -144,10 +144,82 @@ namespace ad
                         results[idx].image1 = (uint32_t)i;
                         results[idx].image2 = (uint32_t)j;
                         results[idx].difference = (float)difference;
+                        results[idx].transform = 0;
                     }
                 }
             }
             __syncthreads();  // Синхронизация перед следующей итерацией i
+        }
+    }
+
+    // pHASH AllVsAll kernel: минимум расстояния Хэмминга по вариантам D4 изображения i
+    // против базового варианта (0) изображения j. Замкнутость группы D4 делает такой
+    // минимум симметричным, поэтому каждая пара (i, j) рассматривается один раз.
+    __global__ void HashAllVsAllKernel(
+        const uint64_t* hashes,        // count * variantCount * 4 слов
+        const uint64_t* crcArray,
+        const uint8_t* poolMask,
+        int poolCompareMode,
+        size_t count,
+        int variantCount,
+        int maxHamming,
+        double addDiffForCrcMismatch,
+        size_t maxMatches,
+        Match* results,
+        size_t* matchCount)
+    {
+        extern __shared__ uint64_t shared_hash[];   // variantCount * 4 слов изображения i
+
+        for (size_t i = blockIdx.x; i < count; i += gridDim.x) {
+            const uint64_t* h1 = hashes + i * (size_t)variantCount * 4;
+            for (size_t p = threadIdx.x; p < (size_t)variantCount * 4; p += blockDim.x) {
+                shared_hash[p] = h1[p];
+            }
+            __syncthreads();
+
+            for (size_t j = i + 1 + threadIdx.x; j < count; j += blockDim.x) {
+                if (poolMask && poolCompareMode != 0) {
+                    uint8_t pi = poolMask[i];
+                    uint8_t pj = poolMask[j];
+                    bool keep = false;
+                    switch (poolCompareMode) {
+                        case 1: keep = (pi == 1 && pj == 1); break;
+                        case 2: keep = (pi == 2 && pj == 2); break;
+                        case 3: keep = (pi == 1 && pj == 2) || (pi == 2 && pj == 1); break;
+                        case 4: keep = (pi > 0 && pj > 0); break;
+                    }
+                    if (!keep) continue;
+                }
+
+                const uint64_t* h2 = hashes + j * (size_t)variantCount * 4;  // базовый вариант j
+
+                int best = 257;
+                int bestVariant = 0;
+                for (int v = 0; v < variantCount; v++) {
+                    const uint64_t* a = shared_hash + v * 4;
+                    int d = __popcll(a[0] ^ h2[0]) + __popcll(a[1] ^ h2[1]) +
+                            __popcll(a[2] ^ h2[2]) + __popcll(a[3] ^ h2[3]);
+                    if (d < best) {
+                        best = d;
+                        bestVariant = v;
+                    }
+                }
+
+                if (best <= maxHamming) {
+                    size_t idx = atomicAdd(matchCount, (size_t)1);
+                    if (idx < maxMatches) {
+                        double difference = 100.0 * best / 256.0;
+                        if (crcArray[i] != crcArray[j])
+                            difference += addDiffForCrcMismatch;
+
+                        results[idx].image1 = (uint32_t)i;
+                        results[idx].image2 = (uint32_t)j;
+                        results[idx].difference = (float)difference;
+                        results[idx].transform = (uint8_t)bestVariant;
+                    }
+                }
+            }
+            __syncthreads();
         }
     }
 
@@ -817,6 +889,211 @@ namespace ad
         return true;
     }
 
+    bool GpuCompareAllVsAllHash(
+        const uint64_t* allHashes,
+        int variantCount,
+        const uint64_t* allCrcArray,
+        const uint8_t* poolMask,
+        int poolCompareMode,
+        size_t count,
+        int maxHamming,
+        double addDiffForCrcMismatch,
+        void* callbackContext,
+        GpuMatchCallback callback,
+        size_t maxMatchesPerBatch,
+        size_t* pDroppedMatches)
+    {
+        AD_DEBUG("GpuCompareAllVsAllHash: Starting\n");
+
+        cudaGetLastError();  // clear any pending errors
+
+        if (!allHashes || !allCrcArray || count == 0 || variantCount < 1 || variantCount > 8 || !callback) {
+            AD_DEBUG("GpuCompareAllVsAllHash: Invalid parameters\n");
+            return false;
+        }
+
+        uint64_t* d_hashes = nullptr;
+        uint64_t* d_crcArray = nullptr;
+        uint8_t* d_poolMask = nullptr;
+        Match* d_results = nullptr;
+        size_t* d_matchCount = nullptr;
+        cudaError_t err;
+
+        // §4.4/§4.12: буфер пар берётся из свободной VRAM так же, как в MS-сравнении;
+        // хэши занимают меньше места, чем тамбы (32/256 байт на изображение).
+        const size_t MIN_MATCHES = 1000000;
+        size_t freeMem = 0, totalMem = 0;
+        cudaMemGetInfo(&freeMem, &totalMem);
+        size_t fixedMem = count * (size_t)variantCount * 4 * sizeof(uint64_t) + count * sizeof(uint64_t);
+        size_t budgetMem = freeMem * 4 / 5;
+        size_t byVram = (budgetMem > fixedMem) ? (budgetMem - fixedMem) / sizeof(Match) : 0;
+        size_t maxMatches = (byVram < maxMatchesPerBatch) ? byVram : maxMatchesPerBatch;
+        if (maxMatches < MIN_MATCHES && maxMatchesPerBatch >= MIN_MATCHES)
+            maxMatches = MIN_MATCHES;
+        size_t requiredMem = fixedMem + maxMatches * sizeof(Match);
+        AD_DEBUG_FMT("GpuCompareAllVsAllHash: VRAM free=%zu MB, required=%zu MB (match buffer: %zu)\n",
+                     freeMem / 1024 / 1024, requiredMem / 1024 / 1024, maxMatches);
+
+        if (requiredMem > budgetMem) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Not enough VRAM (need %zu MB, have %zu MB)\n",
+                         requiredMem / 1024 / 1024, freeMem / 1024 / 1024);
+            return false;
+        }
+        maxMatchesPerBatch = maxMatches;
+
+        size_t hashesBytes = count * (size_t)variantCount * 4 * sizeof(uint64_t);
+
+        err = cudaMalloc(&d_hashes, hashesBytes);
+        if (err != cudaSuccess) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Failed to allocate hashes VRAM: %s\n", cudaGetErrorString(err));
+            cudaGetLastError();
+            return false;
+        }
+
+        err = cudaMalloc(&d_crcArray, count * sizeof(uint64_t));
+        if (err != cudaSuccess) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Failed to allocate CRC VRAM: %s\n", cudaGetErrorString(err));
+            cudaFree(d_hashes);
+            return false;
+        }
+
+        err = cudaMalloc(&d_results, maxMatchesPerBatch * sizeof(Match));
+        if (err != cudaSuccess) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Failed to allocate results VRAM: %s\n", cudaGetErrorString(err));
+            cudaFree(d_hashes);
+            cudaFree(d_crcArray);
+            return false;
+        }
+
+        err = cudaMalloc(&d_matchCount, sizeof(size_t));
+        if (err != cudaSuccess) {
+            AD_DEBUG("GpuCompareAllVsAllHash: Failed to allocate counter VRAM\n");
+            cudaFree(d_hashes);
+            cudaFree(d_crcArray);
+            cudaFree(d_results);
+            return false;
+        }
+
+        err = cudaMemcpy(d_hashes, allHashes, hashesBytes, cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Upload hashes failed: %s\n", cudaGetErrorString(err));
+            cudaFree(d_hashes);
+            cudaFree(d_crcArray);
+            cudaFree(d_results);
+            cudaFree(d_matchCount);
+            return false;
+        }
+
+        err = cudaMemcpy(d_crcArray, allCrcArray, count * sizeof(uint64_t), cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Upload CRC failed: %s\n", cudaGetErrorString(err));
+            cudaFree(d_hashes);
+            cudaFree(d_crcArray);
+            cudaFree(d_results);
+            cudaFree(d_matchCount);
+            return false;
+        }
+
+        size_t h_matchCount = 0;
+        err = cudaMemcpy(d_matchCount, &h_matchCount, sizeof(size_t), cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Counter init failed: %s\n", cudaGetErrorString(err));
+            cudaFree(d_hashes);
+            cudaFree(d_crcArray);
+            cudaFree(d_results);
+            cudaFree(d_matchCount);
+            return false;
+        }
+
+        int threadsPerBlock = 256;
+        size_t blocks = count;
+        if (blocks > 65535) blocks = 65535;
+        if (blocks == 0) blocks = 1;
+
+        if (poolMask && poolCompareMode != 0) {
+            err = cudaMalloc(&d_poolMask, count * sizeof(uint8_t));
+            if (err == cudaSuccess) {
+                cudaMemcpy(d_poolMask, poolMask, count * sizeof(uint8_t), cudaMemcpyHostToDevice);
+            }
+        }
+
+        size_t sharedBytes = (size_t)variantCount * 4 * sizeof(uint64_t);
+        AD_DEBUG_FMT("GpuCompareAllVsAllHash: Launching %zu blocks, %d threads/block, shared=%zu\n",
+                     blocks, threadsPerBlock, sharedBytes);
+
+        HashAllVsAllKernel<<<(int)blocks, threadsPerBlock, sharedBytes>>>(
+            d_hashes, d_crcArray, d_poolMask, poolCompareMode, count, variantCount,
+            maxHamming, addDiffForCrcMismatch, maxMatchesPerBatch, d_results, d_matchCount);
+
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Kernel launch failed: %s\n", cudaGetErrorString(err));
+            cudaFree(d_hashes);
+            cudaFree(d_crcArray);
+            if (d_poolMask) cudaFree(d_poolMask);
+            cudaFree(d_results);
+            cudaFree(d_matchCount);
+            return false;
+        }
+
+        err = cudaDeviceSynchronize();
+        if (err != cudaSuccess) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Sync failed: %s\n", cudaGetErrorString(err));
+            cudaFree(d_hashes);
+            cudaFree(d_crcArray);
+            if (d_poolMask) cudaFree(d_poolMask);
+            cudaFree(d_results);
+            cudaFree(d_matchCount);
+            return false;
+        }
+
+        // P2-6: неконтролируемое чтение счётчика могло бы переиспользовать старое значение.
+        err = cudaMemcpy(&h_matchCount, d_matchCount, sizeof(size_t), cudaMemcpyDeviceToHost);
+        if (err != cudaSuccess) {
+            AD_DEBUG_FMT("GpuCompareAllVsAllHash: Match count readback failed: %s\n", cudaGetErrorString(err));
+            cudaFree(d_hashes);
+            cudaFree(d_crcArray);
+            if (d_poolMask) cudaFree(d_poolMask);
+            cudaFree(d_results);
+            cudaFree(d_matchCount);
+            return false;
+        }
+
+        AD_DEBUG_FMT("GpuCompareAllVsAllHash: Found %zu total matches (buffer capacity: %zu)\n",
+                     h_matchCount, maxMatchesPerBatch);
+
+        size_t matchesToRead = (h_matchCount < maxMatchesPerBatch) ? h_matchCount : maxMatchesPerBatch;
+        if (pDroppedMatches)
+            *pDroppedMatches = h_matchCount - matchesToRead;
+
+        if (matchesToRead > 0) {
+            std::vector<Match> h_batch(maxMatchesPerBatch);
+            size_t remaining = matchesToRead;
+            size_t offset = 0;
+
+            while (remaining > 0) {
+                size_t batchSize = (remaining < maxMatchesPerBatch) ? remaining : maxMatchesPerBatch;
+                err = cudaMemcpy(h_batch.data(), d_results + offset, batchSize * sizeof(Match), cudaMemcpyDeviceToHost);
+                if (err != cudaSuccess) {
+                    AD_DEBUG_FMT("GpuCompareAllVsAllHash: Readback failed: %s\n", cudaGetErrorString(err));
+                    break;
+                }
+                callback(h_batch.data(), batchSize, callbackContext);
+                remaining -= batchSize;
+                offset += batchSize;
+            }
+        }
+
+        cudaFree(d_hashes);
+        cudaFree(d_crcArray);
+        if (d_poolMask) cudaFree(d_poolMask);
+        cudaFree(d_results);
+        cudaFree(d_matchCount);
+
+        AD_DEBUG("GpuCompareAllVsAllHash: Complete\n");
+        return true;
+    }
+
     // --- SSIM AllVsAll kernel ---
 
     __global__ void SsimAllVsAllKernel(
@@ -894,6 +1171,7 @@ namespace ad
                         results[idx].image1 = (uint32_t)i;
                         results[idx].image2 = (uint32_t)j;
                         results[idx].difference = (float)difference;
+                        results[idx].transform = 0;
                     }
                 }
             }

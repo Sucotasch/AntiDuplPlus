@@ -195,7 +195,7 @@ static uint8_t GetImageType(const std::wstring& ext) {
 
 struct Arguments {
     std::wstring inputPath, outputPath, databaseName;
-    int thumbSize=32, workers=0; bool help=false, update=false, noPause=false;
+    int thumbSize=32, workers=0; bool help=false, update=false, noPause=false, forceEmpty=false;
 };
 
 Arguments ParseArguments(int argc, wchar_t* argv[]) {
@@ -212,6 +212,7 @@ Arguments ParseArguments(int argc, wchar_t* argv[]) {
         else if ((arg==L"--size"||arg==L"-s")&&i+1<argc) args.thumbSize=parseInt(argv[++i], args.thumbSize);
         else if ((arg==L"--workers"||arg==L"-w")&&i+1<argc) args.workers=parseInt(argv[++i], 0);
         else if (arg==L"--update"||arg==L"-u") args.update=true;
+        else if (arg==L"--force-empty") args.forceEmpty=true;
         else if (arg==L"--no-pause") args.noPause=true;
         else if (arg==L"--help"||arg==L"-h") args.help=true;
     }
@@ -234,6 +235,7 @@ void PrintHelp() {
     std::wcout << L"  --size, -s        Thumbnail size: 16, 32, 64 or 128 (default: 32)\n";
     std::wcout << L"  --workers, -w     CPU worker threads for analysis (default: auto = physical cores - 1)\n";
     std::wcout << L"  --update, -u      Update existing database (incremental: add new, remove deleted)\n";
+    std::wcout << L"  --force-empty     Allow --update to write an empty database (clears a non-empty one)\n";
     std::wcout << L"  --no-pause        Non-interactive mode: never show message boxes, log to stdout/stderr\n";
     std::wcout << L"                    (used by the GUI which launches this tool with redirected pipes)\n";
     std::wcout << L"\nSupported: JPEG/JPG/JFIF (GPU), PNG, BMP, TIFF, WebP, GIF (CPU via WIC)\n";
@@ -565,6 +567,28 @@ static bool LoadExistingDatabase(const std::wstring& dbFolder, int expectedThumb
     }
     fclose(f);
     if (bad) { existing.clear(); return false; }
+    return true;
+}
+
+// R2 (§5.1): запись файла БД через <имя>.tmp — на диск не попадает частично записанный
+// финальный файл. Данные сбрасываются на носитель до подмены имени.
+template <typename WriteFn>
+static bool SaveFileAtomic(const std::wstring& finalPath, WriteFn writeContent) {
+    std::wstring tmpPath = finalPath + L".tmp";
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, tmpPath.c_str(), L"wb") != 0 || !f) {
+        std::wcerr << L"[ERROR] Cannot create " << tmpPath << std::endl;
+        return false;
+    }
+    writeContent(f);
+    fflush(f);
+    FlushFileBuffers((HANDLE)_get_osfhandle(_fileno(f)));
+    fclose(f);
+    if (!MoveFileExW(tmpPath.c_str(), finalPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        std::wcerr << L"[ERROR] Cannot replace " << finalPath << L" (error " << GetLastError() << L")" << std::endl;
+        DeleteFileW(tmpPath.c_str());
+        return false;
+    }
     return true;
 }
 
@@ -920,6 +944,23 @@ int wmain_impl(int argc, wchar_t* argv[]) {
     std::wstring dbFolder = outPath + L"\\" + dbName;
     fs::create_directories(dbFolder);
 
+    // R3 (§5.1): один писатель на папку БД — второй процесс получает код 4. Хэндл живёт до
+    // конца процесса; на диске остаётся пустой collector.lock, он блокирует только живой
+    // хэндл (после падения не мешает) и загрузке БД не мешает.
+    HANDLE dbLock = CreateFileW((dbFolder + L"\\collector.lock").c_str(), GENERIC_WRITE, 0 /*no share*/,
+                                NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (dbLock == INVALID_HANDLE_VALUE) {
+        DWORD lockErr = GetLastError();
+        if (lockErr == ERROR_SHARING_VIOLATION) {
+            std::wcerr << L"[ERROR] This database is already being written by another process: "
+                       << dbName << std::endl;
+            PauseAndExit();
+            return 4;
+        }
+        std::wcerr << L"[WARN] Could not create the database lock file (error " << lockErr
+                   << L"), continuing without it." << std::endl;
+    }
+
     // Determine relative folder path for portability
     std::wstring relativeFolder;
     // Check if dbFolder is inside exeDir\databases
@@ -939,6 +980,17 @@ int wmain_impl(int argc, wchar_t* argv[]) {
     std::wcout << L"Database: " << dbName << std::endl;
     std::wcout << L"Folder: " << dbFolder << std::endl;
     std::wcout << L"Thumb: " << args.thumbSize << L"x" << args.thumbSize << std::endl << std::endl;
+
+    // R1 (§5.1): недоступная папка-источник при --update — отказ до чтения и записи БД,
+    // иначе инкрементальный проход стёр бы содержимое базы.
+    if (args.update) {
+        std::error_code inputEc;
+        if (!fs::is_directory(args.inputPath, inputEc)) {
+            std::wcerr << L"[ERROR] Source folder is missing or unavailable: " << args.inputPath << std::endl;
+            PauseAndExit();
+            return 3;
+        }
+    }
 
     std::wcout << L"[SCAN] Searching for image files..." << std::endl;
     std::vector<fs::path> imageFiles;
@@ -1098,11 +1150,21 @@ int wmain_impl(int argc, wchar_t* argv[]) {
                 std::sort(images.begin(), images.end(), [](const ImageInfo& a, const ImageInfo& b) { return a.path < b.path; });
             }
 
+            // R1 (§5.1): не записывать пустую БД поверх непустой — источник опустошён или ни
+            // один файл не декодировался. Осознанная очистка — только по --force-empty.
+            if (!args.forceEmpty && !existingRecords.empty() && images.empty()) {
+                std::wcerr << L"[ERROR] Nothing to keep: the source folder is empty/unavailable or every file "
+                              L"failed to decode. Database left unchanged (pass --force-empty to clear it)." << std::endl;
+                CleanupNvJpeg();
+                PauseAndExit();
+                return 3;
+            }
+
             std::wcout << L"[UPDATE] Final database: " << images.size() << L" records" << std::endl;
 
             // Write updated database (reuse save logic). Written even when `images` is
-            // empty (all files deleted): a valid count=0 database prevents the stale
-            // old DB from surviving in the folder.
+            // empty — with --force-empty, or when the DB was empty to begin with: a valid
+            // count=0 database prevents the stale old DB from surviving in the folder.
             auto writeStrUpd = [&](FILE* f, const std::wstring& s) {
                 uint64_t len = s.size(); fwrite(&len, 8, 1, f);
                 fwrite(s.c_str(), sizeof(wchar_t), len, f);
@@ -1114,48 +1176,53 @@ int wmain_impl(int argc, wchar_t* argv[]) {
 
                 std::wstring firstPath = images.empty() ? L"" : images.front().path;
                 std::wstring lastPath = images.empty() ? L"" : images.back().path;
+                uint32_t ts32 = (uint32_t)args.thumbSize;
 
-                std::wstring indexPath = dbFolder + L"\\index.adi";
-                FILE* idxFile = nullptr; _wfopen_s(&idxFile, indexPath.c_str(), L"wb");
-                if (idxFile) {
-                    uint32_t ts32 = (uint32_t)args.thumbSize;
-                    fwrite(&ts32, 4, 1, idxFile);
-                    uint64_t groupCount = 1; fwrite(&groupCount, 8, 1, idxFile);
-                    int16_t key = 0; fwrite(&key, 2, 1, idxFile);
-                    writeStrUpd(idxFile, firstPath);
-                    writeStrUpd(idxFile, lastPath);
-                    uint64_t imgCount = images.size(); fwrite(&imgCount, 8, 1, idxFile);
-                    fclose(idxFile);
+                // R2 (§5.1): оба файла — через .tmp с подменой по завершении; первым
+                // фиксируется data-файл, затем индекс (читатель видит пару целиком).
+                std::wstring dataPath = dbFolder + L"\\0000.adi";
+                if (!SaveFileAtomic(dataPath, [&](FILE* dataFile) {
+                        fwrite(&ts32, 4, 1, dataFile);
+                        int16_t key = 0; fwrite(&key, 2, 1, dataFile);
+                        writeStrUpd(dataFile, firstPath);
+                        writeStrUpd(dataFile, lastPath);
+                        uint64_t imgCount = images.size(); fwrite(&imgCount, 8, 1, dataFile);
+                        for (const auto& img : images) {
+                            writeStrUpd(dataFile, img.path);
+                            fwrite(&img.size, 8, 1, dataFile);
+                            fwrite(&img.time, 8, 1, dataFile);
+                            fwrite(&img.hash, 4, 1, dataFile);
+                            fwrite(&img.type, 1, 1, dataFile);
+                            fwrite(&img.width, 4, 1, dataFile);
+                            fwrite(&img.height, 4, 1, dataFile);
+                            fwrite(&img.blockiness, 4, 1, dataFile);
+                            fwrite(&img.blurring, 4, 1, dataFile);
+                            uint8_t defect = 0; fwrite(&defect, 1, 1, dataFile);
+                            fwrite(&img.crc32c, 8, 1, dataFile);
+                            uint8_t filled = 1; fwrite(&filled, 1, 1, dataFile);
+                            uint64_t tSize = img.thumbnail.size(); fwrite(&tSize, 8, 1, dataFile);
+                            fwrite(img.thumbnail.data(), 1, tSize, dataFile);
+                            fwrite(&img.average, 4, 1, dataFile);
+                            fwrite(&img.varianceSquare, 4, 1, dataFile);
+                        }
+                    })) {
+                    CleanupNvJpeg();
+                    PauseAndExit();
+                    return 1;
                 }
 
-                std::wstring dataPath = dbFolder + L"\\0000.adi";
-                FILE* dataFile = nullptr; _wfopen_s(&dataFile, dataPath.c_str(), L"wb");
-                if (dataFile) {
-                    uint32_t ts32 = (uint32_t)args.thumbSize;
-                    fwrite(&ts32, 4, 1, dataFile);
-                    int16_t key = 0; fwrite(&key, 2, 1, dataFile);
-                    writeStrUpd(dataFile, firstPath);
-                    writeStrUpd(dataFile, lastPath);
-                    uint64_t imgCount = images.size(); fwrite(&imgCount, 8, 1, dataFile);
-                    for (const auto& img : images) {
-                        writeStrUpd(dataFile, img.path);
-                        fwrite(&img.size, 8, 1, dataFile);
-                        fwrite(&img.time, 8, 1, dataFile);
-                        fwrite(&img.hash, 4, 1, dataFile);
-                        fwrite(&img.type, 1, 1, dataFile);
-                        fwrite(&img.width, 4, 1, dataFile);
-                        fwrite(&img.height, 4, 1, dataFile);
-                        fwrite(&img.blockiness, 4, 1, dataFile);
-                        fwrite(&img.blurring, 4, 1, dataFile);
-                        uint8_t defect = 0; fwrite(&defect, 1, 1, dataFile);
-                        fwrite(&img.crc32c, 8, 1, dataFile);
-                        uint8_t filled = 1; fwrite(&filled, 1, 1, dataFile);
-                        uint64_t tSize = img.thumbnail.size(); fwrite(&tSize, 8, 1, dataFile);
-                        fwrite(img.thumbnail.data(), 1, tSize, dataFile);
-                        fwrite(&img.average, 4, 1, dataFile);
-                        fwrite(&img.varianceSquare, 4, 1, dataFile);
-                    }
-                    fclose(dataFile);
+                std::wstring indexPath = dbFolder + L"\\index.adi";
+                if (!SaveFileAtomic(indexPath, [&](FILE* idxFile) {
+                        fwrite(&ts32, 4, 1, idxFile);
+                        uint64_t groupCount = 1; fwrite(&groupCount, 8, 1, idxFile);
+                        int16_t key = 0; fwrite(&key, 2, 1, idxFile);
+                        writeStrUpd(idxFile, firstPath);
+                        writeStrUpd(idxFile, lastPath);
+                        uint64_t imgCount = images.size(); fwrite(&imgCount, 8, 1, idxFile);
+                    })) {
+                    CleanupNvJpeg();
+                    PauseAndExit();
+                    return 1;
                 }
 
                 std::wcout << L"[UPDATE] Saved " << images.size() << L" records to " << dbFolder << std::endl;
@@ -1270,48 +1337,58 @@ int wmain_impl(int argc, wchar_t* argv[]) {
     std::wstring firstPath = images.empty() ? L"" : images.front().path;
     std::wstring lastPath  = images.empty() ? L"" : images.back().path;
 
-    // 1. Write index.adi
-    std::wstring indexPath = dbFolder + L"\\index.adi";
-    FILE* idxFile = nullptr; _wfopen_s(&idxFile, indexPath.c_str(), L"wb");
-    if (!idxFile) { std::wcerr << L"[ERROR] Cannot create index.adi" << std::endl; CleanupNvJpeg(); PauseAndExit(); return 1; }
+    // 1. Write 0000.adi, then index.adi — both through .tmp (R2 §5.1): a partially written
+    // final file never reaches disk, and the data file is fixed before the index.
     uint32_t ts32 = (uint32_t)args.thumbSize;
-    fwrite(&ts32, 4, 1, idxFile);
-    uint64_t groupCount = 1; fwrite(&groupCount, 8, 1, idxFile);
-    int16_t key = 0; fwrite(&key, 2, 1, idxFile);
-    writeStr(idxFile, firstPath);
-    writeStr(idxFile, lastPath);
-    uint64_t imgCount = images.size(); fwrite(&imgCount, 8, 1, idxFile);
-    fclose(idxFile);
 
-    // 2. Write 0000.adi
     std::wstring dataPath = dbFolder + L"\\0000.adi";
-    FILE* dataFile = nullptr; _wfopen_s(&dataFile, dataPath.c_str(), L"wb");
-    if (!dataFile) { std::wcerr << L"[ERROR] Cannot create 0000.adi" << std::endl; CleanupNvJpeg(); PauseAndExit(); return 1; }
-    fwrite(&ts32, 4, 1, dataFile);  // thumbSize
-    fwrite(&key, 2, 1, dataFile);   // key
-    writeStr(dataFile, firstPath);
-    writeStr(dataFile, lastPath);
-    fwrite(&imgCount, 8, 1, dataFile);  // count
+    if (!SaveFileAtomic(dataPath, [&](FILE* dataFile) {
+            fwrite(&ts32, 4, 1, dataFile);  // thumbSize
+            int16_t key = 0;
+            fwrite(&key, 2, 1, dataFile);   // key
+            writeStr(dataFile, firstPath);
+            writeStr(dataFile, lastPath);
+            uint64_t imgCount = images.size();
+            fwrite(&imgCount, 8, 1, dataFile);  // count
 
-    for (const auto& img : images) {
-        writeStr(dataFile, img.path);       // path
-        fwrite(&img.size, 8, 1, dataFile);  // size
-        fwrite(&img.time, 8, 1, dataFile);  // time
-        fwrite(&img.hash, 4, 1, dataFile);  // hash
-        fwrite(&img.type, 1, 1, dataFile);  // type
-        fwrite(&img.width, 4, 1, dataFile); // width
-        fwrite(&img.height, 4, 1, dataFile);// height
-        fwrite(&img.blockiness, 4, 1, dataFile); // blockiness
-        fwrite(&img.blurring, 4, 1, dataFile);   // blurring
-        uint8_t defect = 0; fwrite(&defect, 1, 1, dataFile); // defect
-        fwrite(&img.crc32c, 8, 1, dataFile);  // crc32c
-        uint8_t filled = 1; fwrite(&filled, 1, 1, dataFile); // filled
-        uint64_t tSize = img.thumbnail.size(); fwrite(&tSize, 8, 1, dataFile); // thumb_size
-        fwrite(img.thumbnail.data(), 1, tSize, dataFile);  // thumb_data
-        fwrite(&img.average, 4, 1, dataFile);         // average (computed)
-        fwrite(&img.varianceSquare, 4, 1, dataFile);  // varianceSquare (computed)
+            for (const auto& img : images) {
+                writeStr(dataFile, img.path);       // path
+                fwrite(&img.size, 8, 1, dataFile);  // size
+                fwrite(&img.time, 8, 1, dataFile);  // time
+                fwrite(&img.hash, 4, 1, dataFile);  // hash
+                fwrite(&img.type, 1, 1, dataFile);  // type
+                fwrite(&img.width, 4, 1, dataFile); // width
+                fwrite(&img.height, 4, 1, dataFile);// height
+                fwrite(&img.blockiness, 4, 1, dataFile); // blockiness
+                fwrite(&img.blurring, 4, 1, dataFile);   // blurring
+                uint8_t defect = 0; fwrite(&defect, 1, 1, dataFile); // defect
+                fwrite(&img.crc32c, 8, 1, dataFile);  // crc32c
+                uint8_t filled = 1; fwrite(&filled, 1, 1, dataFile); // filled
+                uint64_t tSize = img.thumbnail.size(); fwrite(&tSize, 8, 1, dataFile); // thumb_size
+                fwrite(img.thumbnail.data(), 1, tSize, dataFile);  // thumb_data
+                fwrite(&img.average, 4, 1, dataFile);         // average (computed)
+                fwrite(&img.varianceSquare, 4, 1, dataFile);  // varianceSquare (computed)
+            }
+        })) {
+        CleanupNvJpeg();
+        PauseAndExit();
+        return 1;
     }
-    fclose(dataFile);
+
+    // 2. Write index.adi
+    std::wstring indexPath = dbFolder + L"\\index.adi";
+    if (!SaveFileAtomic(indexPath, [&](FILE* idxFile) {
+            fwrite(&ts32, 4, 1, idxFile);
+            uint64_t groupCount = 1; fwrite(&groupCount, 8, 1, idxFile);
+            int16_t key = 0; fwrite(&key, 2, 1, idxFile);
+            writeStr(idxFile, firstPath);
+            writeStr(idxFile, lastPath);
+            uint64_t imgCount = images.size(); fwrite(&imgCount, 8, 1, idxFile);
+        })) {
+        CleanupNvJpeg();
+        PauseAndExit();
+        return 1;
+    }
 
     std::wcout << L"[SAVE] Saved index.adi + 0000.adi (" << images.size() << L" images)" << std::endl;
 

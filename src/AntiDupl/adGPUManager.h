@@ -152,6 +152,27 @@ namespace ad
                                           pDroppedMatches);
         }
 
+        // pHASH AllVsAll comparison (см. adGPU.h / adPhash.h)
+        bool CompareAllVsAllHash(
+            const uint64_t* allHashes,
+            int variantCount,
+            const uint64_t* allCrcArray,
+            const uint8_t* poolMask,
+            int poolCompareMode,
+            size_t count,
+            int maxHamming,
+            double addDiffForCrcMismatch,
+            void* callbackContext,
+            GpuMatchCallback callback,
+            size_t maxMatchesPerBatch,
+            size_t* pDroppedMatches) {
+            if (!m_available) return false;
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            return GpuCompareAllVsAllHash(allHashes, variantCount, allCrcArray, poolMask, poolCompareMode,
+                                          count, maxHamming, addDiffForCrcMismatch,
+                                          callbackContext, callback, maxMatchesPerBatch, pDroppedMatches);
+        }
+
     private:
         bool m_available;
         GpuDeviceInfo m_deviceInfo;

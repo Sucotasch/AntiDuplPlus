@@ -58,6 +58,9 @@ namespace ad
 		data = NULL;
 		m_owner = false;
 		hGlobal = NULL;
+		phashValid = false;
+		phashVariants = 0;
+		memset(phash, 0, sizeof(phash));
 	}
 
 	void TImageData::SetData(size_t reducedImageSize)
@@ -94,6 +97,10 @@ namespace ad
 		index = imageData.index;
 		globalIdx = imageData.globalIdx;
 		pEngine = imageData.pEngine;
+		phashValid = imageData.phashValid;
+		phashVariants = imageData.phashVariants;
+		if (phashValid)
+			memcpy(phash, imageData.phash, sizeof(phash));
 		if(m_owner && imageData.data->side != data->side)
 		{
 			delete data;
@@ -159,22 +166,31 @@ namespace ad
 		{
 			data->FillFast(pOptions->GetIgnoreWidthFrame());
 
-			const int resolution = pOptions->advanced.ratioResolution;
-			if(width > height)
-			{
-				ratio = height*resolution/width - resolution;
-			}
-			else
-			{
-				ratio = resolution - width*resolution/height;
-			}
-
-			valid = pOptions->validPaths.IsHasSubPath(path) != AD_IS_NOT_EXIST || 
-				pOptions->validPaths.IsHasPath(path) != AD_IS_NOT_EXIST;
+			FillRatioAndValid(pOptions);
 
 			//узнаем в каком из путей содержится и записываем индекс путя.
 			index = pOptions->searchPaths.IsHasSubPath(path);
 		}
+	}
+
+	// §3.1: тело вынесено из FillOther без изменений — вызывается и при загрузке БД.
+	void TImageData::FillRatioAndValid(TOptions *pOptions)
+	{
+		if(type <= AD_IMAGE_NONE)
+			return;
+
+		const int resolution = pOptions->advanced.ratioResolution;
+		if(width > height)
+		{
+			ratio = height*resolution/width - resolution;
+		}
+		else
+		{
+			ratio = resolution - width*resolution/height;
+		}
+
+		valid = pOptions->validPaths.IsHasSubPath(path) != AD_IS_NOT_EXIST || 
+			pOptions->validPaths.IsHasPath(path) != AD_IS_NOT_EXIST;
 	}
 
 	void TImageData::Turn(TUInt8 *pBuffer)
@@ -182,11 +198,26 @@ namespace ad
 		std::swap(width, height);
 		ratio = -ratio;
 		data->Turn(pBuffer);
+		phashValid = false; // пиксели изменились — кэш хэша больше не соответствует
 	}
 
 	void TImageData::Mirror(TUInt8 *pBuffer)
 	{
 		data->Mirror(pBuffer);
+		phashValid = false;
+	}
+
+	void TImageData::EnsurePhash(int variantCount)
+	{
+		if (phashValid && phashVariants >= variantCount)
+			return;
+		if (data == NULL || data->main == NULL || data->side == 0)
+			return;
+		// Пересчитываем все запрошенные варианты разом (не досчитываем): вариантность
+		// фиксируется на время поиска, но между поисками может вырасти (1 -> 8).
+		ComputePhashVariants(data->main, data->side, variantCount, phash);
+		phashVariants = (TUInt8)variantCount;
+		phashValid = true;
 	}
 
 	void TImageData::FreeGlobal()

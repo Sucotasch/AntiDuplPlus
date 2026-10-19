@@ -72,8 +72,12 @@ namespace ad
                 else if (width / 2 >= targetSize && height / 2 >= targetSize) denom = 2;
 
                 if (denom > 1) {
-                    scaledWidth = width / denom;
-                    scaledHeight = height / denom;
+                    // libjpeg-turbo accepts a scaled size only when it equals ceil(orig/denom)
+                    // (TJSCALED). The former truncating division made every JPEG with a side not
+                    // divisible by the factor fail with TJERR_FATAL, and TImage::Load has no
+                    // fallback - such images silently vanished from the scan.
+                    scaledWidth = (width + denom - 1) / denom;
+                    scaledHeight = (height + denom - 1) / denom;
                     flags |= TJFLAG_FASTUPSAMPLE;
                 }
             }

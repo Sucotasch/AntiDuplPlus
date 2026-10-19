@@ -696,6 +696,10 @@ namespace ad
 				// no real key). Heal at load time so legacy DBs work without rebuild.
 				imageData.hash = imageData.path.GetCrc32();
 
+			// §3.2: в режиме БД ratio/valid иначе остаются 0/false — «контроль пропорций» и
+			// категория «Проверено» молча не работают (см. TImageData::FillRatioAndValid).
+			imageData.FillRatioAndValid(m_pOptions);
+
 			// Read thumbnail data if filled
 			// Reset per-record state so a record with filled==0 never inherits the
 			// previous record's thumbnail/flags (the reused TImageData instance).
@@ -766,6 +770,8 @@ namespace ad
 				else if(imageData.hash == 0)
 					// P2-10: heal legacy hash=0 records at load (see LoadCollectorNative).
 					imageData.hash = imageData.path.GetCrc32();
+				// §3.2: см. LoadCollectorData — ratio/valid нужны и для DLL-native БД.
+				imageData.FillRatioAndValid(m_pOptions);
 				if(Find(imageData) == m_storage.end())
 				{
 					if(IsFileExists(imageData.path.Original().c_str()))

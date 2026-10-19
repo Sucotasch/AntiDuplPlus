@@ -91,6 +91,15 @@ namespace ad
     const TUInt8 JPEG_FILE_MARKER = 0xFF;
     const TUInt8 JPEG_FILE_MARKER_END = 0xD9;
     const TInt32 RATIO_THRESHOLD_DIFFERENCE = 1;
+    // §3.3: пропорции пары совместимы, если фигуры совпадают напрямую ИЛИ одна — поворот другой
+    // на 90° (TImageData::Turn меняет знак ratio). Только такая пара не отбрасывается фильтром.
+    inline bool IsRatioCompatible(TInt32 ratio1, TInt32 ratio2)
+    {
+        const TInt32 direct = ratio1 - ratio2;
+        const TInt32 turned = ratio1 + ratio2;
+        return (direct >= -RATIO_THRESHOLD_DIFFERENCE && direct <= RATIO_THRESHOLD_DIFFERENCE) ||
+            (turned >= -RATIO_THRESHOLD_DIFFERENCE && turned <= RATIO_THRESHOLD_DIFFERENCE);
+    }
     const TUInt32 AUTO_DELETE_DIFFERENCE_FACTOR = 2;
     const TUInt32 AUTO_DELETE_DIFFERENCE_MAX = TUInt32(DENOMINATOR*0.050);
     const double ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32 = 0.000001;

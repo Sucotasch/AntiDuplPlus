@@ -56,9 +56,11 @@ namespace ad
         TImageComparer(TEngine *pEngine);
         virtual ~TImageComparer();
 
-        void Accept(TImageDataPtr pImageData, bool add);
+        virtual void Accept(TImageDataPtr pImageData, bool add);
 
     protected:
+        TResultStorage* Result() const { return m_pResult; }
+
         virtual void Add(TImageDataPtr pImageData) = 0; // pure virtual or abstract function and requires to be overwritten in an derived class
         virtual void Compare(TImageDataPtr pOriginal, TImageDataPtr pTransformed, adTransformType transform) = 0;
 		virtual bool IsDuplPair(TImageDataPtr pFirst, TImageDataPtr pSecond, double *pDifference); //виртуальная функция, но не обязательно ее переопределять
@@ -144,6 +146,27 @@ namespace ad
 		float C1;
 		float C2;
 		TImageDataStorage *m_pImageDataStorage;
+    };
+    //-------------------------------------------------------------------------
+    // Режим AD_COMPARING_PERCEPTUAL_HASH: сравнение 256-битных pHASH, посчитанных из тамба
+    // (см. adPhash.h). При compare.transformedImage == TRUE вариантность 8 (группа D4),
+    // иначе 1. Группа замкнута, поэтому min Хэмминга симметричен и варианты берутся только
+    // у принимаемого изображения; его же вариант попадает в результат как transform.
+    class TImageComparer_Hash : public TImageComparer 
+    {
+    public:
+        TImageComparer_Hash(TEngine *pEngine);
+
+    protected:
+        virtual void Accept(TImageDataPtr pImageData, bool add);
+        virtual void Add(TImageDataPtr pImageData);
+        virtual void Compare(TImageDataPtr pOriginal, TImageDataPtr pTransformed, adTransformType transform);
+        virtual bool IsDuplPair(TImageDataPtr pFirst, TImageDataPtr pSecond, double *pDifference);
+
+    private:
+        bool IsDuplPairEx(TImageDataPtr pFirst, TImageDataPtr pSecond, double *pDifference, int *pVariant);
+
+        int m_variantCount;
     };
     //-------------------------------------------------------------------------
     TImageComparer* CreateImageComparer(TEngine *pEngine);

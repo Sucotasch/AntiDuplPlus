@@ -388,6 +388,7 @@ extern "C"
 	{
 		AD_COMPARING_SQUARED_SUM = 0,
 		AD_COMPARING_SSIM = 1,
+		AD_COMPARING_PERCEPTUAL_HASH = 2, // pHASH: 256-битный перцептивный хэш из тамба (см. adPhash.h)
 		AD_COMPARING_SIZE
 	};
 

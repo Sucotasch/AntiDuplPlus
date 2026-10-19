@@ -108,6 +108,7 @@
     <ClCompile Include="adOptions.cpp" />
     <ClCompile Include="adPath.cpp" />
     <ClCompile Include="adPerformance.cpp" />
+    <ClCompile Include="adPhash.cpp" />
     <ClCompile Include="adPixelData.cpp" />
     <ClCompile Include="adPsd.cpp" />
     <ClCompile Include="adRecycleBin.cpp" />
@@ -164,6 +165,7 @@
     <ClInclude Include="adOptions.h" />
     <ClInclude Include="adPath.h" />
     <ClInclude Include="adPerformance.h" />
+    <ClInclude Include="adPhash.h" />
     <ClInclude Include="adPixelData.h" />
     <ClInclude Include="adPsd.h" />
     <ClInclude Include="adRecycleBin.h" />

@@ -141,7 +141,11 @@ namespace AntiDupl.Contract.Tests
                 Eq("Blurring", (int)DefectType.Blurring, 4);
             });
             Check("HintType.None=0 .. RenameSecondToFirst=4", () => Eq("RenameSecondToFirst", (int)HintType.RenameSecondToFirst, 4));
-            Check("AlgorithmComparing.SquaredSum=0 / SSIM=1", () => Eq("SSIM", (int)AlgorithmComparing.SSIM, 1));
+            Check("AlgorithmComparing.SquaredSum=0 / SSIM=1 / PerceptualHash=2", () =>
+            {
+                Eq("SSIM", (int)AlgorithmComparing.SSIM, 1);
+                Eq("PerceptualHash", (int)AlgorithmComparing.PerceptualHash, 2);
+            });
             Check("PoolCompareMode.None=0 .. All=4", () =>
             {
                 Eq("Pool1Internal", (int)PoolCompareMode.Pool1Internal, 1);

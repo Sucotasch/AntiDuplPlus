@@ -40,6 +40,17 @@ namespace ad
 {
 	const unsigned char FRAME_MASK_INDEX = 0xFF;
 
+    // pHASH: полное число бит хэша (см. adPhash.h) и popcount без зависимости от /arch.
+    const int PHASH_TOTAL_BITS = 256;
+
+    inline int PopCount64(TUInt64 x)
+    {
+        x = x - ((x >> 1) & 0x5555555555555555ull);
+        x = (x & 0x3333333333333333ull) + ((x >> 2) & 0x3333333333333333ull);
+        x = (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0Full;
+        return (int)((x * 0x0101010101010101ull) >> 56);
+    }
+
     //-------------------------------------------------------------------------
 
     TImageComparer::TImageComparer(TEngine *pEngine)
@@ -183,7 +194,7 @@ namespace ad
             // Basic CPU-side pre-checks to avoid unnecessary GPU work
             if(m_pOptions->compare.typeControl == TRUE && pTransformed->type != pSecond->type) continue;
             if(m_pOptions->compare.sizeControl == TRUE && (pTransformed->height != pSecond->height || pTransformed->width != pSecond->width)) continue;
-            if(m_pOptions->compare.ratioControl == TRUE && Simd::Square(pTransformed->ratio - pSecond->ratio) > Simd::Square(RATIO_THRESHOLD_DIFFERENCE)) continue;
+            if(m_pOptions->compare.ratioControl == TRUE && !IsRatioCompatible(pTransformed->ratio, pSecond->ratio)) continue;
             if(m_pOptions->compare.compareInsideOneFolder == FALSE && TPath::EqualByDirectory(pTransformed->path, pSecond->path)) continue;
             if(m_pOptions->compare.compareInsideOneSearchPath == FALSE && pTransformed->index == pSecond->index) continue;
 
@@ -273,11 +284,8 @@ namespace ad
 			pFirst->width != pSecond->width))
 			return false;
 
-		if(m_pOptions->compare.ratioControl == TRUE)
-		{
-			if(Simd::Square(pFirst->ratio - pSecond->ratio) > Simd::Square(RATIO_THRESHOLD_DIFFERENCE))
-				return false;
-		}
+		if(m_pOptions->compare.ratioControl == TRUE && !IsRatioCompatible(pFirst->ratio, pSecond->ratio))
+			return false;
 
 		if(m_pOptions->compare.compareInsideOneFolder == FALSE && TPath::EqualByDirectory(pFirst->path, pSecond->path))
 			return false;
@@ -459,11 +467,8 @@ namespace ad
             pFirst->width != pSecond->width))
             return false;
 
-        if(m_pOptions->compare.ratioControl == TRUE)
-        {
-            if(Simd::Square(pFirst->ratio - pSecond->ratio) > Simd::Square(RATIO_THRESHOLD_DIFFERENCE))
-                return false;
-        }
+        if(m_pOptions->compare.ratioControl == TRUE && !IsRatioCompatible(pFirst->ratio, pSecond->ratio))
+            return false;
 
         if(m_pOptions->compare.compareInsideOneFolder == FALSE && TPath::EqualByDirectory(pFirst->path, pSecond->path))
             return false;
@@ -502,6 +507,123 @@ namespace ad
         return true;
     }
     //-------------------------------------------------------------------------
+    TImageComparer_Hash::TImageComparer_Hash(TEngine *pEngine)
+        :TImageComparer(pEngine)
+    {
+        m_variantCount = (m_pOptions->compare.transformedImage == TRUE) ? PHASH_VARIANT_MAX : 1;
+        m_sets.resize(1);
+    }
+
+    void TImageComparer_Hash::Add(TImageDataPtr pImageData)
+    {
+        AddToSet(m_sets[0], pImageData);
+    }
+
+    void TImageComparer_Hash::Compare(TImageDataPtr pOriginal, TImageDataPtr pTransformed, adTransformType transform)
+    {
+        // В режиме pHASH весь проход делает Accept (там известен вариант с минимальным
+        // расстоянием); сюда управление не попадает. Оставлено для контракта базового класса.
+        CompareWithSet(m_sets[0], pOriginal, pTransformed, transform);
+    }
+
+    void TImageComparer_Hash::Accept(TImageDataPtr pImageData, bool add)
+    {
+        pImageData->EnsurePhash(m_variantCount);
+        if (pImageData->phashValid)
+        {
+            const Set &set = m_sets[0];
+            double difference;
+            int variant;
+            if (!pImageData->valid)
+            {
+                for (TImageDataPtrList::const_iterator i = set.valid.begin(); i != set.valid.end(); ++i)
+                {
+                    if (IsDuplPairEx(pImageData, *i, &difference, &variant))
+                        Result()->AddDuplImagePair(pImageData, *i, difference, (adTransformType)variant);
+                }
+            }
+            for (TImageDataPtrList::const_iterator i = set.other.begin(); i != set.other.end(); ++i)
+            {
+                if (IsDuplPairEx(pImageData, *i, &difference, &variant))
+                    Result()->AddDuplImagePair(pImageData, *i, difference, (adTransformType)variant);
+            }
+        }
+        if (add)
+            Add(pImageData);
+    }
+
+    bool TImageComparer_Hash::IsDuplPair(TImageDataPtr pFirst, TImageDataPtr pSecond, double *pDifference)
+    {
+        int variant;
+        return IsDuplPairEx(pFirst, pSecond, pDifference, &variant);
+    }
+
+    bool TImageComparer_Hash::IsDuplPairEx(TImageDataPtr pFirst, TImageDataPtr pSecond, double *pDifference, int *pVariant)
+    {
+        if(m_pOptions->compare.typeControl == TRUE && 
+            pFirst->type != pSecond->type)
+            return false;
+
+        if(m_pOptions->compare.compareInsideOneFolder == FALSE && TPath::EqualByDirectory(pFirst->path, pSecond->path))
+            return false;
+
+        if(m_pOptions->compare.compareInsideOneSearchPath == FALSE && pFirst->index == pSecond->index)
+            return false;
+
+        pFirst->EnsurePhash(m_variantCount);
+        pSecond->EnsurePhash(m_variantCount);
+        if(!pFirst->phashValid || !pSecond->phashValid)
+            return false;
+
+        // min по вариантам первого изображения против базового варианта второго;
+        // симметричность обеспечивает замкнутость группы D4 (см. adPhash.h).
+        int best = PHASH_TOTAL_BITS + 1;
+        int bestVariant = 0;
+        const TUInt64* base = pSecond->phash[0];
+        for(int v = 0; v < m_variantCount; ++v)
+        {
+            const TUInt64* a = pFirst->phash[v];
+            int d = PopCount64(a[0] ^ base[0]) + PopCount64(a[1] ^ base[1]) +
+                    PopCount64(a[2] ^ base[2]) + PopCount64(a[3] ^ base[3]);
+            if(d < best)
+            {
+                best = d;
+                bestVariant = v;
+            }
+        }
+
+        // Размер/пропорции проверяются как для turn-версии (см. TImageData::Turn): вариант
+        // с транспонированием (bit0) меняет стороны местами и знак ratio.
+        TUInt32 width1 = pFirst->width;
+        TUInt32 height1 = pFirst->height;
+        double ratio1 = pFirst->ratio;
+        if((bestVariant & 1) != 0)
+        {
+            const TUInt32 tmp = width1;
+            width1 = height1;
+            height1 = tmp;
+            ratio1 = -ratio1;
+        }
+
+        if(m_pOptions->compare.sizeControl == TRUE &&
+            (height1 != pSecond->height || width1 != pSecond->width))
+            return false;
+
+        if(m_pOptions->compare.ratioControl == TRUE && !IsRatioCompatible((TInt32)ratio1, pSecond->ratio))
+            return false;
+
+        // Порог в процентах: 100 * best / 256 > threshold (целочисленно, как в GPU-ядре).
+        if(best * 100 > m_pOptions->compare.thresholdDifference * PHASH_TOTAL_BITS)
+            return false;
+
+        *pDifference = 100.0 * best / PHASH_TOTAL_BITS;
+        if(pFirst->crc32c != pSecond->crc32c)
+            *pDifference += ADDITIONAL_DIFFERENCE_FOR_DIFFERENT_CRC32;
+        if(pVariant)
+            *pVariant = bestVariant;
+        return true;
+    }
+    //-------------------------------------------------------------------------
 	// Фабрика возврашает движок
     TImageComparer* CreateImageComparer(TEngine *pEngine)
     {
@@ -523,6 +645,8 @@ namespace ad
 				return new TImageComparer_3D(pEngine);
 			}
 		}
+		else if (pEngine->Options()->compare.algorithmComparing == AD_COMPARING_PERCEPTUAL_HASH)
+			return new TImageComparer_Hash(pEngine);
 		else
 			return new TImageComparer_SSIM(pEngine);
     }

@@ -42,6 +42,7 @@ namespace ad
         uint32_t image1;
         uint32_t image2;
         float difference;
+        uint8_t transform;   // вариант D4 для режима pHASH (0 для MS/SSIM)
     };
 
     bool GpuInit(GpuDeviceInfo* pInfo);
@@ -101,6 +102,22 @@ namespace ad
         GpuMatchCallback callback,
         size_t maxMatchesPerBatch,          // может быть уменьшен по свободной VRAM
         size_t* pDroppedMatches);           // §4.12: сколько пар не влезло в буфер (может быть NULL)
+
+    // pHASH AllVsAll comparison: min Хэмминга по вариантам D4 против базового варианта.
+    // allHashes: count * variantCount * 4 слов, где вариант 0 — базовая ориентация.
+    bool GpuCompareAllVsAllHash(
+        const uint64_t* allHashes,
+        int variantCount,                   // 1 (без трансформаций) или 8 (D4)
+        const uint64_t* allCrcArray,
+        const uint8_t* poolMask,
+        int poolCompareMode,
+        size_t count,
+        int maxHamming,                     // порог в битах: thresholdDifference * 256 / 100
+        double addDiffForCrcMismatch,
+        void* callbackContext,
+        GpuMatchCallback callback,
+        size_t maxMatchesPerBatch,
+        size_t* pDroppedMatches);
 }
 
 #endif//__adGPU_h__

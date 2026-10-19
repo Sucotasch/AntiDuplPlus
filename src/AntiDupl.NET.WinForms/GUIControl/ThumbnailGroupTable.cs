@@ -29,6 +29,7 @@ using System.Drawing;
 using System.Threading;
 
 using AntiDupl.NET.Core;
+using AntiDupl.NET.Core.Original;
 
 namespace AntiDupl.NET.WinForms
 {
@@ -433,6 +434,36 @@ namespace AntiDupl.NET.WinForms
         {
             if (OnCurrentThumbnailChanged != null)
                 OnCurrentThumbnailChanged(group, index);
+        }
+
+        /// <summary>
+        /// «Оставить одну» (T1'): отметить в группе все файлы, кроме указанного — нативным
+        /// SelectAllButThis (чекбоксы группы) и разметкой пар (AutoSelector), потому что batch
+        /// удаляет только то, что помечено в разметке пар. Затем обновляет чекбоксы группы.
+        /// </summary>
+        public void KeepOnlyThis(CoreGroup group, int index)
+        {
+            if (group == null || group.images == null || index < 0 || index >= group.images.Length)
+                return;
+
+            m_core.SetSelection(group.id, index, CoreDll.SelectionType.SelectAllButThis);
+            AutoSelector.KeepOnlyOne(m_core, group.images, group.images[index].path);
+
+            if (m_thumbnailGroupPanels != null)
+            {
+                for (int i = 0; i < m_thumbnailGroupPanels.Length; i++)
+                {
+                    ThumbnailGroupPanel groupPanel = m_thumbnailGroupPanels[i];
+                    if (groupPanel == null || groupPanel.Group == null || groupPanel.Group.id != group.id)
+                        continue;
+
+                    ThumbnailPanel[] thumbnailPanels = groupPanel.ThumbnailPanels;
+                    for (int j = 0; j < thumbnailPanels.Length; j++)
+                        thumbnailPanels[j].UpdateSelection();
+                }
+            }
+
+            ChangeCurrentThumbnail(group, index);
         }
 
         public bool Rename(CoreGroup group, int index, string newFileName)

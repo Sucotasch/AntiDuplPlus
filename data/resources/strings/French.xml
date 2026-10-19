@@ -47,6 +47,7 @@
   <CoreOptionsForm_RatioControlCheckBox_Text>Contrôler le ratio largeur/hauteur de l'image</CoreOptionsForm_RatioControlCheckBox_Text>
   <CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text>Algorithme de comparaison d'images</CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text>
   <CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum>Différence quadratique moyenne</CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum>
+  <CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash>Hachage perceptuel (pHASH)</CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash>
   <CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text>Seuil de différence</CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text>
   <CoreOptionsForm_MinimalImageSizeLabeledIntegerEdit_Text>Largeur/hauteur minimale de l'image</CoreOptionsForm_MinimalImageSizeLabeledIntegerEdit_Text>
   <CoreOptionsForm_MaximalImageSizeLabeledIntegerEdit_Text>Largeur/hauteur maximale de l'image</CoreOptionsForm_MaximalImageSizeLabeledIntegerEdit_Text>
@@ -252,4 +253,29 @@
   <ImagePreviewPanel_EXIF_Tooltip_DateTime>Date/Heure :</ImagePreviewPanel_EXIF_Tooltip_DateTime>
   <ImagePreviewPanel_EXIF_Tooltip_Artist>Artiste:</ImagePreviewPanel_EXIF_Tooltip_Artist>
   <ImagePreviewPanel_EXIF_Tooltip_UserComment>Commentaire:</ImagePreviewPanel_EXIF_Tooltip_UserComment>
+  <DatabaseManagerForm_UpdateEmptySourceTitle>Dossier source vide</DatabaseManagerForm_UpdateEmptySourceTitle>
+  <DatabaseManagerForm_UpdateEmptySourceQuestion>Le dossier source est vide ou indisponible. Vider la base « {0} » (supprimer tous les enregistrements) ?</DatabaseManagerForm_UpdateEmptySourceQuestion>
+  <DatabaseManagerForm_UpdateBusyText>Cette base est déjà en cours de mise à jour par un autre processus. Attendez la fin puis réessayez.</DatabaseManagerForm_UpdateBusyText>
+  <MainToolStrip_Presets_Text>Préréglages de recherche</MainToolStrip_Presets_Text>
+  <MainToolStrip_PresetExactCopies_Text>Copies exactes</MainToolStrip_PresetExactCopies_Text>
+  <MainToolStrip_PresetRecompression_Text>Compression et redimensionnement</MainToolStrip_PresetRecompression_Text>
+  <MainToolStrip_PresetTransformations_Text>Transformations</MainToolStrip_PresetTransformations_Text>
+  <MainToolStrip_PresetSimilarStrict_Text>Similaires : strict</MainToolStrip_PresetSimilarStrict_Text>
+  <MainToolStrip_PresetSimilarWider_Text>Similaires : étendu</MainToolStrip_PresetSimilarWider_Text>
+  <CorePathsForm_ProtectedTabPage_Text>Ne pas supprimer</CorePathsForm_ProtectedTabPage_Text>
+  <MainMenu_Edit_UndoMarkingMenuItem_Text>Annuler le marquage (Ctrl-U)</MainMenu_Edit_UndoMarkingMenuItem_Text>
+  <MainMenu_Edit_UndoMarkingEmpty_Text>Aucun marquage à annuler.</MainMenu_Edit_UndoMarkingEmpty_Text>
+  <MainMenu_BatchProtectedWarning_Text>{0} fichier(s) dans des chemins protégés ne seront pas traités.</MainMenu_BatchProtectedWarning_Text>
+  <ImagePreviewContextMenu_KeepOnlyThisItem_Text>Ne garder que celle-ci</ImagePreviewContextMenu_KeepOnlyThisItem_Text>
+  <MainToolStrip_FilterHideProcessed_Text>Masquer les traitées</MainToolStrip_FilterHideProcessed_Text>
+  <MainToolStrip_FilterOnlyUnmarked_Text>Seulement non marquées</MainToolStrip_FilterOnlyUnmarked_Text>
+  <MainToolStrip_FilterText_ToolTipText>Afficher seulement les paires dont un chemin contient ce texte (Entrée pour appliquer)</MainToolStrip_FilterText_ToolTipText>
+  <MainToolStrip_FilterReset_Text>Réinitialiser le filtre</MainToolStrip_FilterReset_Text>
+  <MainStatusStrip_TotalFilteredLabel_Text>Affichées : {0} sur {1}</MainStatusStrip_TotalFilteredLabel_Text>
+  <MainStatusStrip_ProcessedLabel_Text>Traitées : </MainStatusStrip_ProcessedLabel_Text>
+  <MainMenu_Edit_MarkProcessedMenuItem_Text>Marquer comme traitées</MainMenu_Edit_MarkProcessedMenuItem_Text>
+  <MainMenu_Edit_UnmarkProcessedMenuItem_Text>Retirer la marque « traité »</MainMenu_Edit_UnmarkProcessedMenuItem_Text>
+  <MainMenu_Edit_ClearProcessedMenuItem_Text>Effacer toutes les marques « traité »</MainMenu_Edit_ClearProcessedMenuItem_Text>
+  <MainMenu_Edit_AutoMarkProcessedMenuItem_Text>Marquer comme traitées après les opérations</MainMenu_Edit_AutoMarkProcessedMenuItem_Text>
+  <MainMenu_Edit_ProcessedEmpty_Text>Aucune paire n'était sélectionnée.</MainMenu_Edit_ProcessedEmpty_Text>
 </Strings>

@@ -173,12 +173,16 @@ namespace AntiDupl.NET.WinForms
                     autoSelectMenu.DropDownItems.Add(new ToolStripSeparator());
                     autoSelectMenu.DropDownItems.Add("Invert Selection", null, (s, e) => { AutoSelector.InvertSides(m_core); m_mainSplitContainer.UpdateResults(); });
                     autoSelectMenu.DropDownItems.Add("Deselect All", null, (s, e) => { AutoSelector.ClearAll(m_core); m_mainSplitContainer.UpdateResults(); });
+                    ToolStripMenuItem undoMarkingItem = InitFactory.MenuItem.Create(null, null, UndoMarking);
+                    undoMarkingItem.Text = Resources.Strings.Current.MainMenu_Edit_UndoMarkingMenuItem_Text;
+                    autoSelectMenu.DropDownItems.Add(undoMarkingItem);
                     Items.Add(autoSelectMenu);
 
                     // Execute actions
                     Items.Add(new ToolStripSeparator());
                     Items.Add("Delete Selected", null, (s, e) =>
                     {
+                        AutoSelector.SyncProtectedPaths(m_coreOptions);
                         int count = AutoSelector.CountMarked(m_core);
                         if (count <= 0) return;
 
@@ -187,6 +191,7 @@ namespace AntiDupl.NET.WinForms
                             ? "Some files have paths longer than 260 characters. These files cannot be moved " +
                               "to Recycle Bin and will be permanently deleted.\n\n"
                             : "";
+                        warning += MainMenu.ProtectedWarning(AutoSelector.CountMarkedProtected(m_core));
                         var confirm = MessageBox.Show(
                             warning + $"Permanently delete {count} selected image(s)?",
                             "Delete Selected", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
@@ -194,12 +199,14 @@ namespace AntiDupl.NET.WinForms
 
                         System.Threading.Thread batchThread = new System.Threading.Thread(() =>
                         {
-                            AutoSelector.BatchResult result = AutoSelector.ExecuteBatch(m_core, true);
+                            AutoSelector.BatchResult result = AutoSelector.ExecuteBatch(m_core, true, null, m_options.markProcessedAfterBatch);
                             m_mainSplitContainer.BeginInvoke(new Action(() =>
                             {
                                 string msg = $"Deleted {result.Succeeded} images.";
                                 if (result.Failed > 0)
                                     msg += $"\n{result.Failed} files could not be deleted.";
+                                if (result.SkippedProtected > 0)
+                                    msg += "\n" + string.Format(Resources.Strings.Current.MainMenu_BatchProtectedWarning_Text, result.SkippedProtected);
                                 MessageBox.Show(msg, "Delete Selected",
                                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                                 m_mainSplitContainer.UpdateResults();
@@ -208,6 +215,16 @@ namespace AntiDupl.NET.WinForms
                         batchThread.Start();
                     });
                     Items.Add("Move Selected to Folder...", null, OnMoveSelectedToFolder);
+
+                    // «Разобрано» (T5, этап 6): отметки выделенных пар.
+                    Items.Add(new ToolStripSeparator());
+                    Items.Add(Resources.Strings.Current.MainMenu_Edit_MarkProcessedMenuItem_Text, null, (s, e) => MarkProcessed(true));
+                    Items.Add(Resources.Strings.Current.MainMenu_Edit_UnmarkProcessedMenuItem_Text, null, (s, e) => MarkProcessed(false));
+                    Items.Add(Resources.Strings.Current.MainMenu_Edit_ClearProcessedMenuItem_Text, null, (s, e) =>
+                    {
+                        ProcessedPairs.ClearAll();
+                        m_mainSplitContainer.UpdateResults();
+                    });
                 }
             }
         }
@@ -239,14 +256,43 @@ namespace AntiDupl.NET.WinForms
 
         private void DoAutoSelect(AutoSelectCriteria criteria)
         {
+            AutoSelector.SyncProtectedPaths(m_coreOptions);
             int affected = AutoSelector.Apply(m_core, criteria);
             MessageBox.Show($"Marked {affected} images for action.", "Auto-Select",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             m_mainSplitContainer.UpdateResults();
         }
 
+        /// <summary>
+        /// «Отменить разметку» (T4'): состояние разметки до последнего авто-выбора.
+        /// </summary>
+        private void UndoMarking(object sender, EventArgs e)
+        {
+            if (AutoSelector.UndoMarking() == 0)
+            {
+                MessageBox.Show(Resources.Strings.Current.MainMenu_Edit_UndoMarkingEmpty_Text, "Undo Marking",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            m_mainSplitContainer.UpdateResults();
+        }
+
+        /// <summary>
+        /// «Разобрано» (T5, этап 6): отметить/снять отметку у выделенных пар.
+        /// </summary>
+        private void MarkProcessed(bool mark)
+        {
+            var keys = m_mainSplitContainer.resultsListView.GetSelectedKeys();
+            if (mark)
+                ProcessedPairs.Mark(keys);
+            else
+                ProcessedPairs.Unmark(keys);
+            m_mainSplitContainer.UpdateResults();
+        }
+
         private void OnMoveSelectedToFolder(object sender, EventArgs e)
         {
+            AutoSelector.SyncProtectedPaths(m_coreOptions);
             using (var dialog = new FolderBrowserDialog())
             {
                 dialog.Description = "Select folder to move marked images";
@@ -259,10 +305,12 @@ namespace AntiDupl.NET.WinForms
                             "Invalid Destination", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
-                    var result = AutoSelector.ExecuteBatch(m_core, false, dialog.SelectedPath);
+                    var result = AutoSelector.ExecuteBatch(m_core, false, dialog.SelectedPath, m_options.markProcessedAfterBatch);
                     string msg = $"Moved {result.Succeeded} images to:\n{dialog.SelectedPath}";
                     if (result.Failed > 0)
                         msg += $"\n{result.Failed} files could not be moved.";
+                    if (result.SkippedProtected > 0)
+                        msg += "\n" + string.Format(Resources.Strings.Current.MainMenu_BatchProtectedWarning_Text, result.SkippedProtected);
                     MessageBox.Show(msg, "Move",
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
                     m_mainSplitContainer.UpdateResults();

@@ -196,6 +196,14 @@ namespace AntiDupl.NET.WinForms
             m_imageTypeLabel.Text = (info.type == CoreDll.ImageType.None ? "   " : info.GetImageTypeString());
             m_fileNameLabel.Text = Path.GetFileNameWithoutExtension(info.path);
 
+            UpdateSelection();
+        }
+
+        /// <summary>
+        /// Перечитать отметку файла из ядра (используется «Оставить одну» в группе).
+        /// </summary>
+        public void UpdateSelection()
+        {
             bool[] selected = m_core.GetSelection(m_group.id, (uint)m_index, 1);
             m_checkBox.Checked = selected[0];
         }

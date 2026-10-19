@@ -37,8 +37,10 @@ namespace AntiDupl.NET.WinForms
     {
         static public int THRESHOLD_DIFFERENCE_MAX_SQUARED_SUM = 15;
         static public int THRESHOLD_DIFFERENCE_MAX_SSIM = 50;
+        static public int THRESHOLD_DIFFERENCE_MAX_PERCEPTUAL_HASH = 50;
         static public int THRESHOLD_DIFFERENCE_DEFAULT_SQUARED_SUM = 5;
         static public int THRESHOLD_DIFFERENCE_DEFAULT_SSIM = 20;
+        static public int THRESHOLD_DIFFERENCE_DEFAULT_PERCEPTUAL_HASH = 33; // ~84 бита из 256
         static public int THRESHOLD_BLOCKINESS_MAX = 60;
         static public int THRESHOLD_BLURRING_MAX = 32;
         static public int IGNORE_FRAME_WIDTH_MAX = 12;
@@ -235,6 +237,7 @@ namespace AntiDupl.NET.WinForms
             m_algorithmComparingLabeledComboBox = new LabeledComboBox(COMBO_BOX_WIDTH + 115, COMBO_BOX_HEIGHT, OnOptionChanged);
             m_algorithmComparingLabeledComboBox.comboBox.Items.Add(new LabeledComboBox.Value(0, Resources.Strings.Current.CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum));
             m_algorithmComparingLabeledComboBox.comboBox.Items.Add(new LabeledComboBox.Value(1, "SSIM"));
+            m_algorithmComparingLabeledComboBox.comboBox.Items.Add(new LabeledComboBox.Value(2, Resources.Strings.Current.CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash));
             checkTableLayoutPanel.Controls.Add(m_algorithmComparingLabeledComboBox, 0, 5);
 
             m_thresholdDifferenceLabeledComboBox = new LabeledComboBox(COMBO_BOX_WIDTH, COMBO_BOX_HEIGHT, OnOptionChanged);
@@ -858,6 +861,14 @@ namespace AntiDupl.NET.WinForms
                 for (int i = 0; i <= THRESHOLD_DIFFERENCE_MAX_SSIM; i++)
                     m_thresholdDifferenceLabeledComboBox.comboBox.Items.Add(new LabeledComboBox.Value(i, string.Format("{0} %", i)));
                 m_thresholdDifferenceLabeledComboBox.SelectedValue = THRESHOLD_DIFFERENCE_DEFAULT_SSIM;
+            }
+            if (m_algorithmComparingLabeledComboBox.SelectedValue == (int)AlgorithmComparing.PerceptualHash &&
+                m_thresholdDifferenceLabeledComboBox.comboBox.Items.Count < THRESHOLD_DIFFERENCE_MAX_PERCEPTUAL_HASH + 1)
+            {
+                m_thresholdDifferenceLabeledComboBox.comboBox.Items.Clear();
+                for (int i = 0; i <= THRESHOLD_DIFFERENCE_MAX_PERCEPTUAL_HASH; i++)
+                    m_thresholdDifferenceLabeledComboBox.comboBox.Items.Add(new LabeledComboBox.Value(i, string.Format("{0} %", i)));
+                m_thresholdDifferenceLabeledComboBox.SelectedValue = THRESHOLD_DIFFERENCE_DEFAULT_PERCEPTUAL_HASH;
             }
         }
 

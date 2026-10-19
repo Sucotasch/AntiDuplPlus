@@ -22,11 +22,97 @@ namespace AntiDupl.NET.WinForms
 
         public static IReadOnlyDictionary<string, string> SideCache => s_sideCache;
 
+        /// <summary>
+        /// Защищённые пути («Не удалять», этап 5 плана дубль-поиска). Заполняется UI из
+        /// CoreOptions.protectedPath; нативный движок об этой категории не знает.
+        /// </summary>
+        public static CorePathWithSubFolder[] ProtectedPaths;
+
+        /// <summary>
+        /// Снимок разметки перед последним Apply — для пункта «Отменить разметку» (T4').
+        /// </summary>
+        private static Dictionary<string, string> s_lastSnapshot;
+
         public class BatchResult
         {
             public int Succeeded { get; set; }
             public int Failed { get; set; }
+            public int SkippedProtected { get; set; }
             public List<string> FailedPaths { get; set; } = new List<string>();
+        }
+
+        /// <summary>
+        /// Передать в AutoSelector актуальный список защищённых путей (managed-категория
+        /// «Не удалять» из CoreOptions) перед разметкой и пакетными операциями.
+        /// </summary>
+        public static void SyncProtectedPaths(CoreOptions options)
+        {
+            ProtectedPaths = options != null ? options.protectedPath : null;
+        }
+
+        /// <summary>
+        /// Файл лежит под защищённым путём: совпадение по полному пути, а для записей
+        /// с включённой вложенностью — по префиксу с границей разделителя (как в GetPool).
+        /// </summary>
+        public static bool IsProtected(string path)
+        {
+            CorePathWithSubFolder[] paths = ProtectedPaths;
+            if (paths == null || string.IsNullOrEmpty(path)) return false;
+
+            for (int i = 0; i < paths.Length; i++)
+            {
+                if (paths[i] == null || string.IsNullOrEmpty(paths[i].path)) continue;
+                if (string.Equals(path, paths[i].path, StringComparison.OrdinalIgnoreCase)) return true;
+                if (!paths[i].enableSubFolder) continue;
+
+                string dir = paths[i].path;
+                if (path.Length > dir.Length &&
+                    path.StartsWith(dir, StringComparison.OrdinalIgnoreCase) &&
+                    (path[dir.Length] == System.IO.Path.DirectorySeparatorChar ||
+                     path[dir.Length] == System.IO.Path.AltDirectorySeparatorChar))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Активный фильтр результатов (этап 6; null или неактивный — фильтра нет).
+        /// Скрытые фильтром пары не размечаются, не инвертируются и не обрабатываются batch.
+        /// </summary>
+        public static ResultFilter Filter;
+
+        /// <summary>Передать в AutoSelector текущий фильтр результатов (этап 6).</summary>
+        public static void SyncFilter(Options options)
+        {
+            Filter = options != null ? options.resultFilter : null;
+        }
+
+        /// <summary>Есть ли пометка у пары с таким ключом (для фильтра и счётчиков).</summary>
+        public static bool IsMarkedKey(string key)
+        {
+            return !string.IsNullOrEmpty(key) && s_sideCache.ContainsKey(key);
+        }
+
+        /// <summary>Видима ли пара при текущем фильтре (для разметки и batch).</summary>
+        public static bool IsVisibleKey(string key)
+        {
+            return Filter == null || !Filter.IsActive || Filter.MatchesKey(key);
+        }
+
+        private static bool IsVisible(CoreResult r)
+        {
+            return Filter == null || !Filter.IsActive || Filter.Matches(r);
+        }
+
+        /// <summary>Только видимые результаты — инвариант «оставить файл» считается по ним.</summary>
+        private static CoreResult[] VisibleResults(CoreResult[] results)
+        {
+            if (Filter == null || !Filter.IsActive) return results;
+            var visible = new List<CoreResult>(results.Length);
+            for (int i = 0; i < results.Length; i++)
+                if (results[i] != null && IsVisible(results[i]))
+                    visible.Add(results[i]);
+            return visible.ToArray();
         }
 
         /// <summary>
@@ -106,13 +192,27 @@ namespace AntiDupl.NET.WinForms
             if (results == null || results.Length == 0) return 0;
 
             var poolMap = Forms.DatabaseManagerForm.GetPoolAssignments();
-            s_sideCache.Clear();
+            // T4': снимок состояния до разметки — для «Отменить разметку».
+            s_lastSnapshot = new Dictionary<string, string>(s_sideCache, StringComparer.OrdinalIgnoreCase);
+            // Этап 6: при активном фильтре снимаются пометки только у видимых пар, скрытые
+            // фильтром сохраняют свои пометки (и batch их не тронет).
+            if (Filter == null || !Filter.IsActive)
+            {
+                s_sideCache.Clear();
+            }
+            else
+            {
+                foreach (var key in s_sideCache.Keys)
+                    if (Filter.MatchesKey(key))
+                        s_sideCache.TryRemove(key, out _);
+            }
             int affected = 0;
 
             for (int i = 0; i < results.Length; i++)
             {
                 var r = results[i];
                 if (r.type != CoreDll.ResultType.DuplImagePair) continue;
+                if (!IsVisible(r)) continue;
 
                 AutoSelectSide side = DetermineSide(r, criteria, poolMap);
 
@@ -124,7 +224,113 @@ namespace AntiDupl.NET.WinForms
                 }
             }
 
+            // T2/T3: инвариант «в каждой группе остаётся файл» — поверх попарной разметки.
+            // Этап 6: считается по видимым парам (скрытые фильтром не размечаются).
+            EnforceKeepOne(VisibleResults(results), criteria, poolMap, s_sideCache);
+
             return affected;
+        }
+
+        /// <summary>
+        /// «Отменить разметку» (T4'): восстанавливает снимок, сделанный перед последним Apply.
+        /// Возвращает число восстановленных пометок (0, если снимка нет).
+        /// </summary>
+        public static int UndoMarking()
+        {
+            Dictionary<string, string> snapshot = s_lastSnapshot;
+            if (snapshot == null) return 0;
+            s_lastSnapshot = null;
+
+            var restored = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
+            foreach (var kv in snapshot)
+                restored[kv.Key] = kv.Value;
+            s_sideCache = restored;
+            return restored.Count;
+        }
+
+        /// <summary>
+        /// «Оставить одну» (T1'): в группе помечаются к удалению все файлы, кроме keepPath.
+        /// Нативный SelectionType.SelectAllButThis сам файлы не удаляет (batch читает пометки
+        /// результатов, а не флаги группы), поэтому разметка строится обходом графа группы от
+        /// оставляемого файла: каждому незакрытому файлу достаётся своя родительская пара —
+        /// у каждой пары ровно одна цель, и все файлы группы, кроме оставляемого, покрыты.
+        /// Возвращает число помеченных пар.
+        /// </summary>
+        public static int KeepOnlyOne(CoreLib core, CoreImageInfo[] groupImages, string keepPath)
+        {
+            if (core == null || groupImages == null || string.IsNullOrEmpty(keepPath)) return 0;
+
+            var groupPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < groupImages.Length; i++)
+                if (groupImages[i] != null && !string.IsNullOrEmpty(groupImages[i].path))
+                    groupPaths.Add(groupImages[i].path);
+            if (!groupPaths.Contains(keepPath)) return 0;
+
+            var results = core.GetResult(0, 1000000);
+            if (results == null || results.Length == 0) return 0;
+
+            // Смежность по парам, обе стороны которых лежат в группе.
+            var adjacent = new Dictionary<string, List<KeyValuePair<string, string>>>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < results.Length; i++)
+            {
+                var r = results[i];
+                if (r == null || r.type != CoreDll.ResultType.DuplImagePair) continue;
+                if (r.first == null || r.second == null) continue;
+                if (!groupPaths.Contains(r.first.path) || !groupPaths.Contains(r.second.path)) continue;
+
+                string key = GetKey(r);
+                // Этап 6: скрытые фильтром пары не входят в граф группы — иначе T1' поставил бы
+                // пометку, которую batch не станет выполнять.
+                if (!IsVisibleKey(key)) continue;
+                List<KeyValuePair<string, string>> list;
+                if (!adjacent.TryGetValue(r.first.path, out list)) { list = new List<KeyValuePair<string, string>>(); adjacent[r.first.path] = list; }
+                list.Add(new KeyValuePair<string, string>(key, r.second.path));
+                if (!adjacent.TryGetValue(r.second.path, out list)) { list = new List<KeyValuePair<string, string>>(); adjacent[r.second.path] = list; }
+                list.Add(new KeyValuePair<string, string>(key, r.first.path));
+            }
+
+            // Старые пометки пар группы снимаются: BFS проставит их заново там, где нужно.
+            foreach (var kv in adjacent)
+                foreach (var edge in kv.Value)
+                    s_sideCache.TryRemove(edge.Key, out _);
+
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { keepPath };
+            var queue = new Queue<string>();
+            queue.Enqueue(keepPath);
+            int marked = 0;
+
+            while (queue.Count > 0)
+            {
+                string current = queue.Dequeue();
+                List<KeyValuePair<string, string>> list;
+                if (!adjacent.TryGetValue(current, out list)) continue;
+
+                for (int i = 0; i < list.Count; i++)
+                {
+                    string other = list[i].Value;
+                    if (!visited.Add(other)) continue;
+                    s_sideCache[list[i].Key] = other;
+                    queue.Enqueue(other);
+                    marked++;
+                }
+            }
+
+            return marked;
+        }
+
+        /// <summary>
+        /// Число помеченных файлов, лежащих в защищённых путях (для сообщения до batch).
+        /// </summary>
+        public static int CountMarkedProtected(CoreLib core)
+        {
+            int count = 0;
+            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in s_sideCache)
+            {
+                if (!IsVisibleKey(kv.Key)) continue;
+                if (kv.Value != null && processed.Add(kv.Value) && IsProtected(kv.Value)) count++;
+            }
+            return count;
         }
 
         /// <summary>
@@ -160,6 +366,8 @@ namespace AntiDupl.NET.WinForms
             foreach (var kv in s_sideCache)
             {
                 string key = kv.Key;
+                // Этап 6: скрытые фильтром пометки переносятся как есть — инверсия их не трогает.
+                if (!IsVisibleKey(key)) { newCache[key] = kv.Value; continue; }
                 int sep = key.IndexOf('|');
                 if (sep < 0 || sep == key.Length - 1) continue; // malformed key — drop
                 string p1 = key.Substring(0, sep);
@@ -200,9 +408,10 @@ namespace AntiDupl.NET.WinForms
         {
             int count = 0;
             var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var v in s_sideCache.Values)
+            foreach (var kv in s_sideCache)
             {
-                if (v != null && processed.Add(v)) count++;
+                if (!IsVisibleKey(kv.Key)) continue;
+                if (kv.Value != null && processed.Add(kv.Value)) count++;
             }
             return count;
         }
@@ -214,9 +423,10 @@ namespace AntiDupl.NET.WinForms
         public static bool HasLongPaths(CoreLib core)
         {
             const int MAX_PATH = 260;
-            foreach (var v in s_sideCache.Values)
+            foreach (var kv in s_sideCache)
             {
-                if (v != null && v.Length > MAX_PATH) return true;
+                if (!IsVisibleKey(kv.Key)) continue;
+                if (kv.Value != null && kv.Value.Length > MAX_PATH) return true;
             }
             return false;
         }
@@ -225,86 +435,65 @@ namespace AntiDupl.NET.WinForms
         /// For delete: removes the targeted image.
         /// For move: moves the targeted image to the specified folder.
         /// </summary>
-        public static BatchResult ExecuteBatch(CoreLib core, bool delete, string targetFolder = null)
+        public static BatchResult ExecuteBatch(CoreLib core, bool delete, string targetFolder = null, bool markProcessed = false)
         {
             var results = core.GetResult(0, 1000000);
             if (results == null || results.Length == 0)
                 return new BatchResult();
 
-            int succeeded = 0, failed = 0;
-            var failedPaths = new List<string>();
-            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var succeededKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            for (int i = results.Length - 1; i >= 0; i--)
+            int skippedProtected = 0;
+            var targetByKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var protectedSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < results.Length; i++)
             {
                 var r = results[i];
-                string key = GetKey(r);
-                string targetPath;
-                if (!s_sideCache.TryGetValue(key, out targetPath)) continue;
                 if (r.type != CoreDll.ResultType.DuplImagePair) continue;
-                if (!processed.Add(targetPath)) continue;
-
-                core.SetCurrent(i);
-                bool ok = false;
-
-                if (delete)
-                {
-                    if (string.Equals(targetPath, r.first?.path, StringComparison.OrdinalIgnoreCase))
-                        ok = core.ApplyToResult(CoreDll.LocalActionType.DeleteFirst, CoreDll.TargetType.Current);
-                    else
-                        ok = core.ApplyToResult(CoreDll.LocalActionType.DeleteSecond, CoreDll.TargetType.Current);
-                    if (!ok)
-                    {
-                        failedPaths.Add(targetPath);
-                        // If the file simply no longer exists, mark the result as removed
-                        // so the stale row does not persist in the list.
-                        if (!System.IO.File.Exists(targetPath))
-                        {
-                            if (string.Equals(targetPath, r.first?.path, StringComparison.OrdinalIgnoreCase))
-                                core.ApplyToResult(CoreDll.LocalActionType.MarkRemovedFirst, CoreDll.TargetType.Current);
-                            else
-                                core.ApplyToResult(CoreDll.LocalActionType.MarkRemovedSecond, CoreDll.TargetType.Current);
-                        }
-                    }
-                }
-                else if (!string.IsNullOrEmpty(targetFolder))
-                {
-                    string sourcePath = targetPath;
-                    if (!string.IsNullOrEmpty(sourcePath) && System.IO.File.Exists(sourcePath))
-                    {
-                        try
-                        {
-                            string destPath = System.IO.Path.Combine(targetFolder, System.IO.Path.GetFileName(sourcePath));
-                            if (System.IO.File.Exists(destPath))
-                            {
-                                string name = System.IO.Path.GetFileNameWithoutExtension(sourcePath);
-                                string ext = System.IO.Path.GetExtension(sourcePath);
-                                int counter = 1;
-                                while (System.IO.File.Exists(destPath))
-                                {
-                                    destPath = System.IO.Path.Combine(targetFolder, $"{name}_{counter}{ext}");
-                                    counter++;
-                                }
-                            }
-                            System.IO.File.Move(sourcePath, destPath);
-                            if (string.Equals(targetPath, r.first?.path, StringComparison.OrdinalIgnoreCase))
-                                ok = core.ApplyToResult(CoreDll.LocalActionType.MarkRemovedFirst, CoreDll.TargetType.Current);
-                            else
-                                ok = core.ApplyToResult(CoreDll.LocalActionType.MarkRemovedSecond, CoreDll.TargetType.Current);
-                        }
-                        catch (IOException) { failedPaths.Add(sourcePath); }
-                        catch (UnauthorizedAccessException) { failedPaths.Add(sourcePath); }
-                    }
-                }
-
-                if (ok) { succeeded++; succeededKeys.Add(key); } else { failed++; }
+                string key = GetKey(r);
+                // Этап 6: скрытые фильтром пары не обрабатываются, их пометки сохраняются.
+                if (!IsVisibleKey(key)) continue;
+                string targetPath;
+                if (!s_sideCache.TryGetValue(key, out targetPath) || string.IsNullOrEmpty(targetPath)) continue;
+                // Ручные действия защитой не блокируются, пакетные — блокируются (этап 5).
+                if (IsProtected(targetPath)) { if (protectedSeen.Add(targetPath)) skippedProtected++; continue; }
+                targetByKey[key] = targetPath;
+                targets.Add(targetPath);
             }
+
+            if (delete)
+            {
+                ApplyBySelection(core, targets, true, CoreDll.LocalActionType.DeleteFirst);
+                ApplyBySelection(core, targets, false, CoreDll.LocalActionType.DeleteSecond);
+            }
+            else if (!string.IsNullOrEmpty(targetFolder))
+            {
+                MoveTargets(targets, targetFolder);
+                ApplyBySelection(core, targets, true, CoreDll.LocalActionType.MarkRemovedFirst);
+                ApplyBySelection(core, targets, false, CoreDll.LocalActionType.MarkRemovedSecond);
+            }
+
+            // Учёт по файловой системе: файла нет — операция удалась; иначе — неудача (S13:
+            // пометки неудачных пар остаются для повторной попытки).
+            int succeeded = 0, failed = 0;
+            var failedPaths = new List<string>();
+            foreach (string targetPath in targets)
+            {
+                if (!System.IO.File.Exists(targetPath)) succeeded++;
+                else { failed++; failedPaths.Add(targetPath); }
+            }
+            var succeededKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in targetByKey)
+                if (!System.IO.File.Exists(kv.Value))
+                    succeededKeys.Add(kv.Key);
 
             // Remove only the keys that were successfully acted upon, so that a partial
             // failure keeps the marking for the remaining rows (S13).
             foreach (var key in succeededKeys)
                 s_sideCache.TryRemove(key, out _);
+
+            // Этап 6: авто-отметка «разобрано» после успешных операций (опция, по умолчанию выкл.).
+            if (markProcessed && succeededKeys.Count > 0)
+                ProcessedPairs.Mark(succeededKeys);
 
             if (succeeded > 0)
             {
@@ -312,7 +501,64 @@ namespace AntiDupl.NET.WinForms
                 core.CheckImageData();
             }
 
-            return new BatchResult { Succeeded = succeeded, Failed = failed, FailedPaths = failedPaths };
+            return new BatchResult { Succeeded = succeeded, Failed = failed, FailedPaths = failedPaths, SkippedProtected = skippedProtected };
+        }
+
+        /// <summary>
+        /// Применить действие к результатам, у которых нужная сторона — из targets, через выборку ядра
+        /// (TargetType.Selected): движок сам перебирает результаты, поэтому сдвиг индексов после
+        /// удаления/пометки (RemoveDeleted, adUndoRedoEngine.cpp:110) безопасен. Вызовы по индексу
+        /// (SetCurrent + TargetType.Current) после первой же операции бьют по чужой паре — G6.2.
+        /// </summary>
+        private static void ApplyBySelection(CoreLib core, HashSet<string> targets, bool firstSide, CoreDll.LocalActionType action)
+        {
+            if (targets.Count == 0) return;
+            CoreResult[] live = core.GetResult(0, core.GetResultSize());
+            if (live == null || live.Length == 0) return;
+
+            core.SetSelection(0, (uint)live.Length, false);
+            int selected = 0;
+            for (int i = 0; i < live.Length; i++)
+            {
+                if (live[i].type != CoreDll.ResultType.DuplImagePair) continue;
+                string path = firstSide ? live[i].first?.path : live[i].second?.path;
+                if (path == null || !targets.Contains(path)) continue;
+                core.SetSelection((uint)i, 1, true);
+                selected++;
+            }
+            if (selected == 0) return;
+            core.ApplyToResult(action, CoreDll.TargetType.Selected);
+        }
+
+        /// <summary>Перемещает целевые файлы в папку (имена не перетираются) — по путям, без индексов ядра.</summary>
+        private static void MoveTargets(HashSet<string> targets, string targetFolder)
+        {
+            foreach (string sourcePath in targets)
+            {
+                if (!System.IO.File.Exists(sourcePath)) continue; // файла уже нет — не ошибка
+                try
+                {
+                    System.IO.File.Move(sourcePath, UniqueDestinationPath(targetFolder, sourcePath));
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        private static string UniqueDestinationPath(string folder, string sourcePath)
+        {
+            string destPath = System.IO.Path.Combine(folder, System.IO.Path.GetFileName(sourcePath));
+            if (!System.IO.File.Exists(destPath)) return destPath;
+
+            string name = System.IO.Path.GetFileNameWithoutExtension(sourcePath);
+            string ext = System.IO.Path.GetExtension(sourcePath);
+            int counter = 1;
+            while (System.IO.File.Exists(destPath))
+            {
+                destPath = System.IO.Path.Combine(folder, $"{name}_{counter}{ext}");
+                counter++;
+            }
+            return destPath;
         }
 
         /// <summary>
@@ -327,6 +573,183 @@ namespace AntiDupl.NET.WinForms
         ///     nothing is selected (DontCare).
         /// </summary>
         public static AutoSelectSide DetermineSide(CoreResult r, AutoSelectCriteria criteria, Dictionary<string, int> poolMap)
+        {
+            AutoSelectSide side = DetermineSideRaw(r, criteria, poolMap);
+            if (side == AutoSelectSide.DontCare) return side;
+
+            // Защищённый файл никогда не выбирается целевым; если защищены обе стороны —
+            // пара не помечается.
+            if (!IsProtected(PathOf(r, side))) return side;
+            AutoSelectSide other = Opposite(side);
+            return IsProtected(PathOf(r, other)) ? AutoSelectSide.DontCare : other;
+        }
+
+        private static string PathOf(CoreResult r, AutoSelectSide side)
+        {
+            return (side == AutoSelectSide.First) ? r.first?.path : r.second?.path;
+        }
+
+        /// <summary>
+        /// Инвариант «в каждой группе остаётся хотя бы один файл» (T2/T3, план 8.1.1).
+        /// Строит компоненты графа дублей по парам результатов; если в компоненте помечены все
+        /// файлы — снимает пометку с «лучшего» по тому же каскаду критериев, что и DetermineSide
+        /// (полное равенство решается тай-брейком по пути). Возвращает число снятых пометок.
+        /// </summary>
+        public static int EnforceKeepOne(CoreResult[] results, AutoSelectCriteria criteria,
+            Dictionary<string, int> poolMap, IDictionary<string, string> sideCache)
+        {
+            if (results == null || results.Length == 0 || sideCache == null || sideCache.Count == 0)
+                return 0;
+
+            var nodeIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var parent = new List<int>();
+            var images = new List<CoreImageInfo>();
+
+            int GetNode(CoreImageInfo image)
+            {
+                if (image == null || string.IsNullOrEmpty(image.path)) return -1;
+                int id;
+                if (nodeIndex.TryGetValue(image.path, out id)) return id;
+                id = parent.Count;
+                nodeIndex[image.path] = id;
+                parent.Add(id);
+                images.Add(image);
+                return id;
+            }
+
+            int Find(int x)
+            {
+                while (parent[x] != x)
+                {
+                    parent[x] = parent[parent[x]];
+                    x = parent[x];
+                }
+                return x;
+            }
+
+            for (int i = 0; i < results.Length; i++)
+            {
+                CoreResult r = results[i];
+                if (r == null || r.type != CoreDll.ResultType.DuplImagePair) continue;
+                int a = GetNode(r.first);
+                int b = GetNode(r.second);
+                if (a < 0 || b < 0) continue;
+                a = Find(a);
+                b = Find(b);
+                if (a != b) parent[b] = a;
+            }
+            if (parent.Count == 0) return 0;
+
+            // path → ключи кэша, в которых этот путь является целью.
+            var markedKeys = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in sideCache)
+            {
+                if (kv.Value == null) continue;
+                List<string> keys;
+                if (!markedKeys.TryGetValue(kv.Value, out keys))
+                {
+                    keys = new List<string>();
+                    markedKeys[kv.Value] = keys;
+                }
+                keys.Add(kv.Key);
+            }
+            if (markedKeys.Count == 0) return 0;
+
+            var components = new Dictionary<int, List<int>>();
+            for (int i = 0; i < parent.Count; i++)
+            {
+                int root = Find(i);
+                List<int> members;
+                if (!components.TryGetValue(root, out members))
+                {
+                    members = new List<int>();
+                    components[root] = members;
+                }
+                members.Add(i);
+            }
+
+            int unmarked = 0;
+            foreach (var members in components.Values)
+            {
+                if (members.Count < 2) continue;
+
+                bool allMarked = true;
+                for (int i = 0; i < members.Count; i++)
+                {
+                    if (!markedKeys.ContainsKey(images[members[i]].path))
+                    {
+                        allMarked = false;
+                        break;
+                    }
+                }
+                if (!allMarked) continue;
+
+                CoreImageInfo keep = images[members[0]];
+                for (int i = 1; i < members.Count; i++)
+                {
+                    if (BetterForKeep(images[members[i]], keep, criteria, poolMap))
+                        keep = images[members[i]];
+                }
+
+                List<string> keys;
+                if (!markedKeys.TryGetValue(keep.path, out keys)) continue;
+                for (int i = 0; i < keys.Count; i++)
+                {
+                    string target;
+                    if (sideCache.TryGetValue(keys[i], out target) &&
+                        string.Equals(target, keep.path, StringComparison.OrdinalIgnoreCase))
+                        sideCache.Remove(keys[i]);
+                }
+                markedKeys.Remove(keep.path);
+                unmarked++;
+            }
+
+            return unmarked;
+        }
+
+        /// <summary>
+        /// Какой из двух файлов лучше оставить: зеркало каскада DetermineSide (критерий,
+        /// помечающий файл к удалению, для «оставить» означает обратную сторону).
+        /// </summary>
+        private static bool BetterForKeep(CoreImageInfo a, CoreImageInfo b, AutoSelectCriteria criteria,
+            Dictionary<string, int> poolMap)
+        {
+            int cmp = 0;
+
+            if (criteria.ResolutionSide != AutoSelectSide.DontCare)
+            {
+                cmp = Math.Sign((long)a.width * a.height - (long)b.width * b.height);
+                if (criteria.ResolutionSide != AutoSelectSide.First) cmp = -cmp;
+            }
+            if (cmp == 0 && criteria.SizeSide != AutoSelectSide.DontCare)
+            {
+                cmp = a.size.CompareTo(b.size);
+                if (criteria.SizeSide != AutoSelectSide.First) cmp = -cmp;
+            }
+            if (cmp == 0 && criteria.QualitySide != AutoSelectSide.DontCare &&
+                a.blockiness >= 0 && a.blurring >= 0 && b.blockiness >= 0 && b.blurring >= 0)
+            {
+                cmp = (a.blockiness + a.blurring).CompareTo(b.blockiness + b.blurring);
+                if (criteria.QualitySide == AutoSelectSide.First) cmp = -cmp;
+            }
+            if (cmp == 0 && criteria.TimeSide != AutoSelectSide.DontCare)
+            {
+                cmp = a.time.CompareTo(b.time);
+                if (criteria.TimeSide == AutoSelectSide.Second) cmp = -cmp;
+            }
+            if (cmp == 0 && criteria.PoolSide != AutoSelectSide.DontCare && poolMap != null)
+            {
+                int want = criteria.PoolSide == AutoSelectSide.First ? 1 : 2;
+                bool aInPool = GetPool(a, poolMap) == want;
+                bool bInPool = GetPool(b, poolMap) == want;
+                if (aInPool != bInPool) cmp = aInPool ? -1 : 1;
+            }
+
+            if (cmp != 0) return cmp > 0;
+            return string.Compare(a.path, b.path, StringComparison.OrdinalIgnoreCase) < 0;
+        }
+
+        private static AutoSelectSide DetermineSideRaw(CoreResult r, AutoSelectCriteria criteria, Dictionary<string, int> poolMap)
         {
             bool hasQualityCriterion =
                 criteria.ResolutionSide != AutoSelectSide.DontCare ||

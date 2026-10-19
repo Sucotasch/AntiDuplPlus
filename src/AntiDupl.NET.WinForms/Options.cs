@@ -73,6 +73,19 @@ namespace AntiDupl.NET.WinForms
         public ResultsOptions resultsOptions = new ResultsOptions();
         public HotKeyOptions hotKeyOptions= new HotKeyOptions();
 
+        /// <summary>
+        /// Автоматически отмечать пары «разобрано» после успешных файловых операций
+        /// (этап 6; по умолчанию выключено).
+        /// </summary>
+        public bool markProcessedAfterBatch = false;
+
+        /// <summary>
+        /// Фильтр результатов (этап 6). Сессионный: в options.xml не пишется, иначе после
+        /// перезапуска список внезапно оказался бы отфильтрованным.
+        /// </summary>
+        [XmlIgnore]
+        public ResultFilter resultFilter = new ResultFilter();
+
         public string coreOptionsFileName = GetDefaultCoreOptionsFileName();
 
         public string GetResultsFileName()

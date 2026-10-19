@@ -56,8 +56,20 @@ namespace AntiDupl.NET.WinForms
         private ToolStripButton m_undoButton;
         private ToolStripButton m_redoButton;
         private ToolStripDropDownButton m_autoSelectButton;
+        private ToolStripMenuItem m_presetsMenuItem;
+        private ToolStripMenuItem m_presetExactCopiesMenuItem;
+        private ToolStripMenuItem m_presetRecompressionMenuItem;
+        private ToolStripMenuItem m_presetTransformationsMenuItem;
+        private ToolStripMenuItem m_presetSimilarStrictMenuItem;
+        private ToolStripMenuItem m_presetSimilarWiderMenuItem;
         private ToolStripButton m_deleteSelectedButton;
         private ToolStripButton m_moveSelectedButton;
+
+        private ToolStripButton m_filterHideProcessedButton;
+        private ToolStripButton m_filterOnlyUnmarkedButton;
+        private ToolStripTextBox m_filterTextBox;
+        private ToolStripButton m_filterResetButton;
+        private bool m_filterUpdating;
 
         private ToolStripButton m_mistakeButton;
         private ToolStripButton m_performHintButton;
@@ -119,6 +131,7 @@ namespace AntiDupl.NET.WinForms
             m_algorithmComparingComboBox.SelectedIndexChanged += new EventHandler(OnAlgorithmComparingChanged);
             m_algorithmComparingComboBox.Items.Add(Resources.Strings.Current.CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum);
             m_algorithmComparingComboBox.Items.Add("SSIM");
+            m_algorithmComparingComboBox.Items.Add(Resources.Strings.Current.CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash);
 
             m_undoButton = InitFactory.ToolButton.Create("UndoButton", null, m_mainMenu.UndoAction);
             m_redoButton = InitFactory.ToolButton.Create("RedoButton", null, m_mainMenu.RedoAction);
@@ -152,6 +165,42 @@ namespace AntiDupl.NET.WinForms
                     m_mainMenu.DoAutoSelect(dlg.ResultCriteria);
                 }
             });
+
+            // Пресеты поиска (этап 4 плана дубль-поиска): те же три опции сравнения, что у комбо выше.
+            m_presetsMenuItem = new ToolStripMenuItem("Search presets");
+            m_presetExactCopiesMenuItem = new ToolStripMenuItem("Exact copies", null, (s, e) => ApplyPreset(AlgorithmComparing.SquaredSum, 5, false));
+            m_presetRecompressionMenuItem = new ToolStripMenuItem("Compression and resize", null, (s, e) => ApplyPreset(AlgorithmComparing.SSIM, 20, false));
+            m_presetTransformationsMenuItem = new ToolStripMenuItem("Transformations", null, (s, e) => ApplyPreset(AlgorithmComparing.SquaredSum, 10, true));
+            m_presetSimilarStrictMenuItem = new ToolStripMenuItem("Similar: strict", null, (s, e) => ApplyPreset(AlgorithmComparing.PerceptualHash, 33, true));
+            m_presetSimilarWiderMenuItem = new ToolStripMenuItem("Similar: wider", null, (s, e) => ApplyPreset(AlgorithmComparing.PerceptualHash, 35, true));
+            m_presetsMenuItem.DropDownItems.Add(m_presetExactCopiesMenuItem);
+            m_presetsMenuItem.DropDownItems.Add(m_presetRecompressionMenuItem);
+            m_presetsMenuItem.DropDownItems.Add(m_presetTransformationsMenuItem);
+            m_presetsMenuItem.DropDownItems.Add(m_presetSimilarStrictMenuItem);
+            m_presetsMenuItem.DropDownItems.Add(m_presetSimilarWiderMenuItem);
+            m_autoSelectButton.DropDownItems.Add(new ToolStripSeparator());
+            m_autoSelectButton.DropDownItems.Add(m_presetsMenuItem);
+
+            // Фильтр результатов (этап 6): разобранные / неразмеченные пары + подстрока пути.
+            m_filterHideProcessedButton = new ToolStripButton();
+            m_filterHideProcessedButton.CheckOnClick = true;
+            m_filterHideProcessedButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            m_filterHideProcessedButton.CheckedChanged += new EventHandler(OnFilterChanged);
+
+            m_filterOnlyUnmarkedButton = new ToolStripButton();
+            m_filterOnlyUnmarkedButton.CheckOnClick = true;
+            m_filterOnlyUnmarkedButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            m_filterOnlyUnmarkedButton.CheckedChanged += new EventHandler(OnFilterChanged);
+
+            m_filterTextBox = new ToolStripTextBox();
+            m_filterTextBox.AutoSize = false;
+            m_filterTextBox.Size = new Size(110, 22);
+            m_filterTextBox.KeyDown += new KeyEventHandler(OnFilterTextKeyDown);
+            m_filterTextBox.Leave += new EventHandler(OnFilterChanged);
+
+            m_filterResetButton = new ToolStripButton();
+            m_filterResetButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            m_filterResetButton.Click += new EventHandler(OnFilterReset);
 
             m_deleteSelectedButton = InitFactory.ToolButton.Create(null, null, m_mainMenu.DeleteSelectedAction);
             m_deleteSelectedButton.Text = "Delete";
@@ -198,6 +247,18 @@ namespace AntiDupl.NET.WinForms
             m_optionsButton.ToolTipText = s.MainMenu_Search_OptionsMenuItem_Text;
             m_thresholdDifferenceComboBox.ToolTipText = s.CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text;
             m_algorithmComparingComboBox.ToolTipText = s.CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text;
+
+            m_presetsMenuItem.Text = s.MainToolStrip_Presets_Text;
+            m_presetExactCopiesMenuItem.Text = s.MainToolStrip_PresetExactCopies_Text;
+            m_presetRecompressionMenuItem.Text = s.MainToolStrip_PresetRecompression_Text;
+            m_presetTransformationsMenuItem.Text = s.MainToolStrip_PresetTransformations_Text;
+            m_presetSimilarStrictMenuItem.Text = s.MainToolStrip_PresetSimilarStrict_Text;
+            m_presetSimilarWiderMenuItem.Text = s.MainToolStrip_PresetSimilarWider_Text;
+
+            m_filterHideProcessedButton.Text = s.MainToolStrip_FilterHideProcessed_Text;
+            m_filterOnlyUnmarkedButton.Text = s.MainToolStrip_FilterOnlyUnmarked_Text;
+            m_filterTextBox.ToolTipText = s.MainToolStrip_FilterText_ToolTipText;
+            m_filterResetButton.Text = s.MainToolStrip_FilterReset_Text;
 
             m_undoButton.ToolTipText = s.MainMenu_Edit_UndoMenuItem_Text;
             m_redoButton.ToolTipText = s.MainMenu_Edit_RedoMenuItem_Text;
@@ -279,6 +340,13 @@ namespace AntiDupl.NET.WinForms
                 for (int i = 0; i <= CoreOptionsForm.THRESHOLD_DIFFERENCE_MAX_SSIM; i++)
                     m_thresholdDifferenceComboBox.Items.Add(new LabeledComboBox.Value(i, string.Format("{0} %", i)));
             }
+            if (m_coreOptions.compareOptions.algorithmComparing == AlgorithmComparing.PerceptualHash &&
+                 m_thresholdDifferenceComboBox.Items.Count < CoreOptionsForm.THRESHOLD_DIFFERENCE_MAX_PERCEPTUAL_HASH + 1)
+            {
+                m_thresholdDifferenceComboBox.Items.Clear();
+                for (int i = 0; i <= CoreOptionsForm.THRESHOLD_DIFFERENCE_MAX_PERCEPTUAL_HASH; i++)
+                    m_thresholdDifferenceComboBox.Items.Add(new LabeledComboBox.Value(i, string.Format("{0} %", i)));
+            }
             m_thresholdDifferenceComboBox.SelectedIndex = m_coreOptions.compareOptions.thresholdDifference;
         }
 
@@ -301,6 +369,11 @@ namespace AntiDupl.NET.WinForms
             Items.Add(m_autoSelectButton);
             Items.Add(m_deleteSelectedButton);
             Items.Add(m_moveSelectedButton);
+            Items.Add(new ToolStripSeparator());
+            Items.Add(m_filterHideProcessedButton);
+            Items.Add(m_filterOnlyUnmarkedButton);
+            Items.Add(m_filterTextBox);
+            Items.Add(m_filterResetButton);
             if (viewMode == ResultsOptions.ViewMode.VerticalPairTable || viewMode == ResultsOptions.ViewMode.HorizontalPairTable)
             {
                 Items.Add(new ToolStripSeparator());
@@ -332,9 +405,59 @@ namespace AntiDupl.NET.WinForms
             }
         }
 
+        /// <summary>
+        /// Пресет поиска (этап 4): выставляет три опции сравнения — как это делают комбо тулбара,
+        /// UI обновляется существующим OnOptionsChanged. Ничего в БД/реестр не пишется.
+        /// </summary>
+        private void ApplyPreset(AlgorithmComparing algorithm, int threshold, bool transformed)
+        {
+            m_coreOptions.compareOptions.algorithmComparing = algorithm;
+            m_coreOptions.compareOptions.thresholdDifference = threshold;
+            m_coreOptions.compareOptions.transformedImage = transformed;
+            OnOptionsChanged();
+        }
+
         private void OnThresholdDifferenceChanged(object sender, EventArgs e)
         {
             m_coreOptions.compareOptions.thresholdDifference = m_thresholdDifferenceComboBox.SelectedIndex;
+        }
+
+        /// <summary>
+        /// Фильтр результатов (этап 6): переносит состояние контролов в Options.resultFilter
+        /// и перестраивает список. Скрытые пары не участвуют в авто-выборе и batch.
+        /// </summary>
+        private void OnFilterChanged(object sender, EventArgs e)
+        {
+            if (m_filterUpdating) return;
+            ApplyFilterFromControls();
+        }
+
+        private void ApplyFilterFromControls()
+        {
+            ResultFilter filter = m_options.resultFilter;
+            filter.HideProcessed = m_filterHideProcessedButton.Checked;
+            filter.OnlyUnmarked = m_filterOnlyUnmarkedButton.Checked;
+            filter.Text = m_filterTextBox.Text ?? "";
+            m_mainSplitContainer.UpdateResults();
+        }
+
+        private void OnFilterTextKeyDown(object sender, KeyEventArgs e)
+        {
+            // Текстовый фильтр применяется по Enter или при уходе фокуса: пересборка строк
+            // на 100k+ результатов на каждое нажатие клавиши не нужна.
+            if (e.KeyCode != Keys.Enter) return;
+            e.Handled = e.SuppressKeyPress = true;
+            OnFilterChanged(sender, EventArgs.Empty);
+        }
+
+        private void OnFilterReset(object sender, EventArgs e)
+        {
+            m_filterUpdating = true;
+            m_filterHideProcessedButton.Checked = false;
+            m_filterOnlyUnmarkedButton.Checked = false;
+            m_filterTextBox.Text = "";
+            m_filterUpdating = false;
+            ApplyFilterFromControls();
         }
 
         private void OnAlgorithmComparingChanged(object sender, EventArgs e)
@@ -355,6 +478,16 @@ namespace AntiDupl.NET.WinForms
                 for (int i = 0; i <= CoreOptionsForm.THRESHOLD_DIFFERENCE_MAX_SSIM; i++)
                     m_thresholdDifferenceComboBox.Items.Add(new LabeledComboBox.Value(i, string.Format("{0} %", i)));
                 m_thresholdDifferenceComboBox.SelectedIndex = CoreOptionsForm.THRESHOLD_DIFFERENCE_DEFAULT_SSIM;
+            }
+            if (m_coreOptions.compareOptions.algorithmComparing == AlgorithmComparing.PerceptualHash)
+            {
+                if (m_thresholdDifferenceComboBox.Items.Count < CoreOptionsForm.THRESHOLD_DIFFERENCE_MAX_PERCEPTUAL_HASH + 1)
+                {
+                    m_thresholdDifferenceComboBox.Items.Clear();
+                    for (int i = 0; i <= CoreOptionsForm.THRESHOLD_DIFFERENCE_MAX_PERCEPTUAL_HASH; i++)
+                        m_thresholdDifferenceComboBox.Items.Add(new LabeledComboBox.Value(i, string.Format("{0} %", i)));
+                }
+                m_thresholdDifferenceComboBox.SelectedIndex = CoreOptionsForm.THRESHOLD_DIFFERENCE_DEFAULT_PERCEPTUAL_HASH;
             }
         }
     }

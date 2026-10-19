@@ -94,6 +94,7 @@ namespace AntiDupl.NET.WinForms
         public string CoreOptionsForm_RatioControlCheckBox_Text;
         public string CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text;
         public string CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum;
+        public string CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash;
         public string CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text;
         public string CoreOptionsForm_MinimalImageSizeLabeledIntegerEdit_Text;
         public string CoreOptionsForm_MaximalImageSizeLabeledIntegerEdit_Text;
@@ -333,5 +334,30 @@ namespace AntiDupl.NET.WinForms
         public string ImagePreviewPanel_EXIF_Tooltip_DateTime;
         public string ImagePreviewPanel_EXIF_Tooltip_Artist;
         public string ImagePreviewPanel_EXIF_Tooltip_UserComment;
+        public string DatabaseManagerForm_UpdateEmptySourceTitle;
+        public string DatabaseManagerForm_UpdateEmptySourceQuestion;
+        public string DatabaseManagerForm_UpdateBusyText;
+        public string MainToolStrip_Presets_Text;
+        public string MainToolStrip_PresetExactCopies_Text;
+        public string MainToolStrip_PresetRecompression_Text;
+        public string MainToolStrip_PresetTransformations_Text;
+        public string MainToolStrip_PresetSimilarStrict_Text;
+        public string MainToolStrip_PresetSimilarWider_Text;
+        public string CorePathsForm_ProtectedTabPage_Text;
+        public string MainMenu_Edit_UndoMarkingMenuItem_Text;
+        public string MainMenu_Edit_UndoMarkingEmpty_Text;
+        public string MainMenu_BatchProtectedWarning_Text;
+        public string ImagePreviewContextMenu_KeepOnlyThisItem_Text;
+        public string MainToolStrip_FilterHideProcessed_Text;
+        public string MainToolStrip_FilterOnlyUnmarked_Text;
+        public string MainToolStrip_FilterText_ToolTipText;
+        public string MainToolStrip_FilterReset_Text;
+        public string MainStatusStrip_TotalFilteredLabel_Text;
+        public string MainStatusStrip_ProcessedLabel_Text;
+        public string MainMenu_Edit_MarkProcessedMenuItem_Text;
+        public string MainMenu_Edit_UnmarkProcessedMenuItem_Text;
+        public string MainMenu_Edit_ClearProcessedMenuItem_Text;
+        public string MainMenu_Edit_AutoMarkProcessedMenuItem_Text;
+        public string MainMenu_Edit_ProcessedEmpty_Text;
     }
 }

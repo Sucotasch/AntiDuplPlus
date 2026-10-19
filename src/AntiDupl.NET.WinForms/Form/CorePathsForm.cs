@@ -60,7 +60,15 @@ namespace AntiDupl.NET.WinForms
         private ListBox m_validListBox;
         private TabPage m_deleteTabPage;
         private ListBox m_deleteListBox;
+        private TabPage m_protectedTabPage;
+        private ListBox m_protectedListBox;
         private ToolTip m_toolTip;
+
+        /// <summary>
+        /// Пятая категория («Не удалять») есть только в managed-коде — у нативного CoreDll.PathType
+        /// для неё значения нет, поэтому вкладки помечаются собственным тегом.
+        /// </summary>
+        private enum PathKind { Search, Ignore, Valid, Delete, Protected }
 
         public CorePathsForm(CoreLib core, Options options, CoreOptions coreOptions)
         {
@@ -106,7 +114,7 @@ namespace AntiDupl.NET.WinForms
             pathTableLayoutPanel.Controls.Add(m_tabControl, 0, 0);
 
             m_searchTabPage = new TabPage();
-            m_searchTabPage.Tag = CoreDll.PathType.Search;
+            m_searchTabPage.Tag = PathKind.Search;
             // Search tab hidden - Database Manager is now the source of truth for search paths
 
             m_toolTip = new ToolTip();
@@ -116,25 +124,32 @@ namespace AntiDupl.NET.WinForms
             m_searchTabPage.Controls.Add(m_searchCheckedList);
 
             m_ignoreTabPage = new TabPage();
-            m_ignoreTabPage.Tag = CoreDll.PathType.Ignore;
+            m_ignoreTabPage.Tag = PathKind.Ignore;
             m_tabControl.Controls.Add(m_ignoreTabPage);
 
             m_ignoreListBox = InitFactory.ListBox.Create(OnSelectedIndexChanged, OnListBoxDoubleClick);
             m_ignoreTabPage.Controls.Add(m_ignoreListBox);
 
             m_validTabPage = new TabPage();
-            m_validTabPage.Tag = CoreDll.PathType.Valid;
+            m_validTabPage.Tag = PathKind.Valid;
             m_tabControl.Controls.Add(m_validTabPage);
 
             m_validListBox = InitFactory.ListBox.Create(OnSelectedIndexChanged, OnListBoxDoubleClick);
             m_validTabPage.Controls.Add(m_validListBox);
 
             m_deleteTabPage = new TabPage();
-            m_deleteTabPage.Tag = CoreDll.PathType.Delete;
+            m_deleteTabPage.Tag = PathKind.Delete;
             m_tabControl.Controls.Add(m_deleteTabPage);
 
             m_deleteListBox = InitFactory.ListBox.Create(OnSelectedIndexChanged, OnListBoxDoubleClick);
             m_deleteTabPage.Controls.Add(m_deleteListBox);
+
+            m_protectedTabPage = new TabPage();
+            m_protectedTabPage.Tag = PathKind.Protected;
+            m_tabControl.Controls.Add(m_protectedTabPage);
+
+            m_protectedListBox = InitFactory.ListBox.Create(OnSelectedIndexChanged, OnListBoxDoubleClick);
+            m_protectedTabPage.Controls.Add(m_protectedListBox);
 
             TableLayoutPanel pathButtonsTableLayoutPanel = InitFactory.Layout.Create(4, 1);
             pathButtonsTableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30F));
@@ -195,6 +210,7 @@ namespace AntiDupl.NET.WinForms
             m_ignoreTabPage.Text = s.CorePathsForm_IgnoreTabPage_Text;
             m_validTabPage.Text = s.CorePathsForm_ValidTabPage_Text;
             m_deleteTabPage.Text = s.CorePathsForm_DeleteTabPage_Text;
+            m_protectedTabPage.Text = s.CorePathsForm_ProtectedTabPage_Text;
 
             m_okButton.Text = s.OkButton_Text;
             m_cancelButton.Text = s.CancelButton_Text;
@@ -209,16 +225,18 @@ namespace AntiDupl.NET.WinForms
         /// </summary>
         private CorePathWithSubFolder[] GetCurrentPath()
         {
-            switch ((CoreDll.PathType)m_tabControl.SelectedTab.Tag)
+            switch ((PathKind)m_tabControl.SelectedTab.Tag)
             {
-                case CoreDll.PathType.Search:
+                case PathKind.Search:
                     return m_newCoreOptions.searchPath;
-                case CoreDll.PathType.Ignore:
+                case PathKind.Ignore:
                     return m_newCoreOptions.ignorePath;
-                case CoreDll.PathType.Valid:
+                case PathKind.Valid:
                     return m_newCoreOptions.validPath;
-                case CoreDll.PathType.Delete:
+                case PathKind.Delete:
                     return m_newCoreOptions.deletePath;
+                case PathKind.Protected:
+                    return m_newCoreOptions.protectedPath;
                 default:
                     return null;
             }
@@ -226,16 +244,18 @@ namespace AntiDupl.NET.WinForms
 
         private ListBox GetCurrentListBox()
         {
-            switch ((CoreDll.PathType)m_tabControl.SelectedTab.Tag)
+            switch ((PathKind)m_tabControl.SelectedTab.Tag)
             {
-                case CoreDll.PathType.Search:
+                case PathKind.Search:
                     return m_searchCheckedList;
-                case CoreDll.PathType.Ignore:
+                case PathKind.Ignore:
                     return m_ignoreListBox;
-                case CoreDll.PathType.Valid:
+                case PathKind.Valid:
                     return m_validListBox;
-                case CoreDll.PathType.Delete:
+                case PathKind.Delete:
                     return m_deleteListBox;
+                case PathKind.Protected:
+                    return m_protectedListBox;
                 default:
                     return null;
             }
@@ -243,9 +263,9 @@ namespace AntiDupl.NET.WinForms
 
         private CheckedListBox GetCurrentCheckedListBox()
         {
-            switch ((CoreDll.PathType)m_tabControl.SelectedTab.Tag)
+            switch ((PathKind)m_tabControl.SelectedTab.Tag)
             {
-                case CoreDll.PathType.Search:
+                case PathKind.Search:
                     return m_searchCheckedList;
                 default:
                     return null;
@@ -254,19 +274,22 @@ namespace AntiDupl.NET.WinForms
 
         private void SetCurrentPath(CorePathWithSubFolder[] path)
         {
-            switch ((CoreDll.PathType)m_tabControl.SelectedTab.Tag)
+            switch ((PathKind)m_tabControl.SelectedTab.Tag)
             {
-                case CoreDll.PathType.Search:
+                case PathKind.Search:
                     m_newCoreOptions.searchPath = path;
                     break;
-                case CoreDll.PathType.Ignore:
+                case PathKind.Ignore:
                     m_newCoreOptions.ignorePath = path;
                     break;
-                case CoreDll.PathType.Valid:
+                case PathKind.Valid:
                     m_newCoreOptions.validPath = path;
                     break;
-                case CoreDll.PathType.Delete:
+                case PathKind.Delete:
                     m_newCoreOptions.deletePath = path;
+                    break;
+                case PathKind.Protected:
+                    m_newCoreOptions.protectedPath = path;
                     break;
                 default:
                     return;
@@ -381,6 +404,7 @@ namespace AntiDupl.NET.WinForms
             UpdatePath(m_newCoreOptions.ignorePath, m_ignoreListBox);
             UpdatePath(m_newCoreOptions.validPath, m_validListBox);
             UpdatePath(m_newCoreOptions.deletePath, m_deleteListBox);
+            UpdatePath(m_newCoreOptions.protectedPath ?? new CorePathWithSubFolder[0], m_protectedListBox);
         }
 
         private void OnOkButtonClick(object sender, EventArgs e)
@@ -469,7 +493,6 @@ namespace AntiDupl.NET.WinForms
             if (m_tabControl.SelectedTab == null)
                 m_tabControl.SelectedIndex = 0;
 
-            CoreDll.PathType pathType = (CoreDll.PathType)m_tabControl.SelectedTab.Tag;
             CheckedListBox checkedListBox = GetCurrentCheckedListBox();
             CorePathWithSubFolder[] path = GetCurrentPath();
 
@@ -543,7 +566,6 @@ namespace AntiDupl.NET.WinForms
             if (m_tabControl.SelectedTab == null)
                 m_tabControl.SelectedIndex = 0;
 
-            CoreDll.PathType pathType = (CoreDll.PathType)m_tabControl.SelectedTab.Tag;
             ListBox listBox = GetCurrentListBox();
             CorePathWithSubFolder[] path = GetCurrentPath();
 

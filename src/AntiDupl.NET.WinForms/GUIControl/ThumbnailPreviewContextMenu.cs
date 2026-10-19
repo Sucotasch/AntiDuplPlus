@@ -45,6 +45,7 @@ namespace AntiDupl.NET.WinForms
         private ToolStripMenuItem m_openImageItem;
         private ToolStripMenuItem m_openFolderItem;
         private ToolStripMenuItem m_renameImageItem;
+        private ToolStripMenuItem m_keepOnlyThisItem;
 
         public ThumbnailPreviewContextMenu(CoreLib core, Options options, ThumbnailPreview thumbnailPreview, ThumbnailGroupTable thumbnailGroupTable)
         {
@@ -66,6 +67,7 @@ namespace AntiDupl.NET.WinForms
             m_openImageItem = InitFactory.MenuItem.Create(null, null, OpenImage);
             m_openFolderItem = InitFactory.MenuItem.Create(null, null, OpenFolder);
             m_renameImageItem = InitFactory.MenuItem.Create(null, null, RenameImage);
+            m_keepOnlyThisItem = InitFactory.MenuItem.Create(null, null, KeepOnlyThis);
             
             Items.Add(new ToolStripSeparator());
         }
@@ -80,6 +82,8 @@ namespace AntiDupl.NET.WinForms
             Items.Add(m_openFolderItem);
             Items.Add(new ToolStripSeparator());
             Items.Add(m_renameImageItem);
+            Items.Add(new ToolStripSeparator());
+            Items.Add(m_keepOnlyThisItem);
         }
 
         private void UpdateStrings()
@@ -90,6 +94,16 @@ namespace AntiDupl.NET.WinForms
             m_openImageItem.Text = s.ImagePreviewContextMenu_OpenImageItem_Text;
             m_openFolderItem.Text = s.ImagePreviewContextMenu_OpenFolderItem_Text;
             m_renameImageItem.Text = s.ImagePreviewContextMenu_RenameImageItem_Text;
+            m_keepOnlyThisItem.Text = s.ImagePreviewContextMenu_KeepOnlyThisItem_Text;
+        }
+
+        /// <summary>
+        /// «Оставить одну» (T1', этап 5): в группе остаётся только это изображение,
+        /// остальные помечаются к удалению (снимается кнопкой «Delete Selected»).
+        /// </summary>
+        private void KeepOnlyThis(object sender, EventArgs e)
+        {
+            m_thumbnailGroupTable.KeepOnlyThis(m_thumbnailPreview.Group, m_thumbnailPreview.Index);
         }
 
         private void OpenImage(object sender, EventArgs e)

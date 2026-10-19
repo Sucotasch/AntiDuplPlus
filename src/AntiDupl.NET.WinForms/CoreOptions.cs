@@ -44,6 +44,9 @@ namespace AntiDupl.NET.WinForms
         public CorePathWithSubFolder[] ignorePath;
         public CorePathWithSubFolder[] validPath;
         public CorePathWithSubFolder[] deletePath;
+        // Категория «Не удалять» (этап 5 плана дубль-поиска): только managed, нативный движок
+        // про неё не знает — в Set()/Get() её нет намеренно.
+        public CorePathWithSubFolder[] protectedPath;
 
         public CoreOptions()
         {
@@ -56,6 +59,7 @@ namespace AntiDupl.NET.WinForms
             ignorePath = new CorePathWithSubFolder[0];
             validPath = new CorePathWithSubFolder[0];
             deletePath = new CorePathWithSubFolder[0];
+            protectedPath = new CorePathWithSubFolder[0];
         }
 
         public CoreOptions(CoreLib core, bool onePath)
@@ -80,6 +84,7 @@ namespace AntiDupl.NET.WinForms
             ignorePath = PathClone(options.ignorePath);
             validPath = PathClone(options.validPath);
             deletePath = PathClone(options.deletePath);
+            protectedPath = PathClone(options.protectedPath ?? new CorePathWithSubFolder[0]);
         }
 
         public void SetDefault(CoreLib core, bool onePath)
@@ -177,6 +182,7 @@ namespace AntiDupl.NET.WinForms
             PathCopy(ignorePath, ref options.ignorePath);
             PathCopy(validPath, ref options.validPath);
             PathCopy(deletePath, ref options.deletePath);
+            PathCopy(protectedPath ?? new CorePathWithSubFolder[0], ref options.protectedPath);
         }
 
         public static void PathCopy(string[] source, ref string[] destination)
@@ -235,6 +241,8 @@ namespace AntiDupl.NET.WinForms
                 return false;
             if (!Equals(deletePath, options.deletePath))
                 return false;
+            if (!Equals(protectedPath ?? new CorePathWithSubFolder[0], options.protectedPath ?? new CorePathWithSubFolder[0]))
+                return false;
 
             return true;
         }
@@ -251,6 +259,10 @@ namespace AntiDupl.NET.WinForms
                     fileStream = new FileStream(fileName, FileMode.Open, FileAccess.Read);
                     CoreOptions coreOptions = (CoreOptions)xmlSerializer.Deserialize(fileStream);
                     fileStream.Close();
+                    // Старый профиль (до 18.10.2026) не содержит protectedPath — нормализуем,
+                    // иначе PathClone/PathCopy ниже упадут на null.
+                    if (coreOptions.protectedPath == null)
+                        coreOptions.protectedPath = new CorePathWithSubFolder[0];
                     coreOptions.Validate(core, onePath);
                     return coreOptions;
                 }

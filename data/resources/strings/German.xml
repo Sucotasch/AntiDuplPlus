@@ -47,6 +47,7 @@
   <CoreOptionsForm_RatioControlCheckBox_Text>Verhältnis von Bildbreite und -höhe überprüfen</CoreOptionsForm_RatioControlCheckBox_Text>
   <CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text>Algorithmus zum Vergleichen von Bildern</CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text>
   <CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum>Differenz</CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum>
+  <CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash>Perzeptueller Hash (pHASH)</CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash>
   <CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text>Schwellenwert-Differenz</CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text>
   <CoreOptionsForm_MinimalImageSizeLabeledIntegerEdit_Text>Minimale Bildbreite/-höhe</CoreOptionsForm_MinimalImageSizeLabeledIntegerEdit_Text>
   <CoreOptionsForm_MaximalImageSizeLabeledIntegerEdit_Text>Maximale Bildbreite/-höhe</CoreOptionsForm_MaximalImageSizeLabeledIntegerEdit_Text>
@@ -249,4 +250,29 @@
   <ImagePreviewPanel_EXIF_Tooltip_DateTime>Datum/Zeit: </ImagePreviewPanel_EXIF_Tooltip_DateTime>
   <ImagePreviewPanel_EXIF_Tooltip_Artist>Künstler: </ImagePreviewPanel_EXIF_Tooltip_Artist>
   <ImagePreviewPanel_EXIF_Tooltip_UserComment>Kommentar: </ImagePreviewPanel_EXIF_Tooltip_UserComment>
+  <DatabaseManagerForm_UpdateEmptySourceTitle>Leerer Quellordner</DatabaseManagerForm_UpdateEmptySourceTitle>
+  <DatabaseManagerForm_UpdateEmptySourceQuestion>Der Quellordner ist leer oder nicht verfügbar. Datenbank "{0}" leeren (alle Einträge löschen)?</DatabaseManagerForm_UpdateEmptySourceQuestion>
+  <DatabaseManagerForm_UpdateBusyText>Diese Datenbank wird bereits von einem anderen Prozess aktualisiert. Warten Sie, bis der Vorgang abgeschlossen ist.</DatabaseManagerForm_UpdateBusyText>
+  <MainToolStrip_Presets_Text>Suchvoreinstellungen</MainToolStrip_Presets_Text>
+  <MainToolStrip_PresetExactCopies_Text>Exakte Kopien</MainToolStrip_PresetExactCopies_Text>
+  <MainToolStrip_PresetRecompression_Text>Komprimierung und Skalierung</MainToolStrip_PresetRecompression_Text>
+  <MainToolStrip_PresetTransformations_Text>Transformationen</MainToolStrip_PresetTransformations_Text>
+  <MainToolStrip_PresetSimilarStrict_Text>Ähnliche: streng</MainToolStrip_PresetSimilarStrict_Text>
+  <MainToolStrip_PresetSimilarWider_Text>Ähnliche: breiter</MainToolStrip_PresetSimilarWider_Text>
+  <CorePathsForm_ProtectedTabPage_Text>Nicht löschen</CorePathsForm_ProtectedTabPage_Text>
+  <MainMenu_Edit_UndoMarkingMenuItem_Text>Markierung aufheben (Strg-U)</MainMenu_Edit_UndoMarkingMenuItem_Text>
+  <MainMenu_Edit_UndoMarkingEmpty_Text>Es gibt keine Markierung zum Aufheben.</MainMenu_Edit_UndoMarkingEmpty_Text>
+  <MainMenu_BatchProtectedWarning_Text>{0} Datei(en) in geschützten Pfaden werden nicht verarbeitet.</MainMenu_BatchProtectedWarning_Text>
+  <ImagePreviewContextMenu_KeepOnlyThisItem_Text>Nur diese behalten</ImagePreviewContextMenu_KeepOnlyThisItem_Text>
+  <MainToolStrip_FilterHideProcessed_Text>Bearbeitete ausblenden</MainToolStrip_FilterHideProcessed_Text>
+  <MainToolStrip_FilterOnlyUnmarked_Text>Nur unmarkierte</MainToolStrip_FilterOnlyUnmarked_Text>
+  <MainToolStrip_FilterText_ToolTipText>Nur Paare anzeigen, deren Pfad diesen Text enthält (Enter zum Anwenden)</MainToolStrip_FilterText_ToolTipText>
+  <MainToolStrip_FilterReset_Text>Filter zurücksetzen</MainToolStrip_FilterReset_Text>
+  <MainStatusStrip_TotalFilteredLabel_Text>Angezeigt: {0} von {1}</MainStatusStrip_TotalFilteredLabel_Text>
+  <MainStatusStrip_ProcessedLabel_Text>Bearbeitet: </MainStatusStrip_ProcessedLabel_Text>
+  <MainMenu_Edit_MarkProcessedMenuItem_Text>Als bearbeitet markieren</MainMenu_Edit_MarkProcessedMenuItem_Text>
+  <MainMenu_Edit_UnmarkProcessedMenuItem_Text>Markierung „bearbeitet“ entfernen</MainMenu_Edit_UnmarkProcessedMenuItem_Text>
+  <MainMenu_Edit_ClearProcessedMenuItem_Text>Alle Markierungen „bearbeitet“ löschen</MainMenu_Edit_ClearProcessedMenuItem_Text>
+  <MainMenu_Edit_AutoMarkProcessedMenuItem_Text>Nach Aktionen als bearbeitet markieren</MainMenu_Edit_AutoMarkProcessedMenuItem_Text>
+  <MainMenu_Edit_ProcessedEmpty_Text>Es war kein Paar ausgewählt.</MainMenu_Edit_ProcessedEmpty_Text>
 </Strings>

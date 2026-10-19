@@ -98,6 +98,7 @@ namespace AntiDupl.NET.WinForms
         public CoreOptions CoreOptions { get { return m_coreOptions; } } 
         private CoreOptions m_coreOptions;
         private CoreResult[] m_results;
+        private int m_visibleResultCount;
         private ResultsOptions.ViewMode m_viewMode = ResultsOptions.ViewMode.VerticalPairTable;
 
         private int m_firstSelectedRowIndex = -1;
@@ -435,6 +436,7 @@ namespace AntiDupl.NET.WinForms
         public void ClearResults()
         {
             m_results = new CoreResult[0];
+            m_visibleResultCount = 0;
             Rows.Clear();
             RowCount = 1;
             m_currentRowIndex = 0;
@@ -501,6 +503,77 @@ namespace AntiDupl.NET.WinForms
                 {
                     SetCurrentRow(0);
                     SetRowSelection(0, 1, true);
+                }
+            }
+            ApplyFilter();
+        }
+
+        /// <summary>
+        /// Число строк, видимых при активном фильтре (этап 6).
+        /// </summary>
+        public int GetVisibleResultCount()
+        {
+            return Math.Min(m_visibleResultCount, m_results.Length);
+        }
+
+        /// <summary>Число разобранных пар среди текущих результатов (этап 6).</summary>
+        public int GetProcessedResultCount()
+        {
+            return ProcessedPairs.CountIn(ResultKeys());
+        }
+
+        private IEnumerable<string> ResultKeys()
+        {
+            for (int i = 0; i < m_results.Length; i++)
+                yield return AutoSelector.GetKey(m_results[i]);
+        }
+
+        /// <summary>
+        /// Ключи пар, выделенных в списке («Отметить как разобранные», этап 6).
+        /// </summary>
+        public List<string> GetSelectedKeys()
+        {
+            var keys = new List<string>();
+            for (int i = 0; i < Rows.Count && i < m_results.Length; i++)
+                if (((DataGridViewCustomRow)Rows[i]).selected)
+                    keys.Add(AutoSelector.GetKey(m_results[i]));
+            return keys;
+        }
+
+        /// <summary>
+        /// Применить текущий фильтр (этап 6): скрыть неподходящие строки и снять с них выборку,
+        /// чтобы нативные операции по выделению (TargetType.Selected) их не затронули.
+        /// </summary>
+        public void ApplyFilter()
+        {
+            ResultFilter filter = m_options.resultFilter;
+            bool active = filter != null && filter.IsActive;
+            int visible = 0;
+            for (int i = 0; i < Rows.Count && i < m_results.Length; i++)
+            {
+                DataGridViewCustomRow row = (DataGridViewCustomRow)Rows[i];
+                bool show = !active || filter.Matches(m_results[i]);
+                if (row.Visible != show) row.Visible = show;
+                if (show)
+                {
+                    visible++;
+                }
+                else if (row.selected)
+                {
+                    row.selected = false;
+                    m_core.SetSelection((uint)i, 1, false);
+                }
+            }
+            m_visibleResultCount = visible;
+
+            // Текущая строка не должна остаться скрытой: переводим на первую видимую.
+            if (m_results.Length > 0 && m_currentRowIndex >= 0 && m_currentRowIndex < Rows.Count && !Rows[m_currentRowIndex].Visible)
+            {
+                for (int i = 0; i < Rows.Count; i++)
+                {
+                    if (!Rows[i].Visible) continue;
+                    SetCurrentRow(i);
+                    break;
                 }
             }
         }
@@ -984,12 +1057,24 @@ namespace AntiDupl.NET.WinForms
 
         private void SetRowSelection(int beginRowIndex, int endRowIndex, bool value)
         {
+            // Этап 6: скрытые фильтром строки не выделяются — иначе нативные операции по
+            // выделению (TargetType.Selected) обработали бы пары, которых пользователь не видит.
+            bool wholeRange = true;
             for (int i = beginRowIndex; i < endRowIndex; i++)
             {
                 DataGridViewCustomRow row = (DataGridViewCustomRow)Rows[i];
-                row.selected = value;
+                row.selected = value && row.Visible;
+                if (row.selected != value) wholeRange = false;
             }
-            m_core.SetSelection((UInt32)beginRowIndex, (UInt32)(endRowIndex - beginRowIndex), value);
+            if (wholeRange)
+            {
+                m_core.SetSelection((UInt32)beginRowIndex, (UInt32)(endRowIndex - beginRowIndex), value);
+            }
+            else
+            {
+                for (int i = beginRowIndex; i < endRowIndex; i++)
+                    m_core.SetSelection((UInt32)i, 1, ((DataGridViewCustomRow)Rows[i]).selected);
+            }
         }
 
         protected override void OnVisibleChanged(EventArgs e)

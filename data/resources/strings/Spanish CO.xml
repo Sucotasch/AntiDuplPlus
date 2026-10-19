@@ -47,6 +47,7 @@
   <CoreOptionsForm_RatioControlCheckBox_Text>Controlar relación ancho/alto</CoreOptionsForm_RatioControlCheckBox_Text>
   <CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text>Algoritmo de comparación</CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text>
   <CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum>MSE - Error Cuadrático Medio</CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum>
+  <CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash>Hash perceptual (pHASH)</CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash>
   <CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text>Umbral de diferencia</CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text>
   <CoreOptionsForm_MinimalImageSizeLabeledIntegerEdit_Text>Ancho/alto mínimo</CoreOptionsForm_MinimalImageSizeLabeledIntegerEdit_Text>
   <CoreOptionsForm_MaximalImageSizeLabeledIntegerEdit_Text>Ancho/alto máximo</CoreOptionsForm_MaximalImageSizeLabeledIntegerEdit_Text>
@@ -252,4 +253,29 @@
   <ImagePreviewPanel_EXIF_Tooltip_DateTime>Fecha/Hora: </ImagePreviewPanel_EXIF_Tooltip_DateTime>
   <ImagePreviewPanel_EXIF_Tooltip_Artist>Artista: </ImagePreviewPanel_EXIF_Tooltip_Artist>
   <ImagePreviewPanel_EXIF_Tooltip_UserComment>Comentario: </ImagePreviewPanel_EXIF_Tooltip_UserComment>
+  <DatabaseManagerForm_UpdateEmptySourceTitle>Carpeta de origen vacía</DatabaseManagerForm_UpdateEmptySourceTitle>
+  <DatabaseManagerForm_UpdateEmptySourceQuestion>La carpeta de origen está vacía o no disponible. ¿Vaciar la base "{0}" (eliminar todos los registros)?</DatabaseManagerForm_UpdateEmptySourceQuestion>
+  <DatabaseManagerForm_UpdateBusyText>Esta base ya se está actualizando por otro proceso. Espere a que termine e inténtelo de nuevo.</DatabaseManagerForm_UpdateBusyText>
+  <MainToolStrip_Presets_Text>Preajustes de búsqueda</MainToolStrip_Presets_Text>
+  <MainToolStrip_PresetExactCopies_Text>Copias exactas</MainToolStrip_PresetExactCopies_Text>
+  <MainToolStrip_PresetRecompression_Text>Compresión y cambio de tamaño</MainToolStrip_PresetRecompression_Text>
+  <MainToolStrip_PresetTransformations_Text>Transformaciones</MainToolStrip_PresetTransformations_Text>
+  <MainToolStrip_PresetSimilarStrict_Text>Similares: estricto</MainToolStrip_PresetSimilarStrict_Text>
+  <MainToolStrip_PresetSimilarWider_Text>Similares: amplio</MainToolStrip_PresetSimilarWider_Text>
+  <CorePathsForm_ProtectedTabPage_Text>No eliminar</CorePathsForm_ProtectedTabPage_Text>
+  <MainMenu_Edit_UndoMarkingMenuItem_Text>Deshacer marcado (Ctrl-U)</MainMenu_Edit_UndoMarkingMenuItem_Text>
+  <MainMenu_Edit_UndoMarkingEmpty_Text>No hay marcado que deshacer.</MainMenu_Edit_UndoMarkingEmpty_Text>
+  <MainMenu_BatchProtectedWarning_Text>{0} archivo(s) en rutas protegidas no se procesarán.</MainMenu_BatchProtectedWarning_Text>
+  <ImagePreviewContextMenu_KeepOnlyThisItem_Text>Conservar solo esta</ImagePreviewContextMenu_KeepOnlyThisItem_Text>
+  <MainToolStrip_FilterHideProcessed_Text>Ocultar procesadas</MainToolStrip_FilterHideProcessed_Text>
+  <MainToolStrip_FilterOnlyUnmarked_Text>Solo sin marcar</MainToolStrip_FilterOnlyUnmarked_Text>
+  <MainToolStrip_FilterText_ToolTipText>Mostrar solo pares cuya ruta contenga este texto (Intro para aplicar)</MainToolStrip_FilterText_ToolTipText>
+  <MainToolStrip_FilterReset_Text>Restablecer filtro</MainToolStrip_FilterReset_Text>
+  <MainStatusStrip_TotalFilteredLabel_Text>Mostradas: {0} de {1}</MainStatusStrip_TotalFilteredLabel_Text>
+  <MainStatusStrip_ProcessedLabel_Text>Procesadas: </MainStatusStrip_ProcessedLabel_Text>
+  <MainMenu_Edit_MarkProcessedMenuItem_Text>Marcar como procesadas</MainMenu_Edit_MarkProcessedMenuItem_Text>
+  <MainMenu_Edit_UnmarkProcessedMenuItem_Text>Quitar la marca «procesada»</MainMenu_Edit_UnmarkProcessedMenuItem_Text>
+  <MainMenu_Edit_ClearProcessedMenuItem_Text>Borrar todas las marcas «procesada»</MainMenu_Edit_ClearProcessedMenuItem_Text>
+  <MainMenu_Edit_AutoMarkProcessedMenuItem_Text>Marcar como procesadas después de las operaciones</MainMenu_Edit_AutoMarkProcessedMenuItem_Text>
+  <MainMenu_Edit_ProcessedEmpty_Text>No se seleccionó ningún par.</MainMenu_Edit_ProcessedEmpty_Text>
 </Strings>

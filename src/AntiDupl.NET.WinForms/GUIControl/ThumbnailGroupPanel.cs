@@ -38,6 +38,7 @@ namespace AntiDupl.NET.WinForms
     {
         private CoreLib m_core;
         private CoreGroup m_group;
+        public CoreGroup Group { get { return m_group; } }
         private AntiDupl.NET.WinForms.Options m_options;
 
         private ThumbnailPanel[] m_thumbnailPanels;

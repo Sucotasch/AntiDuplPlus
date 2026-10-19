@@ -36,10 +36,13 @@ namespace AntiDupl.NET.WinForms
         private ToolStripStatusLabel m_totalLabel;
         private ToolStripStatusLabel m_currentLabel;
         private ToolStripStatusLabel m_selectedLabel;
+        private ToolStripStatusLabel m_processedLabel;
 
         private string m_totalText;
         private string m_currentText;
         private string m_selectedText;
+        private string m_processedText;
+        private string m_totalFilteredText;
 
         public MainStatusStrip(MainSplitContainer mainSplitContainer, Options options)
         {
@@ -76,9 +79,17 @@ namespace AntiDupl.NET.WinForms
             m_selectedLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             m_selectedLabel.AutoSize = false;
 
+            m_processedLabel = new ToolStripStatusLabel();
+            m_processedLabel.BorderStyle = System.Windows.Forms.Border3DStyle.SunkenOuter;
+            m_processedLabel.Margin = new System.Windows.Forms.Padding(0, 2, 0, 0);
+            m_processedLabel.BorderSides = ToolStripStatusLabelBorderSides.All;
+            m_processedLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            m_processedLabel.AutoSize = false;
+
             Items.Add(m_totalLabel);
             Items.Add(m_currentLabel);
             Items.Add(m_selectedLabel);
+            Items.Add(m_processedLabel);
 
             ResumeLayout(false);
             PerformLayout();
@@ -98,6 +109,8 @@ namespace AntiDupl.NET.WinForms
             m_totalText = s.MainStatusStrip_TotalLabel_Text;
             m_currentText = s.MainStatusStrip_CurrentLabel_Text;
             m_selectedText = s.MainStatusStrip_SelectedLabel_Text;
+            m_processedText = s.MainStatusStrip_ProcessedLabel_Text;
+            m_totalFilteredText = s.MainStatusStrip_TotalFilteredLabel_Text;
 
             UpdateResults();
         }
@@ -105,10 +118,23 @@ namespace AntiDupl.NET.WinForms
         private void UpdateResults()
         {
             {
+                // Этап 6: при активном фильтре показываем, сколько строк реально видно.
+                var resultsListView = m_mainSplitContainer.resultsListView;
                 StringBuilder builder = new StringBuilder();
-                builder.Append(m_totalText);
-                builder.Append(m_mainSplitContainer.resultsListView.GetTotalResultCount());
+                int total = resultsListView.GetTotalResultCount();
+                ResultFilter filter = m_options.resultFilter;
+                if (filter != null && filter.IsActive)
+                    builder.Append(string.Format(m_totalFilteredText, resultsListView.GetVisibleResultCount(), total));
+                else
+                    builder.Append(m_totalText + total);
                 m_totalLabel.Text = builder.ToString();
+            }
+
+            {
+                StringBuilder builder = new StringBuilder();
+                builder.Append(m_processedText);
+                builder.Append(m_mainSplitContainer.resultsListView.GetProcessedResultCount());
+                m_processedLabel.Text = builder.ToString();
             }
 
             CurrentResultChanged();
@@ -130,9 +156,10 @@ namespace AntiDupl.NET.WinForms
 
         private void OnResize(object sender, EventArgs e)
         {
-            m_totalLabel.Width = Width / 3;
-            m_currentLabel.Width = Width / 3;
-            m_selectedLabel.Width = Width / 3;
+            m_totalLabel.Width = Width / 4;
+            m_currentLabel.Width = Width / 4;
+            m_selectedLabel.Width = Width / 4;
+            m_processedLabel.Width = Width / 4;
         }
 
         private void OnVisibleChanged(bool visible)

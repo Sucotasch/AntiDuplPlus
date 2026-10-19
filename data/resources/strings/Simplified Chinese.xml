@@ -48,6 +48,7 @@
   <CoreOptionsForm_RatioControlCheckBox_Text>控制图片宽度/高度比例</CoreOptionsForm_RatioControlCheckBox_Text>
   <CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text>图片比较算法</CoreOptionsForm_AlgorithmComparingLabeledComboBox_Text>
   <CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum>均方差</CoreOptionsForm_AlgorithmComparingLabeledComboBox_SquaredSum>
+  <CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash>感知哈希 (pHASH)</CoreOptionsForm_AlgorithmComparingLabeledComboBox_PerceptualHash>
   <CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text>阈值差异</CoreOptionsForm_ThresholdDifferenceLabeledComboBox_Text>
   <CoreOptionsForm_MinimalImageSizeLabeledIntegerEdit_Text>最小图片宽度/高度</CoreOptionsForm_MinimalImageSizeLabeledIntegerEdit_Text>
   <CoreOptionsForm_MaximalImageSizeLabeledIntegerEdit_Text>最大图片宽度/高度</CoreOptionsForm_MaximalImageSizeLabeledIntegerEdit_Text>
@@ -255,4 +256,29 @@
   <ImagePreviewPanel_EXIF_Tooltip_DateTime>日期/时间：</ImagePreviewPanel_EXIF_Tooltip_DateTime>
   <ImagePreviewPanel_EXIF_Tooltip_Artist>艺术家：</ImagePreviewPanel_EXIF_Tooltip_Artist>
   <ImagePreviewPanel_EXIF_Tooltip_UserComment>备注：</ImagePreviewPanel_EXIF_Tooltip_UserComment>
+  <DatabaseManagerForm_UpdateEmptySourceTitle>源文件夹为空</DatabaseManagerForm_UpdateEmptySourceTitle>
+  <DatabaseManagerForm_UpdateEmptySourceQuestion>源文件夹为空或不可用。是否清空数据库「{0}」（删除所有记录）？</DatabaseManagerForm_UpdateEmptySourceQuestion>
+  <DatabaseManagerForm_UpdateBusyText>该数据库正在被另一个进程更新。请等待完成后再试。</DatabaseManagerForm_UpdateBusyText>
+  <MainToolStrip_Presets_Text>搜索预设</MainToolStrip_Presets_Text>
+  <MainToolStrip_PresetExactCopies_Text>精确副本</MainToolStrip_PresetExactCopies_Text>
+  <MainToolStrip_PresetRecompression_Text>压缩与调整尺寸</MainToolStrip_PresetRecompression_Text>
+  <MainToolStrip_PresetTransformations_Text>变换</MainToolStrip_PresetTransformations_Text>
+  <MainToolStrip_PresetSimilarStrict_Text>相似：严格</MainToolStrip_PresetSimilarStrict_Text>
+  <MainToolStrip_PresetSimilarWider_Text>相似：更宽</MainToolStrip_PresetSimilarWider_Text>
+  <CorePathsForm_ProtectedTabPage_Text>不删除</CorePathsForm_ProtectedTabPage_Text>
+  <MainMenu_Edit_UndoMarkingMenuItem_Text>撤销标记 (Ctrl-U)</MainMenu_Edit_UndoMarkingMenuItem_Text>
+  <MainMenu_Edit_UndoMarkingEmpty_Text>没有可撤销的标记。</MainMenu_Edit_UndoMarkingEmpty_Text>
+  <MainMenu_BatchProtectedWarning_Text>保护路径中的 {0} 个文件将不会被处理。</MainMenu_BatchProtectedWarning_Text>
+  <ImagePreviewContextMenu_KeepOnlyThisItem_Text>仅保留这一个</ImagePreviewContextMenu_KeepOnlyThisItem_Text>
+  <MainToolStrip_FilterHideProcessed_Text>隐藏已处理</MainToolStrip_FilterHideProcessed_Text>
+  <MainToolStrip_FilterOnlyUnmarked_Text>仅未标记</MainToolStrip_FilterOnlyUnmarked_Text>
+  <MainToolStrip_FilterText_ToolTipText>仅显示路径中包含此文本的配对（按 Enter 应用）</MainToolStrip_FilterText_ToolTipText>
+  <MainToolStrip_FilterReset_Text>重置筛选</MainToolStrip_FilterReset_Text>
+  <MainStatusStrip_TotalFilteredLabel_Text>显示：{0} / {1}</MainStatusStrip_TotalFilteredLabel_Text>
+  <MainStatusStrip_ProcessedLabel_Text>已处理：</MainStatusStrip_ProcessedLabel_Text>
+  <MainMenu_Edit_MarkProcessedMenuItem_Text>标记为已处理</MainMenu_Edit_MarkProcessedMenuItem_Text>
+  <MainMenu_Edit_UnmarkProcessedMenuItem_Text>取消“已处理”标记</MainMenu_Edit_UnmarkProcessedMenuItem_Text>
+  <MainMenu_Edit_ClearProcessedMenuItem_Text>清除所有“已处理”标记</MainMenu_Edit_ClearProcessedMenuItem_Text>
+  <MainMenu_Edit_AutoMarkProcessedMenuItem_Text>操作后标记为已处理</MainMenu_Edit_AutoMarkProcessedMenuItem_Text>
+  <MainMenu_Edit_ProcessedEmpty_Text>未选择任何配对。</MainMenu_Edit_ProcessedEmpty_Text>
 </Strings>

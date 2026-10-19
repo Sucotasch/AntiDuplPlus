@@ -54,9 +54,14 @@ namespace AntiDupl.NET.WinForms
         private ToolStripMenuItem m_edit_undoMenuItem;
         private ToolStripMenuItem m_edit_redoMenuItem;
         private ToolStripMenuItem m_edit_selectAllMenuItem;
+        private ToolStripMenuItem m_edit_undoMarkingMenuItem;
         private ToolStripMenuItem m_edit_autoSelectMenuItem;
         private ToolStripMenuItem m_edit_deleteSelectedMenuItem;
         private ToolStripMenuItem m_edit_moveSelectedMenuItem;
+        private ToolStripMenuItem m_edit_markProcessedMenuItem;
+        private ToolStripMenuItem m_edit_unmarkProcessedMenuItem;
+        private ToolStripMenuItem m_edit_clearProcessedMenuItem;
+        private ToolStripMenuItem m_edit_autoMarkProcessedMenuItem;
 
         private ToolStripMenuItem m_viewMenuItem;
         private ToolStripMenuItem m_view_toolMenuItem;
@@ -125,6 +130,9 @@ namespace AntiDupl.NET.WinForms
             m_coreOptions = coreOptions;
             m_mainForm = mainForm;
             m_mainSplitContainer = mainSplitContainer;
+            // Этап 6: фильтр результатов живёт в Options и передаётся в AutoSelector один раз —
+            // дальше UI правит те же поля объекта.
+            AutoSelector.SyncFilter(m_options);
             InitializeComponents();
             UpdateStrings();
             UpdateResults();
@@ -176,6 +184,7 @@ namespace AntiDupl.NET.WinForms
             m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_edit_autoSelectMenuItem.DropDownItems.Add("Invert Selection", null, (s, e) => { AutoSelector.InvertSides(m_core); m_mainSplitContainer.UpdateResults(); });
             m_edit_autoSelectMenuItem.DropDownItems.Add("Deselect All", null, (s, e) => { AutoSelector.ClearAll(m_core); m_mainSplitContainer.UpdateResults(); });
+            m_edit_autoSelectMenuItem.DropDownItems.Add(m_edit_undoMarkingMenuItem);
             m_edit_autoSelectMenuItem.DropDownItems.Add(new ToolStripSeparator());
             m_edit_autoSelectMenuItem.DropDownItems.Add("Advanced...", null, (s, e) =>
             {
@@ -186,10 +195,19 @@ namespace AntiDupl.NET.WinForms
                 }
             });
 
+            m_edit_undoMarkingMenuItem = InitFactory.MenuItem.Create(null, null, UndoMarkingAction);
+            m_edit_undoMarkingMenuItem.ShortcutKeys = Keys.Control | Keys.U;
+
             m_edit_deleteSelectedMenuItem = InitFactory.MenuItem.Create(null, null, DeleteSelectedAction);
             m_edit_deleteSelectedMenuItem.Text = "Delete Selected";
             m_edit_moveSelectedMenuItem = InitFactory.MenuItem.Create(null, null, MoveSelectedAction);
             m_edit_moveSelectedMenuItem.Text = "Move Selected...";
+
+            // «Разобрано» (T5, этап 6): отметки пар хранятся в processed.tsv (ProcessedPairs).
+            m_edit_markProcessedMenuItem = InitFactory.MenuItem.Create(null, null, MarkProcessedAction);
+            m_edit_unmarkProcessedMenuItem = InitFactory.MenuItem.Create(null, null, UnmarkProcessedAction);
+            m_edit_clearProcessedMenuItem = InitFactory.MenuItem.Create(null, null, ClearProcessedAction);
+            m_edit_autoMarkProcessedMenuItem = InitFactory.MenuItem.Create(null, null, AutoMarkProcessedCheckChangeAction, m_options.markProcessedAfterBatch);
 
             m_editMenuItem = new ToolStripMenuItem();
             m_editMenuItem.DropDownItems.Add(m_edit_undoMenuItem);
@@ -200,6 +218,12 @@ namespace AntiDupl.NET.WinForms
             m_editMenuItem.DropDownItems.Add(m_edit_autoSelectMenuItem);
             m_editMenuItem.DropDownItems.Add(m_edit_deleteSelectedMenuItem);
             m_editMenuItem.DropDownItems.Add(m_edit_moveSelectedMenuItem);
+            m_editMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            m_editMenuItem.DropDownItems.Add(m_edit_markProcessedMenuItem);
+            m_editMenuItem.DropDownItems.Add(m_edit_unmarkProcessedMenuItem);
+            m_editMenuItem.DropDownItems.Add(m_edit_clearProcessedMenuItem);
+            m_editMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            m_editMenuItem.DropDownItems.Add(m_edit_autoMarkProcessedMenuItem);
 
             m_view_toolMenuItem = InitFactory.MenuItem.Create(null, null, ViewItemCheckChangeAction, m_options.mainFormOptions.toolStripView);
             m_view_statusMenuItem = InitFactory.MenuItem.Create(null, null, ViewItemCheckChangeAction, m_options.mainFormOptions.statusStripView);
@@ -290,6 +314,11 @@ namespace AntiDupl.NET.WinForms
             m_edit_undoMenuItem.Text = s.MainMenu_Edit_UndoMenuItem_Text;
             m_edit_redoMenuItem.Text = s.MainMenu_Edit_RedoMenuItem_Text;
             m_edit_selectAllMenuItem.Text = s.MainMenu_Edit_SelectAllMenuItem_Text;
+            m_edit_undoMarkingMenuItem.Text = s.MainMenu_Edit_UndoMarkingMenuItem_Text;
+            m_edit_markProcessedMenuItem.Text = s.MainMenu_Edit_MarkProcessedMenuItem_Text;
+            m_edit_unmarkProcessedMenuItem.Text = s.MainMenu_Edit_UnmarkProcessedMenuItem_Text;
+            m_edit_clearProcessedMenuItem.Text = s.MainMenu_Edit_ClearProcessedMenuItem_Text;
+            m_edit_autoMarkProcessedMenuItem.Text = s.MainMenu_Edit_AutoMarkProcessedMenuItem_Text;
 
             m_viewMenuItem.Text = s.MainMenu_ViewMenuItem_Text;
             m_view_toolMenuItem.Text = s.MainMenu_View_ToolMenuItem_Text;
@@ -402,14 +431,86 @@ namespace AntiDupl.NET.WinForms
 
         public void DoAutoSelect(AutoSelectCriteria criteria)
         {
+            // Этап 5: перед разметкой подтягиваем managed-категорию «Не удалять».
+            AutoSelector.SyncProtectedPaths(m_coreOptions);
             int affected = AutoSelector.Apply(m_core, criteria);
             MessageBox.Show($"Marked {affected} images for action.", "Auto-Select",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             m_mainSplitContainer.UpdateResults();
         }
 
+        /// <summary>
+        /// «Отменить разметку» (T4'): возвращает разметку к состоянию перед последним авто-выбором.
+        /// </summary>
+        public void UndoMarkingAction(object sender, EventArgs e)
+        {
+            int restored = AutoSelector.UndoMarking();
+            if (restored == 0)
+            {
+                MessageBox.Show(Resources.Strings.Current.MainMenu_Edit_UndoMarkingEmpty_Text, "Undo Marking",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            m_mainSplitContainer.UpdateResults();
+        }
+
+        /// <summary>
+        /// Предупреждение о защищённых путях до пакетной операции (этап 5, план 8.1.2).
+        /// </summary>
+        internal static string ProtectedWarning(int skippedProtected)
+        {
+            return skippedProtected <= 0 ? "" :
+                string.Format(Resources.Strings.Current.MainMenu_BatchProtectedWarning_Text, skippedProtected) + "\n\n";
+        }
+
+        /// <summary>
+        /// «Отметить как разобранные» (T5, этап 6): отметки выделенных пар в processed.tsv.
+        /// </summary>
+        public void MarkProcessedAction(object sender, EventArgs e)
+        {
+            int marked = ProcessedPairs.Mark(m_mainSplitContainer.resultsListView.GetSelectedKeys());
+            m_mainSplitContainer.UpdateResults();
+            if (marked == 0)
+            {
+                MessageBox.Show(Resources.Strings.Current.MainMenu_Edit_ProcessedEmpty_Text, "Processed",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        /// <summary>Снять отметку «разобрано» с выделенных пар (этап 6).</summary>
+        public void UnmarkProcessedAction(object sender, EventArgs e)
+        {
+            int removed = ProcessedPairs.Unmark(m_mainSplitContainer.resultsListView.GetSelectedKeys());
+            m_mainSplitContainer.UpdateResults();
+            if (removed == 0)
+            {
+                MessageBox.Show(Resources.Strings.Current.MainMenu_Edit_ProcessedEmpty_Text, "Processed",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        /// <summary>Снять все отметки «разобрано» (этап 6).</summary>
+        public void ClearProcessedAction(object sender, EventArgs e)
+        {
+            int cleared = ProcessedPairs.ClearAll();
+            m_mainSplitContainer.UpdateResults();
+            if (cleared == 0)
+            {
+                MessageBox.Show(Resources.Strings.Current.MainMenu_Edit_ProcessedEmpty_Text, "Processed",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private void AutoMarkProcessedCheckChangeAction(object sender, EventArgs e)
+        {
+            ToolStripMenuItem item = sender as ToolStripMenuItem;
+            if (item != null)
+                m_options.markProcessedAfterBatch = item.Checked;
+        }
+
         public void DeleteSelectedAction(object sender, EventArgs e)
         {
+            AutoSelector.SyncProtectedPaths(m_coreOptions);
             int count = AutoSelector.CountMarked(m_core);
             if (count <= 0) return;
             if (s_batchRunning) return; // P2-11: a batch is already running
@@ -419,6 +520,7 @@ namespace AntiDupl.NET.WinForms
                 ? "Some files have paths longer than 260 characters. These files cannot be moved to " +
                   "Recycle Bin and will be permanently deleted.\n\n"
                 : "";
+            warning += ProtectedWarning(AutoSelector.CountMarkedProtected(m_core));
             var confirm = MessageBox.Show(
                 warning + $"Permanently delete {count} selected image(s)?",
                 "Delete Selected", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
@@ -432,7 +534,7 @@ namespace AntiDupl.NET.WinForms
                 AutoSelector.BatchResult result = null;
                 try
                 {
-                    result = AutoSelector.ExecuteBatch(m_core, true);
+                    result = AutoSelector.ExecuteBatch(m_core, true, null, m_options.markProcessedAfterBatch);
                 }
                 finally
                 {
@@ -445,6 +547,8 @@ namespace AntiDupl.NET.WinForms
                         string msg = $"Deleted {result.Succeeded} images.";
                         if (result.Failed > 0)
                             msg += $"\n{result.Failed} files could not be deleted.";
+                        if (result.SkippedProtected > 0)
+                            msg += "\n" + string.Format(Resources.Strings.Current.MainMenu_BatchProtectedWarning_Text, result.SkippedProtected);
                         MessageBox.Show(msg, "Delete Selected",
                             MessageBoxButtons.OK, MessageBoxIcon.Information);
                         m_mainSplitContainer.UpdateResults();
@@ -456,6 +560,7 @@ namespace AntiDupl.NET.WinForms
 
         public void MoveSelectedAction(object sender, EventArgs e)
         {
+            AutoSelector.SyncProtectedPaths(m_coreOptions);
             using (var dialog = new FolderBrowserDialog())
             {
                 dialog.Description = "Select folder to move marked images";
@@ -473,6 +578,12 @@ namespace AntiDupl.NET.WinForms
                 // thread and froze the whole GUI. Mirror DeleteSelectedAction: disable the
                 // entry points, run the batch on a background thread, marshal the result
                 // back with BeginInvoke and refresh/re-enable there.
+                string protectedWarning = ProtectedWarning(AutoSelector.CountMarkedProtected(m_core));
+                if (protectedWarning.Length > 0 &&
+                    MessageBox.Show(protectedWarning + "Continue?", "Move Selected",
+                        MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
+                    return;
+
                 if (s_batchRunning) return; // a delete/move batch is already running
                 s_batchRunning = true;
                 m_edit_moveSelectedMenuItem.Enabled = false;
@@ -483,7 +594,7 @@ namespace AntiDupl.NET.WinForms
                     AutoSelector.BatchResult result = null;
                     try
                     {
-                        result = AutoSelector.ExecuteBatch(m_core, false, targetPath);
+                        result = AutoSelector.ExecuteBatch(m_core, false, targetPath, m_options.markProcessedAfterBatch);
                     }
                     finally
                     {
@@ -496,6 +607,8 @@ namespace AntiDupl.NET.WinForms
                             string msg = $"Moved {result.Succeeded} images to:\n{targetPath}";
                             if (result.Failed > 0)
                                 msg += $"\n{result.Failed} files could not be moved.";
+                            if (result.SkippedProtected > 0)
+                                msg += "\n" + string.Format(Resources.Strings.Current.MainMenu_BatchProtectedWarning_Text, result.SkippedProtected);
                             MessageBox.Show(msg, "Move Selected",
                                 MessageBoxButtons.OK, MessageBoxIcon.Information);
                             m_mainSplitContainer.UpdateResults();

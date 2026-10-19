@@ -501,21 +501,22 @@ namespace AntiDupl.NET.WinForms.Forms
                         int thumbSize = forceSize ?? (entry.ThumbSize > 0 ? entry.ThumbSize : m_reducedImageSize);
 
                         string nvJpegPath = Path.Combine(GetExeDir(), "NvJpegCollector.exe");
-                        var psi = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = nvJpegPath,
-                            // --no-pause (P2-9): the collector must never show a MessageBox
-                            // when launched with redirected pipes — an unclickable dialog
-                            // would hang this update thread's WaitForExit forever.
-                            Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --size {thumbSize} --update --no-pause",
-                            UseShellExecute = false,
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            CreateNoWindow = true
-                        };
 
-                        try
+                        // Один запуск сборщика. --no-pause (P2-9): the collector must never show
+                        // a MessageBox when launched with redirected pipes — an unclickable dialog
+                        // would hang this update thread's WaitForExit forever.
+                        Func<string, (int code, string stdout, string stderr)> runCollector = extraArgs =>
                         {
+                            var psi = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = nvJpegPath,
+                                Arguments = $"--input \"{entry.Path}\" --output \"{dbParent}\" --name \"{dbName}\" --size {thumbSize} --update --no-pause{extraArgs}",
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                CreateNoWindow = true
+                            };
+
                             using (var proc = System.Diagnostics.Process.Start(psi))
                             {
                                 // Drain stderr asynchronously to avoid pipe deadlock: the collector may
@@ -542,25 +543,38 @@ namespace AntiDupl.NET.WinForms.Forms
                                 }
                                 string stderr = stderrTask.Result;
                                 proc.WaitForExit();
+                                return (proc.ExitCode, stdout, stderr);
+                            }
+                        };
 
-                                if (proc.ExitCode != 0)
-                                {
-                                    ok = false;
-                                    error = $"exit code {proc.ExitCode}:\n{stderr}\n{stdout}";
-                                }
-                                else
-                                {
-                                    ok = true;
+                        try
+                        {
+                            var run = runCollector("");
 
-                                    // Refresh from index.adi: after a full rebuild (thumbSize change) the
-                                    // "[UPDATE] Final database:" line is absent and ThumbSize may have changed.
-                                    int actualThumbSize, actualCount;
-                                    ParseAdiInfo(Path.Combine(entry.Folder, "index.adi"), out actualThumbSize, out actualCount);
-                                    if (actualCount > 0)
-                                    {
-                                        newCount = actualCount;
-                                        newThumbSize = actualThumbSize;
-                                    }
+                            // R1 (§5.1): источник пуст/недоступен — сборщик базу не тронул и вернул 3.
+                            // Спрашиваем про осознанную очистку: повтор с --force-empty.
+                            if (run.code == 3 && AskClearEmptyDatabase(entry))
+                                run = runCollector(" --force-empty");
+
+                            if (run.code != 0)
+                            {
+                                ok = false;
+                                error = run.code == 4
+                                    ? Resources.Strings.Current.DatabaseManagerForm_UpdateBusyText
+                                    : $"exit code {run.code}:\n{run.stderr}\n{run.stdout}";
+                            }
+                            else
+                            {
+                                ok = true;
+
+                                // Refresh from index.adi: after a full rebuild (thumbSize change) the
+                                // "[UPDATE] Final database:" line is absent and ThumbSize may have changed.
+                                int actualThumbSize, actualCount;
+                                ParseAdiInfo(Path.Combine(entry.Folder, "index.adi"), out actualThumbSize, out actualCount);
+                                if (actualCount > 0)
+                                {
+                                    newCount = actualCount;
+                                    newThumbSize = actualThumbSize;
                                 }
                             }
                         }
@@ -670,6 +684,31 @@ namespace AntiDupl.NET.WinForms.Forms
             m_btnUpdateAll.Enabled = enabled;
             m_btnRefresh.Enabled = enabled;
             m_btnOpenFolder.Enabled = enabled;
+        }
+
+        // R1 (§5.1): модальный вопрос о осознанной очистке базы — из рабочего потока
+        // обновления, поэтому нужен синхронный ответ (BeginInvokeIfNeeded не подходит).
+        private bool AskClearEmptyDatabase(DbEntry entry)
+        {
+            return InvokeIfNeeded(() => MessageBox.Show(
+                this,
+                string.Format(Resources.Strings.Current.DatabaseManagerForm_UpdateEmptySourceQuestion, entry.Name),
+                Resources.Strings.Current.DatabaseManagerForm_UpdateEmptySourceTitle,
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes, false);
+        }
+
+        private T InvokeIfNeeded<T>(Func<T> func, T fallback)
+        {
+            if (IsDisposed || !IsHandleCreated) return fallback;
+            try
+            {
+                return (T)Invoke(func);
+            }
+            catch (InvalidOperationException)
+            {
+                // Form is closing/closed - report the neutral answer.
+                return fallback;
+            }
         }
 
         private void BeginInvokeIfNeeded(Action action)

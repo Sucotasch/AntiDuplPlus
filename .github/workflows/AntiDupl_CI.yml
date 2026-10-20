@@ -90,6 +90,23 @@ jobs:
         "@ | Set-Content -Path $force -Encoding UTF8
         Get-Content $force
 
+    # 7-zip.org removed the 21.07 downloads that this pinned vcpkg fetches (404), so a
+    # from-source port build dies in the tool bootstrap. Point the two entries at the
+    # official 7-Zip GitHub release, which serves the identical files (sha512 verified
+    # 2026-10-20). Re-check the tool URLs on every vcpkg pin bump.
+    - name: Patch the dead 7-Zip URLs in the pinned vcpkg
+      shell: pwsh
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: |
+        $file = Join-Path $env:VCPKG_ROOT 'scripts\vcpkgTools.xml'
+        $text = Get-Content $file -Raw
+        $text = $text.Replace('https://www.7-zip.org/a/7z2107-extra.7z', 'https://github.com/ip7z/7zip/releases/download/21.07/7z2107-extra.7z')
+        $text = $text.Replace('https://www.7-zip.org/a/7z2107-x64.msi', 'https://github.com/ip7z/7zip/releases/download/21.07/7z2107-x64.msi')
+        if ($text.Contains('7-zip.org')) { throw 'vcpkgTools.xml still references 7-zip.org' }
+        if (-not $text.Contains('ip7z/7zip')) { throw 'vcpkgTools.xml patch did not apply' }
+        [IO.File]::WriteAllText($file, $text)
+        Select-String -Path $file -Pattern 'ip7z/7zip' | ForEach-Object { Write-Host $_.Line.Trim() }
+
     # A fresh checkout has no install tree, and the MSBuild manifest install is hooked
     # BeforeTargets="ClCompile" while the CUDA BuildCustomizations compile the .cu files
     # (which include Simd) earlier -> the build died with

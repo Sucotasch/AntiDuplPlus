@@ -171,6 +171,10 @@ namespace AntiDupl.NET.WinForms
             SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             AllowUserToResizeRows = false;
             AllowUserToDeleteRows = false;
+            // Read-only grid: without this the last row is an uncommitted "new row",
+            // which (a) hides one real result and (b) cannot be made invisible,
+            // so the filter crashed with InvalidOperationException.
+            AllowUserToAddRows = false;
             AllowUserToOrderColumns = true;
             this.BackgroundColor = Color.White;
             ReadOnly = true;
@@ -466,7 +470,7 @@ namespace AntiDupl.NET.WinForms
                 {
                     DataGridViewCustomRow row = (DataGridViewCustomRow)Rows[i];
                     row.updated = false;
-                    if (selection != null)
+                    if (selection != null && i < selection.Length)
                         row.selected = selection[i];
 
                     // Update Target column from sideCache
@@ -552,16 +556,30 @@ namespace AntiDupl.NET.WinForms
             }
             m_visibleResultCount = visible;
 
-            // Текущая строка не должна остаться скрытой: переводим на первую видимую.
+            // Текущая строка не должна остаться скрытой: переводим на первую видимую,
+            // а если под фильтр не попало ничего — снимаем текущую пару вместе с превью.
             if (m_results.Length > 0 && m_currentRowIndex >= 0 && m_currentRowIndex < Rows.Count && !Rows[m_currentRowIndex].Visible)
             {
+                int firstVisible = -1;
                 for (int i = 0; i < Rows.Count; i++)
                 {
                     if (!Rows[i].Visible) continue;
-                    SetCurrentRow(i);
+                    firstVisible = i;
                     break;
                 }
+                if (firstVisible >= 0)
+                    SetCurrentRow(firstVisible);
+                else
+                    ClearCurrentRow();
             }
+        }
+
+        /// <summary>Ни одна пара не прошла фильтр: ни текущей строки, ни превью.</summary>
+        private void ClearCurrentRow()
+        {
+            m_core.SetCurrent(-1);
+            m_currentRowIndex = -1;
+            m_mainSplitContainer.CurrentResultChanged();
         }
 
         protected override void OnRowPrePaint(DataGridViewRowPrePaintEventArgs e)

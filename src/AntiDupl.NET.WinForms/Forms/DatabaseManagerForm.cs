@@ -84,7 +84,7 @@ namespace AntiDupl.NET.WinForms.Forms
             {
                 int splitMain = s_splitMainDistance;
                 if (splitMain < m_splitMain.Panel1MinSize || splitMain > mainMax)
-                    splitMain = m_splitMain.Width * 40 / 100;
+                    splitMain = m_splitMain.Width * 50 / 100;
                 m_splitMain.SplitterDistance = Math.Min(Math.Max(splitMain, m_splitMain.Panel1MinSize), mainMax);
             }
 
@@ -186,6 +186,7 @@ namespace AntiDupl.NET.WinForms.Forms
             Panel registryPanel = CreatePanel("Registry (All)", Color.White);
             m_registryGrid = CreateGrid();
             m_registryGrid.Dock = DockStyle.Fill;
+            m_registryGrid.ColumnHeaderMouseClick += RegistryGrid_ColumnHeaderMouseClick;
             registryPanel.Controls.Add(m_registryGrid);
 
             Panel registryBtnPanel = new Panel();
@@ -286,6 +287,7 @@ namespace AntiDupl.NET.WinForms.Forms
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             grid.RowHeadersVisible = false;
             grid.CellContentClick += Grid_CellContentClick;
+            grid.CellToolTipTextNeeded += Grid_CellToolTipTextNeeded;
 
             var colEnabled = new DataGridViewCheckBoxColumn();
             colEnabled.Name = "Enabled";
@@ -294,6 +296,7 @@ namespace AntiDupl.NET.WinForms.Forms
             colEnabled.Width = 35;
             colEnabled.MinimumWidth = 35;
             colEnabled.ReadOnly = false;
+            colEnabled.ToolTipText = "Click the header to enable or disable all databases.";
             grid.Columns.Add(colEnabled);
 
             var colName = new DataGridViewTextBoxColumn();
@@ -301,15 +304,26 @@ namespace AntiDupl.NET.WinForms.Forms
             colName.DataPropertyName = "Name";
             colName.HeaderText = "Name";
             colName.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-            colName.MinimumWidth = 150;
+            colName.MinimumWidth = 100;
             grid.Columns.Add(colName);
+
+            // Полный путь источника виден в таблице (обрезается многоточием, полностью — в подсказке).
+            var colSource = new DataGridViewTextBoxColumn();
+            colSource.Name = "Source";
+            colSource.DataPropertyName = "Path";
+            colSource.HeaderText = "Source folder";
+            colSource.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+            colSource.FillWeight = 160;
+            colSource.MinimumWidth = 100;
+            colSource.ReadOnly = true;
+            grid.Columns.Add(colSource);
 
             var colMoved = new DataGridViewTextBoxColumn();
             colMoved.Name = "Moved";
             colMoved.DataPropertyName = "RemapIndicator";
             colMoved.HeaderText = "Moved";
-            colMoved.Width = 55;
-            colMoved.MinimumWidth = 55;
+            colMoved.Width = 45;
+            colMoved.MinimumWidth = 45;
             colMoved.ReadOnly = true;
             colMoved.ToolTipText = "Indicates that the source folder was moved and the database is being remapped to a new location.";
             grid.Columns.Add(colMoved);
@@ -318,25 +332,35 @@ namespace AntiDupl.NET.WinForms.Forms
             colCount.Name = "ImageCount";
             colCount.DataPropertyName = "ImageCount";
             colCount.HeaderText = "Images";
-            colCount.Width = 60;
-            colCount.MinimumWidth = 60;
+            colCount.Width = 50;
+            colCount.MinimumWidth = 50;
             grid.Columns.Add(colCount);
 
             var colStatus = new DataGridViewTextBoxColumn();
             colStatus.Name = "Status";
             colStatus.DataPropertyName = "Status";
             colStatus.HeaderText = "Status";
-            colStatus.Width = 55;
-            colStatus.MinimumWidth = 55;
+            colStatus.Width = 50;
+            colStatus.MinimumWidth = 50;
             grid.Columns.Add(colStatus);
+
+            var colUpdated = new DataGridViewTextBoxColumn();
+            colUpdated.Name = "Updated";
+            colUpdated.DataPropertyName = "LastUpdatedText";
+            colUpdated.HeaderText = "Updated";
+            colUpdated.Width = 100;
+            colUpdated.MinimumWidth = 100;
+            colUpdated.ReadOnly = true;
+            colUpdated.ToolTipText = "When index.adi was last written (database create or update).";
+            grid.Columns.Add(colUpdated);
 
             var colPath = new DataGridViewButtonColumn();
             colPath.Name = "Path";
             colPath.HeaderText = "";
             colPath.Text = "Path...";
             colPath.UseColumnTextForButtonValue = true;
-            colPath.Width = 65;
-            colPath.MinimumWidth = 65;
+            colPath.Width = 60;
+            colPath.MinimumWidth = 60;
             colPath.FlatStyle = FlatStyle.Flat;
             grid.Columns.Add(colPath);
 
@@ -345,8 +369,8 @@ namespace AntiDupl.NET.WinForms.Forms
             colUpdate.HeaderText = "";
             colUpdate.Text = "Update";
             colUpdate.UseColumnTextForButtonValue = true;
-            colUpdate.Width = 65;
-            colUpdate.MinimumWidth = 65;
+            colUpdate.Width = 60;
+            colUpdate.MinimumWidth = 60;
             colUpdate.FlatStyle = FlatStyle.Flat;
             grid.Columns.Add(colUpdate);
 
@@ -355,8 +379,8 @@ namespace AntiDupl.NET.WinForms.Forms
             colDelete.HeaderText = "";
             colDelete.Text = "Delete";
             colDelete.UseColumnTextForButtonValue = true;
-            colDelete.Width = 65;
-            colDelete.MinimumWidth = 65;
+            colDelete.Width = 60;
+            colDelete.MinimumWidth = 60;
             colDelete.FlatStyle = FlatStyle.Flat;
             grid.Columns.Add(colDelete);
 
@@ -374,13 +398,47 @@ namespace AntiDupl.NET.WinForms.Forms
             foreach (var entry in m_allEntries)
             {
                 if (string.IsNullOrEmpty(entry.Folder)) continue;
+                string indexPath = Path.Combine(ResolvePath(entry.Folder), "index.adi");
                 int thumbSize, imageCount;
-                ParseAdiInfo(Path.Combine(ResolvePath(entry.Folder), "index.adi"), out thumbSize, out imageCount);
+                ParseAdiInfo(indexPath, out thumbSize, out imageCount);
                 if (imageCount > 0) entry.ImageCount = imageCount;
+                // «Обновлено» = время последней записи index.adi: коллектор перезаписывает его при update.
+                try
+                {
+                    if (File.Exists(indexPath)) entry.LastUpdated = File.GetLastWriteTime(indexPath);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
             }
 
             RefreshAllGrids();
             m_dirty = false;
+        }
+
+        /// <summary>Полный путь источника — в подсказке (в ячейке он обрезается многоточием).</summary>
+        private void Grid_CellToolTipTextNeeded(object sender, DataGridViewCellToolTipTextNeededEventArgs e)
+        {
+            var grid = sender as DataGridView;
+            if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (grid.Columns[e.ColumnIndex].Name != "Source") return;
+            var entry = grid.Rows[e.RowIndex].DataBoundItem as DbEntry;
+            if (entry != null) e.ToolTipText = entry.Path;
+        }
+
+        /// <summary>Клик по заголовку «On»: есть выключенные — включить все, иначе выключить все.</summary>
+        private void RegistryGrid_ColumnHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            var grid = sender as DataGridView;
+            if (grid == null || e.ColumnIndex < 0) return;
+            if (grid.Columns[e.ColumnIndex].Name != "Enabled") return;
+
+            bool enableAll = m_allEntries.Any(entry => !entry.Enabled);
+            foreach (var entry in m_allEntries)
+                entry.Enabled = enableAll;
+
+            RefreshAllGrids();
+            m_dirty = true;
+            SaveDatabases();
         }
 
         private void Grid_CellContentClick(object sender, DataGridViewCellEventArgs e)
@@ -1373,6 +1431,11 @@ namespace AntiDupl.NET.WinForms.Forms
             public int ThumbSize { get; set; } = 32;
             public string Status { get; set; }
             public int Pool { get; set; } = 0;
+
+            /// <summary>Время последней записи index.adi — когда база обновлялась.</summary>
+            public DateTime? LastUpdated { get; set; }
+
+            public string LastUpdatedText => LastUpdated.HasValue ? LastUpdated.Value.ToString("yyyy-MM-dd HH:mm") : "";
 
             public string RemapIndicator => string.IsNullOrEmpty(RemapFrom) ? "" : "yes";
         }

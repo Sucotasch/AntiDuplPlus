@@ -56,10 +56,10 @@ jobs:
         # Required for matrix builds: the action uploads its install log as an artifact.
         log-file-suffix: '${{ matrix.configuration }}.txt'
 
-    # P3: the former `nuget restore` step was dead weight — all C# projects are
-    # PackageReference-based net8.0 csproj restored by msbuild/dotnet themselves,
-    # and the C++ projects have no NuGet dependencies. It succeeded trivially and
-    # wasted ~30s per matrix cell.
+    # P3: the former `nuget restore` step is gone — the C++ projects have no NuGet
+    # dependencies. The C# ones still need a restore: plain `msbuild` does not
+    # restore PackageReference projects (a fresh checkout has no obj/project.assets.json),
+    # so the solution build below passes /restore.
 
     - name: Run and cache vcpkg dependecies
       uses: lukka/run-vcpkg@v10.7
@@ -119,7 +119,7 @@ jobs:
     - if: matrix.configuration == 'Release' || matrix.configuration == 'Debug'
       name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=$env:Configuration /p:Platform=x64 /p:ForceImportBeforeCppProps=${{ github.workspace }}\vcpkg-force.props $env:Solution_Name
+      run: msbuild /m /restore /p:Configuration=$env:Configuration /p:Platform=x64 /p:ForceImportBeforeCppProps=${{ github.workspace }}\vcpkg-force.props $env:Solution_Name
       env: 
         Configuration: ${{ matrix.configuration }}
 

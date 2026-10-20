@@ -194,6 +194,7 @@ namespace AntiDupl.NET.WinForms
             m_filterTextBox = new ToolStripTextBox();
             m_filterTextBox.AutoSize = false;
             m_filterTextBox.Size = new Size(110, 22);
+            m_filterTextBox.TextBox.PlaceholderText = "Filter by name or path";
             m_filterTextBox.KeyDown += new KeyEventHandler(OnFilterTextKeyDown);
             m_filterTextBox.Leave += new EventHandler(OnFilterChanged);
 

@@ -57,6 +57,9 @@ namespace AntiDupl.NET.WinForms.Forms
         private Process m_process;
         private bool m_running;
         private string m_lastSummary = "";
+        // Имя базы сгенерировано из папки (а не введено вручную).
+        private bool m_nameIsAuto = true;
+        private bool m_settingName = false;
 
         public CollectorForm(int defaultThumbSize, string defaultInput)
         {
@@ -166,6 +169,10 @@ namespace AntiDupl.NET.WinForms.Forms
             Controls.Add(m_log);
             Controls.Add(m_startButton);
             Controls.Add(m_closeButton);
+
+            // Имя базы следует за папкой, пока пользователь не введёт своё.
+            m_inputPath.TextChanged += OnInputPathTextChanged;
+            m_databaseName.TextChanged += OnDatabaseNameTextChanged;
         }
 
         private static string DeriveDatabaseName(string path)
@@ -186,9 +193,28 @@ namespace AntiDupl.NET.WinForms.Forms
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                     return;
                 m_inputPath.Text = dialog.SelectedPath;
-                if (m_databaseName.Text.Trim().Length == 0)
-                    m_databaseName.Text = DeriveDatabaseName(dialog.SelectedPath);
             }
+        }
+
+        private void OnInputPathTextChanged(object sender, EventArgs e)
+        {
+            if (m_nameIsAuto)
+                SetDatabaseName(DeriveDatabaseName(m_inputPath.Text));
+        }
+
+        private void OnDatabaseNameTextChanged(object sender, EventArgs e)
+        {
+            if (!m_settingName)
+                m_nameIsAuto = m_databaseName.Text.Trim().Length == 0;
+        }
+
+        /// <summary>Обновляет имя, не переводя его в «введено вручную».</summary>
+        private void SetDatabaseName(string name)
+        {
+            m_settingName = true;
+            m_databaseName.Text = name;
+            m_settingName = false;
+            m_nameIsAuto = true;
         }
 
         private void OnStartClick(object sender, EventArgs e)

@@ -202,6 +202,14 @@ jobs:
         Write-Host "Release package verified: $($cuda -join ', ') + NvJpegCollector.exe"
       
     - if: matrix.configuration == 'Publish'
+      name: Build collector (Publish)
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      # The solution-level "Build" step does not run in this cell, so the collector has
+      # to be built here: the portable package ships it. It has Release|x64 only and
+      # writes to bin\Release (project OutDir), which MakePublish.cmd falls back to.
+      run: msbuild /m src\NvJpegCollector\NvJpegCollector.vcxproj /p:Configuration=Release /p:Platform=x64 /p:ForceImportBeforeCppProps=${{ github.workspace }}\vcpkg-force.props
+
+    - if: matrix.configuration == 'Publish'
       name: Make release binary and source files
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: |

@@ -320,7 +320,9 @@ namespace AntiDupl.NET.WinForms.Forms
             AppendLog(line);
 
             if (line.StartsWith("[DONE]") || line.StartsWith("[SAVE] Saved") || line.StartsWith("[FAILED]"))
-                m_lastSummary = line;
+                m_lastSummary = line.StartsWith("[DONE]")
+                    ? line.Substring("[DONE]".Length).Trim()
+                    : line;
         }
 
         private void AppendLog(string line)

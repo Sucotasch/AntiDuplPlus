@@ -469,6 +469,8 @@ namespace AntiDupl.NET.WinForms
             m_currentGroupPosition = m_groups == null ? -1 : Array.IndexOf(m_groups, group);
             if (OnCurrentThumbnailChanged != null)
                 OnCurrentThumbnailChanged(group, index);
+            // Статус-бар в групповом виде показывает позицию выбранной группы.
+            m_mainSplitContainer.NotifyResultsUpdated();
         }
 
         /// <summary>
@@ -483,7 +485,6 @@ namespace AntiDupl.NET.WinForms
             AutoSelector.SetPathMarked(m_results, group, group.images[index].path, marked);
             RefreshSelection();
             ChangeCurrentThumbnail(group, index);
-            m_mainSplitContainer.NotifyResultsUpdated();
         }
 
         /// <summary>Перечитать чекбоксы во всех созданных группах.</summary>
@@ -536,7 +537,6 @@ namespace AntiDupl.NET.WinForms
             AutoSelector.KeepOnlyOne(m_core, group.images, group.images[index].path);
             RefreshSelection();
             ChangeCurrentThumbnail(group, index);
-            m_mainSplitContainer.NotifyResultsUpdated();
         }
 
         public bool Rename(CoreGroup group, int index, string newFileName)

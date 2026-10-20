@@ -166,8 +166,13 @@ jobs:
       shell: pwsh
       run: |
         $bin = Join-Path $env:GITHUB_WORKSPACE 'bin\Release'
-        Copy-Item (Join-Path $env:CUDA_PATH 'bin\x64\nvjpeg64_12.dll') $bin -Force
-        Copy-Item (Join-Path $env:CUDA_PATH 'bin\x64\cudart64_12.dll') $bin -Force
+        # CUDA 12.x keeps the runtime DLLs in bin\, CUDA 13.x in bin\x64\.
+        foreach ($name in @('nvjpeg64_12.dll', 'cudart64_12.dll')) {
+          $source = @((Join-Path $env:CUDA_PATH "bin\x64\$name"), (Join-Path $env:CUDA_PATH "bin\$name")) |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $source) { throw "$name not found under $env:CUDA_PATH" }
+          Copy-Item $source $bin -Force
+        }
         Get-ChildItem $bin -Filter '*64_*.dll' | Select-Object -ExpandProperty Name
 
     - if: matrix.configuration == 'Release'

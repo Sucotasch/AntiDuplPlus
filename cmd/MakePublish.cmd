@@ -68,6 +68,9 @@ set NVJPEG=%COLLECTOR_DIR%\nvjpeg64_13.dll
 if not exist "%NVJPEG%" set NVJPEG=%COLLECTOR_DIR%\nvjpeg64_12.dll
 if not exist "%NVJPEG%" set NVJPEG=%CUDA_PATH%\bin\x64\nvjpeg64_13.dll
 if not exist "%NVJPEG%" set NVJPEG=%CUDA_PATH%\bin\x64\nvjpeg64_12.dll
+rem CUDA 12.x ships these in bin\, CUDA 13.x in bin\x64\.
+if not exist "%NVJPEG%" set NVJPEG=%CUDA_PATH%\bin\nvjpeg64_13.dll
+if not exist "%NVJPEG%" set NVJPEG=%CUDA_PATH%\bin\nvjpeg64_12.dll
 if not exist "%NVJPEG%" (
 echo [ERROR] nvjpeg64_*.dll not found - the collector in the package would fail to start!
 exit /b 1

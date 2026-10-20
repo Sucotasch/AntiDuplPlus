@@ -79,6 +79,11 @@ xcopy "%NVJPEG%" "%PUBLISH_DIR%" /y
 
 xcopy %PUBLISH_DIR% %TMP_DIR% /y /i /s
 
+rem Symbols are not needed at runtime: AntiDupl.pdb alone is ~62 MB and it made the
+rem portable package ~78 MB instead of ~17 MB.
+erase "%TMP_DIR%\*.pdb" /q /s /f 2>nul
+erase "%TMP_DIR%\AntiDupl.NET.Core.xml" /q /f 2>nul
+
 if exist %RAR_EXE% (
 %RAR_EXE% a -ep1 -s -m5 -r -sfx %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe %TMP_DIR%
 certutil -hashfile %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe SHA256 > %OUT_DIR%\AntiDupl.NET-%VERSION%_SingleFilePortable.exe.hash.txt

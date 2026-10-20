@@ -132,6 +132,9 @@ reused, so repeated searches do not read your photo files again.
 
 Every release provides four files (plus SHA-256 checksums in `*.hash.txt`):
 
+**If you are not sure which one to take, download
+`AntiDupl.NET-<version>_SingleFilePortable.exe`** — it needs no .NET installation.
+
 | File | What is inside | Needs .NET 8 |
 |---|---|---|
 | `AntiDupl.NET-<version>.zip` | The complete application: GUI, `AntiDupl.dll`, database builder `NvJpegCollector.exe`, CUDA runtime libraries, resources | yes |
@@ -147,11 +150,13 @@ installed.
 Installation steps:
 
 1. Download the release from the [releases page](https://github.com/Sucotasch/AntiDuplPlus/releases).
-2. Unpack the zip into a folder you can write to (the application keeps its databases,
-   settings and logs inside that folder — do not put it into `Program Files`).
-3. If the application does not start, install the
+2. The `.exe` files are self-extracting archives: run one, choose an empty folder and press
+   *Extract*. The `.zip` files contain the same folder in a normal archive.
+3. Unpack into a folder you can write to (the application keeps its databases, settings and
+   logs inside that folder — do not put it into `Program Files`).
+4. If the application does not start, install the
    [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0).
-4. Start `AntiDupl.NET.WinForms.exe`.
+5. Start `AntiDupl.NET.WinForms.exe`.
 
 Nothing is installed system-wide: the application runs from its folder. Only a few
 interface preferences (window layout, pool comparison mode) are kept in the current user's

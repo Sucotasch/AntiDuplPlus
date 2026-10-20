@@ -356,6 +356,12 @@ namespace AntiDupl.NET.WinForms
                 if (r.first == null || r.second == null) continue;
                 if (!groupPaths.Contains(r.first.path) || !groupPaths.Contains(r.second.path)) continue;
 
+                // Цель пары может быть только одним из её файлов: иначе пометка файла A
+                // задела бы пары B-C, которые удаление A не разрешает.
+                bool hasPath = string.Equals(r.first.path, path, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(r.second.path, path, StringComparison.OrdinalIgnoreCase);
+                if (!hasPath) continue;
+
                 string key = GetKey(r);
                 if (marked)
                 {

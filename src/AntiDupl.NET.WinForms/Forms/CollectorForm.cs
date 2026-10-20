@@ -197,6 +197,10 @@ namespace AntiDupl.NET.WinForms.Forms
                 return;
 
             string input = m_inputPath.Text.Trim();
+            // Trailing separator before the closing quote would escape it in the
+            // collector's command line ("C:\dir\").
+            if (input.Length > 3)
+                input = input.TrimEnd('\\', '/');
             if (!Directory.Exists(input))
             {
                 MessageBox.Show(this, "Source folder does not exist.", "New Database",
@@ -393,13 +397,8 @@ namespace AntiDupl.NET.WinForms.Forms
 
         private void OnCloseClick(object sender, EventArgs e)
         {
-            if (m_running)
-            {
-                if (MessageBox.Show(this, "Stop the collector?", "New Database",
-                        MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-                    return;
-                StopCollector();
-            }
+            // The "still running" prompt lives in OnFormClosing - asking here too
+            // would show two dialogs in a row.
             Close();
         }
 

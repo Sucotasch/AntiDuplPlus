@@ -136,12 +136,13 @@ Every release provides four files (plus SHA-256 checksums in `*.hash.txt`):
 |---|---|---|
 | `AntiDupl.NET-<version>.zip` | The complete application: GUI, `AntiDupl.dll`, database builder `NvJpegCollector.exe`, CUDA runtime libraries, resources | yes |
 | `AntiDupl.NET-<version>.exe` | The same package as a self-extracting archive | yes |
-| `AntiDupl.NET-<version>_SingleFilePortable.exe` | One self-contained GUI executable — **without** the database builder | no |
-| `AntiDupl.NET-<version>_SingleFilePortable.zip` | The same portable executable in a zip | no |
+| `AntiDupl.NET-<version>_SingleFilePortable.exe` | The complete application as a self-contained build — no .NET installation needed | no |
+| `AntiDupl.NET-<version>_SingleFilePortable.zip` | The same portable package in a zip | no |
 
-**Use the zip package.** It is the only one that can create and update databases. The
-portable build is meant for machines where .NET cannot be installed and for users who
-already have databases built by the full package.
+Both packages can create, update and search databases: the database builder is a native
+executable and ships in both. Choose the zip package when .NET 8 is already installed or
+can be installed; choose the portable build for a machine where the .NET runtime cannot be
+installed.
 
 Installation steps:
 
@@ -435,8 +436,6 @@ Engineering notes (build quirks, database formats, CI) are in [AGENTS.md](AGENTS
 - **Windows x64 only.** There are no Linux or ARM builds.
 - **NVIDIA GPU required.** The comparison has no CPU fallback; without a Turing-class (or
   newer) GPU the search cannot run.
-- **The single-file portable build cannot create databases** — it ships without the
-  collector.
 - **No undo** for delete/move/rename operations.
 - **The database builder indexes JPEG, PNG, BMP, GIF, TIFF and WebP**, so AVIF, HEIF and
   JPEG XL files are not found by a search yet.

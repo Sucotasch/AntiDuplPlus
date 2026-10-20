@@ -99,7 +99,8 @@ Several call sites originally relied on a space-free path; they are now quote-sa
 - `AntiDupl.dll` imports **only `cudart64_12.dll`** (CUDA 12.8 BuildCustomizations + `cudart.lib`)
 - `NvJpegCollector.exe` imports **only `nvjpeg64_13.dll`** (linked via `$(CUDA_PATH)` = 13.1)
 - Not needed: `nvjpeg64_12.dll`, `cudart64_13.dll`
-- `dotnet publish` does **not** copy native P/Invoke DLLs — copy `AntiDupl.dll` + `cudart64_12.dll` + `nvjpeg64_13.dll` manually.
+- `dotnet publish` does **not** copy native P/Invoke DLLs - copy `AntiDupl.dll` + `cudart64_12.dll` + `nvjpeg64_13.dll` manually.
+- `cmd/MakePublish.cmd` (the portable package) also copies `NvJpegCollector.exe` and the matching `nvjpeg64_*.dll` (looked up next to the collector, then in `$(CUDA_PATH)`), so the portable build can create databases: the collector is native and needs no .NET. CI verifies both files in the Publish package; a portable build without them is useless on first run.
 
 ### CI
 `.github/workflows/AntiDupl_CI.yml` — Debug/Release/Publish matrix on **`windows-2022`** (VS 2022 / VCTargetsPath `...\VC\v170`; `windows-latest` now ships VS 2026 / v180, where CUDA 12.8's BuildCustomizations do not exist and the build dies with `MSB4019: ...\v180\BuildCustomizations\CUDA 12.8.props was not found`) with CUDA 12.8, vcpkg (pinned commit), solution build; Release job also runs `MakeBin.cmd`, Publish job runs native vcxproj build + WinForms single-file publish (`AntiDuplPublishSingleFile` profile) + `MakePublish.cmd`. Version tags (`v*`) create **pre-release** GitHub releases (the `create-draft-release` job is `prerelease: true`). The VirusTotal step is optional: it runs only when the `VT_API_KEY` repo secret is set (not set today), otherwise the release body is empty. CI runs the contract tests (Release cell) but does **not** run `Deploy.cmd`.
@@ -189,3 +190,4 @@ Run it after any change to `AntiDupl.h`, `adOptions.h` or `CoreDll.cs` (66 check
 - **`adExternal.h`** (C++) and **`External.cs`** (C#) are auto-generated from `src/version.txt` by pre-build scripts (`adExternal.cmd`, `External.cmd`). **Never edit by hand.** They are gitignored; a build regenerates them locally.
 - Post-build: `cmd/CopyData.cmd` (called from `Deploy.cmd` and WinForms PostBuild target) copies `data/resources/` (mirror) + `docs/data/resources/` (additive) into the output dir.
 - Packaging: `cmd/MakeBin.cmd` builds SFX exe+zip into `out/bin/`, `MakePublish.cmd` → `out/Publish/` (single-file portable), `MakeSrc.cmd` → `out/src/`. They use WinRAR if installed, else bundled `cmd/7-zip/7za_2201.exe`.
+- `MakePublish.cmd` packs **everything** from `out\Publish\AntiDupl.NET`, which is also the `dotnet publish` output folder, and does not clean it: a leftover non-single-file publish (framework DLLs, 100+ files, ~93 MB zip) ends up inside the portable package. CI starts from a fresh runner; locally delete `out\Publish\AntiDupl.NET` before packaging.

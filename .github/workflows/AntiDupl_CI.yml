@@ -194,8 +194,8 @@ jobs:
     # step above breaks or misses a dependency, the package would ship without
     # them and fail at startup ("Can't load AntiDupl.dll"). Fail the build early
     # instead of letting a broken package reach the artifact store.
-    # Note: the Publish package contains the GUI only (no NvJpegCollector.exe,
-    # no nvjpeg64_13.dll — those live in the full bin package).
+      # The package now ships the collector too: a portable first run must be able
+      # to build a database without a .NET install.
     - if: matrix.configuration == 'Publish'
       name: Verify native DLLs in Publish output (P2-14)
       working-directory: ${{env.GITHUB_WORKSPACE}}
@@ -204,10 +204,13 @@ jobs:
         # P3: trimmed read — see the version step note.
         $version = [IO.File]::ReadAllText('src/version.txt').Trim()
         $pkgDir = "out\Publish\AntiDupl.NET-$version"
-        $required = @('AntiDupl.dll', 'cudart64_12.dll')
+        $required = @('AntiDupl.dll', 'cudart64_12.dll', 'NvJpegCollector.exe')
         $missing = @()
         foreach ($f in $required) {
           if (-not (Test-Path (Join-Path $pkgDir $f))) { $missing += $f }
+        }
+        if (-not (Get-ChildItem $pkgDir -Filter 'nvjpeg64_*.dll' -ErrorAction SilentlyContinue)) {
+          $missing += 'nvjpeg64_*.dll'
         }
         if ($missing.Count -gt 0) {
           Write-Host "Missing native DLLs in $pkgDir : $($missing -join ', ')"

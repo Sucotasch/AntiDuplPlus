@@ -53,6 +53,27 @@ echo [ERROR] cudart64_12.dll not found - publish package would fail to start!
 exit /b 1
 )
 
+rem The portable package must be able to build databases, otherwise a first-time
+rem user has nothing to search: the collector is native (C++/CUDA) and needs no
+rem .NET, so ship it together with the nvJPEG runtime it was linked against.
+set COLLECTOR_DIR=%ROOT_DIR%\bin\Publish
+if not exist "%COLLECTOR_DIR%\NvJpegCollector.exe" set COLLECTOR_DIR=%ROOT_DIR%\bin\Release
+if not exist "%COLLECTOR_DIR%\NvJpegCollector.exe" (
+echo [ERROR] NvJpegCollector.exe not found - the portable package could not create databases!
+exit /b 1
+)
+xcopy "%COLLECTOR_DIR%\NvJpegCollector.exe" "%PUBLISH_DIR%" /y
+
+set NVJPEG=%COLLECTOR_DIR%\nvjpeg64_13.dll
+if not exist "%NVJPEG%" set NVJPEG=%COLLECTOR_DIR%\nvjpeg64_12.dll
+if not exist "%NVJPEG%" set NVJPEG=%CUDA_PATH%\bin\x64\nvjpeg64_13.dll
+if not exist "%NVJPEG%" set NVJPEG=%CUDA_PATH%\bin\x64\nvjpeg64_12.dll
+if not exist "%NVJPEG%" (
+echo [ERROR] nvjpeg64_*.dll not found - the collector in the package would fail to start!
+exit /b 1
+)
+xcopy "%NVJPEG%" "%PUBLISH_DIR%" /y
+
 xcopy %PUBLISH_DIR% %TMP_DIR% /y /i /s
 
 if exist %RAR_EXE% (

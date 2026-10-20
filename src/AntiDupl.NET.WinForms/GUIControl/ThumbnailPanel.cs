@@ -200,25 +200,17 @@ namespace AntiDupl.NET.WinForms
         }
 
         /// <summary>
-        /// Перечитать отметку файла из ядра (используется «Оставить одну» в группе).
+        /// Перечитать отметку файла (разметка живёт в AutoSelector, а не в нативном
+        /// выделении группы — batch удаляет/перемещает именно её).
         /// </summary>
         public void UpdateSelection()
         {
-            bool[] selected = m_core.GetSelection(m_group.id, (uint)m_index, 1);
-            m_checkBox.Checked = selected[0];
+            m_checkBox.Checked = AutoSelector.IsMarkedPath(ImageInfo.path);
         }
 
         private void OnCheckBoxClick(object sender, EventArgs e)
         {
-            if (m_checkBox.Checked)
-            {
-                m_core.SetSelection(m_group.id, m_index, CoreDll.SelectionType.SelectCurrent);
-            }
-            else
-            {
-                m_core.SetSelection(m_group.id, m_index, CoreDll.SelectionType.UnselectCurrent);
-            }
-            m_thumbnailGroupPanel.Table.ChangeCurrentThumbnail(m_group, m_index);
+            m_thumbnailGroupPanel.Table.SetMarked(m_group, m_index, m_checkBox.Checked);
         }
 
         private void OnClick(object sender, EventArgs e)

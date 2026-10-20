@@ -63,8 +63,23 @@ namespace AntiDupl.NET.WinForms
             Dock = DockStyle.Fill;
 
             m_pictureBoxPanel = new PictureBoxPanel(m_core, m_options);
+            m_pictureBoxPanel.Paint += new PaintEventHandler(OnPicturePaint);
 
             Controls.Add(m_pictureBoxPanel);
+        }
+
+        /// <summary>
+        /// Индикация выбранного файла: превью в групповом виде показывает одну картинку,
+        /// поэтому помеченную к удалению/перемещению обводим рамкой.
+        /// </summary>
+        private void OnPicturePaint(object sender, PaintEventArgs e)
+        {
+            if (m_group == null || m_group.images == null || m_index < 0 || m_index >= m_group.images.Length)
+                return;
+            if (!AutoSelector.IsMarkedPath(m_group.images[m_index].path))
+                return;
+            ControlPaint.DrawBorder(e.Graphics, ((Control)sender).ClientRectangle,
+                Color.Firebrick, ButtonBorderStyle.Solid);
         }
 
         private void InnitializeTestButton()

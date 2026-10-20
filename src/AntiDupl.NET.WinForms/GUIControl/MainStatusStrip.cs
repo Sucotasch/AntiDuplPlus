@@ -117,14 +117,20 @@ namespace AntiDupl.NET.WinForms
 
         private void UpdateResults()
         {
+            ResultsListView resultsListView = m_mainSplitContainer.resultsListView;
+            ThumbnailGroupTable groupTable = m_mainSplitContainer.thumbnailGroupTable;
+            bool grouped = m_mainSplitContainer.IsGroupedView;
+
             {
                 // Этап 6: при активном фильтре показываем, сколько строк реально видно.
-                var resultsListView = m_mainSplitContainer.resultsListView;
                 StringBuilder builder = new StringBuilder();
-                int total = resultsListView.GetTotalResultCount();
+                int total = grouped ? groupTable.TotalGroupCount : resultsListView.GetTotalResultCount();
                 ResultFilter filter = m_options.resultFilter;
                 if (filter != null && filter.IsActive)
-                    builder.Append(string.Format(m_totalFilteredText, resultsListView.GetVisibleResultCount(), total));
+                {
+                    int visible = grouped ? groupTable.GroupCount : resultsListView.GetVisibleResultCount();
+                    builder.Append(string.Format(m_totalFilteredText, visible, total));
+                }
                 else
                     builder.Append(m_totalText + total);
                 m_totalLabel.Text = builder.ToString();
@@ -133,7 +139,7 @@ namespace AntiDupl.NET.WinForms
             {
                 StringBuilder builder = new StringBuilder();
                 builder.Append(m_processedText);
-                builder.Append(m_mainSplitContainer.resultsListView.GetProcessedResultCount());
+                builder.Append(grouped ? groupTable.ProcessedPairCount : resultsListView.GetProcessedResultCount());
                 m_processedLabel.Text = builder.ToString();
             }
 
@@ -144,14 +150,11 @@ namespace AntiDupl.NET.WinForms
 
         private void SelectionChanged()
         {
-            StringBuilder builder = new StringBuilder();
-            builder.Append(m_selectedText);
-            int selectedResultCount = m_mainSplitContainer.resultsListView.GetSelectedResultCount();
-            if (m_mainSplitContainer.resultsListView.GetTotalResultCount() > 0)
-                builder.Append(selectedResultCount);
-            else
-                builder.Append(0);
-            m_selectedLabel.Text = builder.ToString();
+            // В групповом виде «выбрано» — это помеченные файлы (разметка AutoSelector).
+            int selected = m_mainSplitContainer.IsGroupedView
+                ? m_mainSplitContainer.thumbnailGroupTable.MarkedCount
+                : m_mainSplitContainer.resultsListView.GetSelectedResultCount();
+            m_selectedLabel.Text = m_selectedText + selected;
         }
 
         private void OnResize(object sender, EventArgs e)
@@ -169,10 +172,17 @@ namespace AntiDupl.NET.WinForms
 
         private void CurrentResultChanged()
         {
-            StringBuilder builder = new StringBuilder();
-            builder.Append(m_currentText);
-            builder.Append(m_mainSplitContainer.resultsListView.GetTotalResultCount() > 0 ? m_mainSplitContainer.resultsListView.GetCurrentRowIndex() + 1 : 0);
-            m_currentLabel.Text = builder.ToString();
+            int current = 0;
+            if (m_mainSplitContainer.IsGroupedView)
+            {
+                int position = m_mainSplitContainer.thumbnailGroupTable.CurrentGroupPosition;
+                current = position < 0 ? 0 : position + 1;
+            }
+            else if (m_mainSplitContainer.resultsListView.GetTotalResultCount() > 0)
+            {
+                current = m_mainSplitContainer.resultsListView.GetCurrentRowIndex() + 1;
+            }
+            m_currentLabel.Text = m_currentText + current;
         }
     }
 }

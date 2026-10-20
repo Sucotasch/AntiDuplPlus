@@ -43,6 +43,9 @@ namespace AntiDupl.NET.WinForms
         private CoreGroup[] m_groups;
         private int m_maxGroupIndex = -1;
         private MainSplitContainer m_mainSplitContainer;
+        private CoreResult[] m_results = new CoreResult[0];
+        private int m_totalGroupCount = 0;
+        private int m_currentGroupPosition = -1;
 
         private ThumbnailStorage m_thumbnailStorage = null;
         private volatile bool m_abortUpdateThumbnailsThread = false;
@@ -100,14 +103,44 @@ namespace AntiDupl.NET.WinForms
         /// </summary>
         private void GetGroups()
         {
+            uint resultSize = m_core.GetResultSize();
+            m_results = resultSize == 0 ? new CoreResult[0] : m_core.GetResult(0, resultSize);
+
             uint groupSize = m_core.GetGroupSize();
             if (groupSize == 0)
             {
                 m_groups = new CoreGroup[0];
+                m_totalGroupCount = 0;
                 m_maxGroupIndex = -1;
+                m_currentGroupPosition = -1;
                 return;
             }
-            m_groups = m_core.GetGroup(0, groupSize);
+
+            CoreGroup[] groups = m_core.GetGroup(0, groupSize);
+            m_totalGroupCount = groups.Length;
+
+            // Групповой вид показывает те же результаты, что и список: группа видима, пока
+            // видима хотя бы одна её пара (фильтр по тексту / скрыть разобранные / только неразмеченные).
+            ResultFilter filter = m_options.resultFilter;
+            if (filter != null && filter.IsActive)
+            {
+                HashSet<int> visibleGroups = new HashSet<int>();
+                for (int i = 0; i < m_results.Length; i++)
+                {
+                    CoreResult result = m_results[i];
+                    if (result != null && result.type == CoreDll.ResultType.DuplImagePair && filter.Matches(result))
+                        visibleGroups.Add(result.group);
+                }
+                List<CoreGroup> filtered = new List<CoreGroup>(groups.Length);
+                for (int i = 0; i < groups.Length; i++)
+                    if (visibleGroups.Contains(groups[i].id))
+                        filtered.Add(groups[i]);
+                groups = filtered.ToArray();
+            }
+
+            m_groups = groups;
+            m_currentGroupPosition = -1;
+
             // Находим размер самой большой группы.
             int groupSizeMax = 0;
             for (int i = 0; i < m_groups.Length; ++i)
@@ -118,6 +151,8 @@ namespace AntiDupl.NET.WinForms
                     m_maxGroupIndex = i;
                 }
             }
+            if (m_groups.Length == 0)
+                m_maxGroupIndex = -1;
         }
 
         /// <summary>
@@ -135,7 +170,6 @@ namespace AntiDupl.NET.WinForms
             {
                 //Создаем массив панелей с группами дубликатов
                 m_thumbnailGroupPanels = new ThumbnailGroupPanel[m_groups.Length];
-
                 //Добавляем пустые первую, самую большую и последнию панель с группами дубликатов
                 AddGroupPanel(0);
 
@@ -153,6 +187,10 @@ namespace AntiDupl.NET.WinForms
                 ThumbnailGroupPanel maxPanel = m_thumbnailGroupPanels[m_maxGroupIndex];
                 height += (maxPanel.Height + maxPanel.Margin.Vertical) * m_groups.Length;
                 width += maxPanel.Width + maxPanel.Margin.Horizontal;
+            }
+            else
+            {
+                m_thumbnailGroupPanels = new ThumbnailGroupPanel[0];
             }
             AutoScrollMinSize = new Size(width, height);
             ResumeDrawing(this);
@@ -208,7 +246,6 @@ namespace AntiDupl.NET.WinForms
                 m_thumbnailGroupPanels[index] = groupPanel;
                 Controls.Add(groupPanel);
                 m_changeControls = true;
-                Console.Write("a");
             }
         }
 
@@ -302,10 +339,7 @@ namespace AntiDupl.NET.WinForms
             //    SuspendDrawing(Controls[i]);
 
             m_changeControls = false;
-            DateTime t = DateTime.Now;
             UpdateVisiblePanels();
-            TimeSpan updateTime = DateTime.Now - t;
-            Console.WriteLine("ut = {0}; at = {1}.", updateTime.TotalMilliseconds.ToString(), t.Millisecond);
 
             //for (int i = 0; i < Controls.Count; ++i)
             //{
@@ -432,38 +466,77 @@ namespace AntiDupl.NET.WinForms
 
         public void ChangeCurrentThumbnail(CoreGroup group, int index)
         {
+            m_currentGroupPosition = m_groups == null ? -1 : Array.IndexOf(m_groups, group);
             if (OnCurrentThumbnailChanged != null)
                 OnCurrentThumbnailChanged(group, index);
         }
 
         /// <summary>
-        /// «Оставить одну» (T1'): отметить в группе все файлы, кроме указанного — нативным
-        /// SelectAllButThis (чекбоксы группы) и разметкой пар (AutoSelector), потому что batch
-        /// удаляет только то, что помечено в разметке пар. Затем обновляет чекбоксы группы.
+        /// Отметить/снять файл группы (чекбокс). Разметка — общая с парным списком
+        /// (AutoSelector): её и обрабатывают Delete/Move Selected.
+        /// </summary>
+        public void SetMarked(CoreGroup group, int index, bool marked)
+        {
+            if (group == null || group.images == null || index < 0 || index >= group.images.Length)
+                return;
+
+            AutoSelector.SetPathMarked(m_results, group, group.images[index].path, marked);
+            RefreshSelection();
+            ChangeCurrentThumbnail(group, index);
+            m_mainSplitContainer.NotifyResultsUpdated();
+        }
+
+        /// <summary>Перечитать чекбоксы во всех созданных группах.</summary>
+        public void RefreshSelection()
+        {
+            if (m_thumbnailGroupPanels == null) return;
+            for (int i = 0; i < m_thumbnailGroupPanels.Length; i++)
+            {
+                ThumbnailGroupPanel groupPanel = m_thumbnailGroupPanels[i];
+                if (groupPanel != null)
+                    groupPanel.RefreshSelection();
+            }
+        }
+
+        /// <summary>Сколько групп показано (после фильтра).</summary>
+        public int GroupCount { get { return m_groups == null ? 0 : m_groups.Length; } }
+
+        /// <summary>Сколько групп всего (до фильтра).</summary>
+        public int TotalGroupCount { get { return m_totalGroupCount; } }
+
+        /// <summary>Позиция текущей группы в показанном списке (-1 — не выбрана).</summary>
+        public int CurrentGroupPosition { get { return m_currentGroupPosition; } }
+
+        /// <summary>Сколько файлов помечено к удалению/перемещению (по видимым парам).</summary>
+        public int MarkedCount { get { return AutoSelector.CountMarked(m_core); } }
+
+        /// <summary>Сколько видимых пар отмечено как разобранные.</summary>
+        public int ProcessedPairCount
+        {
+            get
+            {
+                List<string> keys = new List<string>(m_results.Length);
+                for (int i = 0; i < m_results.Length; i++)
+                    if (m_results[i] != null && m_results[i].type == CoreDll.ResultType.DuplImagePair)
+                        keys.Add(AutoSelector.GetKey(m_results[i]));
+                return ProcessedPairs.CountIn(keys);
+            }
+        }
+
+        /// <summary>
+        /// «Оставить одну» (T1'): помечает в группе все файлы, кроме указанного, разметкой
+        /// пар (AutoSelector) — её обрабатывает batch; чекбоксы группы читают ту же разметку.
         /// </summary>
         public void KeepOnlyThis(CoreGroup group, int index)
         {
             if (group == null || group.images == null || index < 0 || index >= group.images.Length)
                 return;
 
-            m_core.SetSelection(group.id, index, CoreDll.SelectionType.SelectAllButThis);
+            // «Оставить одну» ставит пометки в AutoSelector — чекбоксы читают их же.
             AutoSelector.KeepOnlyOne(m_core, group.images, group.images[index].path);
-
-            if (m_thumbnailGroupPanels != null)
-            {
-                for (int i = 0; i < m_thumbnailGroupPanels.Length; i++)
-                {
-                    ThumbnailGroupPanel groupPanel = m_thumbnailGroupPanels[i];
-                    if (groupPanel == null || groupPanel.Group == null || groupPanel.Group.id != group.id)
-                        continue;
-
-                    ThumbnailPanel[] thumbnailPanels = groupPanel.ThumbnailPanels;
-                    for (int j = 0; j < thumbnailPanels.Length; j++)
-                        thumbnailPanels[j].UpdateSelection();
-                }
-            }
-
+            RefreshSelection();
             ChangeCurrentThumbnail(group, index);
+            m_mainSplitContainer.NotifyResultsUpdated();
         }
 
         public bool Rename(CoreGroup group, int index, string newFileName)

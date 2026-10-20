@@ -193,9 +193,9 @@ namespace AntiDupl.NET.WinForms
                 }
             });
 
-            m_edit_deleteSelectedMenuItem = InitFactory.MenuItem.Create(null, null, DeleteSelectedAction);
+            m_edit_deleteSelectedMenuItem = InitFactory.MenuItem.Create("DeleteSelectedMenu", null, DeleteSelectedAction);
             m_edit_deleteSelectedMenuItem.Text = "Delete Selected";
-            m_edit_moveSelectedMenuItem = InitFactory.MenuItem.Create(null, null, MoveSelectedAction);
+            m_edit_moveSelectedMenuItem = InitFactory.MenuItem.Create("MoveSelectedMenu", null, MoveSelectedAction);
             m_edit_moveSelectedMenuItem.Text = "Move Selected...";
 
             // «Разобрано» (T5, этап 6): отметки пар хранятся в processed.tsv (ProcessedPairs).
@@ -756,26 +756,16 @@ namespace AntiDupl.NET.WinForms
                 return;
             }
 
-            // Get default database folder
-            string dbRoot = System.IO.Path.Combine(Application.StartupPath, "databases");
-
-            // Show folder browser dialog for input path selection
             string inputPath = "";
             if (m_coreOptions.searchPath != null && m_coreOptions.searchPath.Length > 0)
                 inputPath = m_coreOptions.searchPath[0].path;
 
-            using (FolderBrowserDialog fbd = new FolderBrowserDialog())
+            // Параметры, живой лог, прогресс и итог — в диалоге; консольного окна и паузы нет.
+            using (Forms.CollectorForm form = new Forms.CollectorForm(
+                m_coreOptions.advancedOptions.reducedImageSize, inputPath))
             {
-                fbd.Description = "Select folder with images to collect database";
-                if (!string.IsNullOrEmpty(inputPath) && System.IO.Directory.Exists(inputPath))
-                    fbd.SelectedPath = inputPath;
-                if (fbd.ShowDialog(m_mainForm) != DialogResult.OK)
-                    return;
-                inputPath = fbd.SelectedPath;
+                form.ShowDialog(m_mainForm);
             }
-
-            string args = $"--input \"{inputPath}\" --output \"{dbRoot}\" --size {m_coreOptions.advancedOptions.reducedImageSize}";
-            System.Diagnostics.Process.Start(exePath, args);
         }
 
         public void DbManagerAction(object sender, EventArgs e)

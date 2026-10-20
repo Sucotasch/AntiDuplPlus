@@ -71,7 +71,16 @@ jobs:
         vcpkgGitCommitId: 4acadb7d732e662bbf130c4849be6d3a0aa6f6b9
         vcpkgJsonGlob: src/vcpkg.json
         runVcpkgInstall: false
-        appendedCacheKey: '${{matrix.configuration}}'
+
+    # The manifest install tree is the expensive part (~60 min of port builds from
+    # source: libheif/libavif/libjxl pull aom/x265/...). Debug, Release and Publish
+    # use the same triplet, so one key is shared by all three jobs. The first run
+    # after a vcpkg.json change is cold; later runs restore in seconds.
+    - name: Cache vcpkg install tree
+      uses: actions/cache@v4
+      with:
+        path: src/vcpkg_installed
+        key: vcpkg-installed-4acadb7-${{ env.VCPKG_DEFAULT_TRIPLET }}-${{ hashFiles('src/vcpkg.json') }}
 
     # `vcpkg integrate install` writes vcpkg.system.props into "Program Files" and dies
     # with Access Denied on hosted runners, so the build got no vcpkg include paths.
@@ -110,9 +119,13 @@ jobs:
         # tree lands in <manifest>\vcpkg_installed\<triplet>\<triplet> - the directory
         # the targets consume as _ZVcpkgCurrentInstalledDir.
         $installRoot = Join-Path $manifest "vcpkg_installed\$triplet"
+        $header = Join-Path $installRoot "$triplet\include\Simd\SimdLib.hpp"
+        if (Test-Path $header) {
+            Write-Host "vcpkg install tree restored from cache: $header"
+            exit 0
+        }
         & "$root\vcpkg.exe" install --x-wait-for-lock --clean-after-build --triplet $triplet --vcpkg-root "$root\" "--x-manifest-root=$manifest\" "--x-install-root=$installRoot\"
         if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed (exit $LASTEXITCODE)" }
-        $header = Join-Path $installRoot "$triplet\include\Simd\SimdLib.hpp"
         if (-not (Test-Path $header)) { throw "vcpkg install did not produce $header" }
         Write-Host "vcpkg install tree ready: $header"
 

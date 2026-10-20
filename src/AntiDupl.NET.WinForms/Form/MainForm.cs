@@ -50,6 +50,7 @@ namespace AntiDupl.NET.WinForms
         private MainMenu m_mainMenu;
         private MainToolStrip m_mainToolStrip;
         private MainStatusStrip m_mainStatusStrip;
+        private ResultsOptions.ViewMode m_lastViewMode;
 
         public MainForm()
         {
@@ -105,6 +106,8 @@ namespace AntiDupl.NET.WinForms
 
             FormClosed += new FormClosedEventHandler(OnFormClosed);
             Shown += new EventHandler(OnFormShown);
+            m_options.resultsOptions.OnViewModeChange +=
+                new ResultsOptions.ViewModeChangeHandler(OnViewModeChanged);
 
             UpdateCaption();
         }
@@ -134,12 +137,28 @@ namespace AntiDupl.NET.WinForms
 
         private void SetLoadedViewOptions()
         {
-            Point loc = m_options.mainFormOptions.location;
-            Size size = m_options.mainFormOptions.size;
+            Location = m_options.mainFormOptions.location;
+            Size size;
+            bool maximized;
+            if (!GetWindowGeometry(m_options.resultsOptions.viewMode, out size, out maximized))
+            {
+                size = m_options.mainFormOptions.size;
+                maximized = m_options.mainFormOptions.maximized;
+            }
+            ApplyWindowGeometry(size, maximized);
+            m_lastViewMode = m_options.resultsOptions.viewMode;
+        }
 
+        /// <summary>
+        /// Применить размер/состояние окна (координаты не меняются). Развёрнутое окно
+        /// сначала возвращается в Normal — иначе Size игнорируется.
+        /// </summary>
+        private void ApplyWindowGeometry(Size size, bool maximized)
+        {
             Size sizeMin = new Size(MIN_WIDTH, MIN_HEIGHT);
             Size sizeMax = Screen.PrimaryScreen.WorkingArea.Size;
 
+            Point loc = Location;
             Point locMin = Screen.PrimaryScreen.WorkingArea.Location;
             Point locMax = locMin + Screen.PrimaryScreen.WorkingArea.Size - sizeMin;
 
@@ -147,9 +166,76 @@ namespace AntiDupl.NET.WinForms
             size = new Size(Restrict(size.Width, sizeMin.Width, sizeMax.Width - loc.X),
                 Restrict(size.Height, sizeMin.Height, sizeMax.Height - loc.Y));
 
+            WindowState = FormWindowState.Normal;
             Location = loc;
             Size = size;
-            WindowState = (m_options.mainFormOptions.maximized ? FormWindowState.Maximized : FormWindowState.Normal);
+            if (maximized)
+                WindowState = FormWindowState.Maximized;
+        }
+
+        /// <summary>
+        /// Геометрия окна, сохранённая для режима отображения. false — режим ещё не
+        /// сохранялся (тогда окно не трогаем).
+        /// </summary>
+        private bool GetWindowGeometry(ResultsOptions.ViewMode viewMode, out Size size, out bool maximized)
+        {
+            MainFormOptions options = m_options.mainFormOptions;
+            switch (viewMode)
+            {
+                case ResultsOptions.ViewMode.GroupedThumbnails:
+                    size = options.sizeGroupedThumbnails;
+                    maximized = options.maximizedGroupedThumbnails;
+                    break;
+                case ResultsOptions.ViewMode.HorizontalPairTable:
+                    size = options.sizeHorizontalPairTable;
+                    maximized = options.maximizedHorizontalPairTable;
+                    break;
+                default:
+                    size = options.sizeVerticalPairTable;
+                    maximized = options.maximizedVerticalPairTable;
+                    break;
+            }
+            return size != Size.Empty;
+        }
+
+        /// <summary>
+        /// Запомнить текущую геометрию окна для режима. Размер развёрнутого окна не
+        /// сохраняется — остаётся последний нормальный.
+        /// </summary>
+        private void SaveWindowGeometry(ResultsOptions.ViewMode viewMode)
+        {
+            MainFormOptions options = m_options.mainFormOptions;
+            bool maximized = WindowState == FormWindowState.Maximized;
+            Size size = WindowState == FormWindowState.Normal ? Size : Size.Empty;
+            switch (viewMode)
+            {
+                case ResultsOptions.ViewMode.GroupedThumbnails:
+                    if (size != Size.Empty) options.sizeGroupedThumbnails = size;
+                    options.maximizedGroupedThumbnails = maximized;
+                    break;
+                case ResultsOptions.ViewMode.HorizontalPairTable:
+                    if (size != Size.Empty) options.sizeHorizontalPairTable = size;
+                    options.maximizedHorizontalPairTable = maximized;
+                    break;
+                default:
+                    if (size != Size.Empty) options.sizeVerticalPairTable = size;
+                    options.maximizedVerticalPairTable = maximized;
+                    break;
+            }
+        }
+
+        private void OnViewModeChanged(ResultsOptions.ViewMode viewMode)
+        {
+            if (viewMode == m_lastViewMode)
+                return;
+
+            SaveWindowGeometry(m_lastViewMode);
+            m_lastViewMode = viewMode;
+
+            Size size;
+            bool maximized;
+            if (GetWindowGeometry(viewMode, out size, out maximized))
+                ApplyWindowGeometry(size, maximized);
         }
 
         private int Restrict(int value, int min, int max)
@@ -165,6 +251,7 @@ namespace AntiDupl.NET.WinForms
                 m_options.mainFormOptions.size = Size;
                 m_options.mainFormOptions.location = Location;
             }
+            SaveWindowGeometry(m_options.resultsOptions.viewMode);
         }
 
         private void OnFormShown(object sender, EventArgs e)

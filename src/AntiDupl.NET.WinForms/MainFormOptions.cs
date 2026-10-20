@@ -73,6 +73,14 @@ namespace AntiDupl.NET.WinForms
         public Size size = DefaultSize();
         public bool maximized = false;
 
+        // Геометрия окна отдельно для каждого режима отображения (Size.Empty — режим ещё не сохранялся).
+        public Size sizeVerticalPairTable = Size.Empty;
+        public Size sizeHorizontalPairTable = Size.Empty;
+        public Size sizeGroupedThumbnails = Size.Empty;
+        public bool maximizedVerticalPairTable = false;
+        public bool maximizedHorizontalPairTable = false;
+        public bool maximizedGroupedThumbnails = false;
+
         public MainFormOptions()
         {
             SetDefault();
@@ -83,6 +91,12 @@ namespace AntiDupl.NET.WinForms
             location = options.location;
             size = options.size;
             maximized = options.maximized;
+            sizeVerticalPairTable = options.sizeVerticalPairTable;
+            sizeHorizontalPairTable = options.sizeHorizontalPairTable;
+            sizeGroupedThumbnails = options.sizeGroupedThumbnails;
+            maximizedVerticalPairTable = options.maximizedVerticalPairTable;
+            maximizedHorizontalPairTable = options.maximizedHorizontalPairTable;
+            maximizedGroupedThumbnails = options.maximizedGroupedThumbnails;
             m_toolStripView = options.m_toolStripView;
             m_statusStripView = options.m_statusStripView;
         }
@@ -92,6 +106,12 @@ namespace AntiDupl.NET.WinForms
             options.location = location;
             options.size = size;
             options.maximized = maximized;
+            options.sizeVerticalPairTable = sizeVerticalPairTable;
+            options.sizeHorizontalPairTable = sizeHorizontalPairTable;
+            options.sizeGroupedThumbnails = sizeGroupedThumbnails;
+            options.maximizedVerticalPairTable = maximizedVerticalPairTable;
+            options.maximizedHorizontalPairTable = maximizedHorizontalPairTable;
+            options.maximizedGroupedThumbnails = maximizedGroupedThumbnails;
             options.m_toolStripView = m_toolStripView;
             options.m_statusStripView = m_statusStripView;
         }
@@ -103,6 +123,18 @@ namespace AntiDupl.NET.WinForms
             if (size != options.size)
                 return false;
             if (maximized != options.maximized)
+                return false;
+            if (sizeVerticalPairTable != options.sizeVerticalPairTable)
+                return false;
+            if (sizeHorizontalPairTable != options.sizeHorizontalPairTable)
+                return false;
+            if (sizeGroupedThumbnails != options.sizeGroupedThumbnails)
+                return false;
+            if (maximizedVerticalPairTable != options.maximizedVerticalPairTable)
+                return false;
+            if (maximizedHorizontalPairTable != options.maximizedHorizontalPairTable)
+                return false;
+            if (maximizedGroupedThumbnails != options.maximizedGroupedThumbnails)
                 return false;
             if (m_toolStripView != options.m_toolStripView)
                 return false;
@@ -117,6 +149,12 @@ namespace AntiDupl.NET.WinForms
             location = DefaultLocation();
             size = DefaultSize();
             maximized = false;
+            sizeVerticalPairTable = Size.Empty;
+            sizeHorizontalPairTable = Size.Empty;
+            sizeGroupedThumbnails = Size.Empty;
+            maximizedVerticalPairTable = false;
+            maximizedHorizontalPairTable = false;
+            maximizedGroupedThumbnails = false;
             m_toolStripView = true;
             m_statusStripView = true;
         }

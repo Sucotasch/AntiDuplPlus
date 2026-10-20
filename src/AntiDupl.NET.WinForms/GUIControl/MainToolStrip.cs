@@ -202,11 +202,13 @@ namespace AntiDupl.NET.WinForms
             m_filterResetButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
             m_filterResetButton.Click += new EventHandler(OnFilterReset);
 
-            m_deleteSelectedButton = InitFactory.ToolButton.Create(null, null, m_mainMenu.DeleteSelectedAction);
+            m_deleteSelectedButton = InitFactory.ToolButton.Create("DeleteSelectedButton", null, m_mainMenu.DeleteSelectedAction);
+            m_deleteSelectedButton.DisplayStyle = ToolStripItemDisplayStyle.Image;
             m_deleteSelectedButton.Text = "Delete";
             m_deleteSelectedButton.ToolTipText = "Delete selected images";
 
-            m_moveSelectedButton = InitFactory.ToolButton.Create(null, null, m_mainMenu.MoveSelectedAction);
+            m_moveSelectedButton = InitFactory.ToolButton.Create("MoveSelectedButton", null, m_mainMenu.MoveSelectedAction);
+            m_moveSelectedButton.DisplayStyle = ToolStripItemDisplayStyle.Image;
             m_moveSelectedButton.Text = "Move";
             m_moveSelectedButton.ToolTipText = "Move selected images to folder";
 

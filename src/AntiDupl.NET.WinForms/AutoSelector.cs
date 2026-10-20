@@ -99,6 +99,20 @@ namespace AntiDupl.NET.WinForms
             return Filter == null || !Filter.IsActive || Filter.MatchesKey(key);
         }
 
+        /// <summary>
+        /// Помечен ли файл как цель хотя бы одной видимой пары (чекбокс группового вида).
+        /// </summary>
+        public static bool IsMarkedPath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            foreach (var kv in s_sideCache)
+            {
+                if (string.Equals(kv.Value, path, StringComparison.OrdinalIgnoreCase) && IsVisibleKey(kv.Key))
+                    return true;
+            }
+            return false;
+        }
+
         private static bool IsVisible(CoreResult r)
         {
             return Filter == null || !Filter.IsActive || Filter.Matches(r);
@@ -316,6 +330,52 @@ namespace AntiDupl.NET.WinForms
             }
 
             return marked;
+        }
+
+        /// <summary>
+        /// Отметить/снять файл во всех видимых парах его группы (чекбокс группового вида).
+        /// Цель пары — один файл, поэтому отметка ставит файл целью всех его пар, а снятие
+        /// убирает только пары, целью которых был именно он.
+        /// </summary>
+        public static int SetPathMarked(CoreResult[] results, CoreGroup group, string path, bool marked)
+        {
+            if (results == null || group == null || group.images == null || string.IsNullOrEmpty(path))
+                return 0;
+
+            var groupPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < group.images.Length; i++)
+                if (group.images[i] != null && !string.IsNullOrEmpty(group.images[i].path))
+                    groupPaths.Add(group.images[i].path);
+            if (!groupPaths.Contains(path)) return 0;
+
+            int changed = 0;
+            for (int i = 0; i < results.Length; i++)
+            {
+                var r = results[i];
+                if (r == null || r.type != CoreDll.ResultType.DuplImagePair) continue;
+                if (r.first == null || r.second == null) continue;
+                if (!groupPaths.Contains(r.first.path) || !groupPaths.Contains(r.second.path)) continue;
+
+                string key = GetKey(r);
+                if (marked)
+                {
+                    // Скрытые фильтром пары batch не обрабатывает — не помечаем и их.
+                    if (!IsVisibleKey(key)) continue;
+                    s_sideCache[key] = path;
+                    changed++;
+                }
+                else
+                {
+                    string value;
+                    if (s_sideCache.TryGetValue(key, out value) &&
+                        string.Equals(value, path, StringComparison.OrdinalIgnoreCase))
+                    {
+                        s_sideCache.TryRemove(key, out _);
+                        changed++;
+                    }
+                }
+            }
+            return changed;
         }
 
         /// <summary>

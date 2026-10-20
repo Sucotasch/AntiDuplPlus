@@ -77,5 +77,12 @@ namespace AntiDupl.NET.WinForms
 
             Controls.AddRange(m_thumbnailPanels);
         }
+
+        /// <summary>Перечитать чекбоксы всех миниатюр группы (разметка AutoSelector).</summary>
+        public void RefreshSelection()
+        {
+            for (int i = 0; i < m_thumbnailPanels.Length; ++i)
+                m_thumbnailPanels[i].UpdateSelection();
+        }
     }
 }

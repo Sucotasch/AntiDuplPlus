@@ -56,6 +56,20 @@ namespace AntiDupl.NET.WinForms
         bool m_atLeastOneTimeSetOrientation = false;
 
         public ResultsListView resultsListView { get { return m_resultsListView; } }
+        public ThumbnailGroupTable thumbnailGroupTable { get { return m_thumbnailGroupTable; } }
+
+        /// <summary>Сейчас показан групповой вид (счётчики статус-бара берутся из групп).</summary>
+        public bool IsGroupedView
+        {
+            get { return m_options.resultsOptions.viewMode == ResultsOptions.ViewMode.GroupedThumbnails; }
+        }
+
+        /// <summary>Пересчитать статус без перестройки списков (щелчок по чекбоксу группы).</summary>
+        public void NotifyResultsUpdated()
+        {
+            if (OnUpdateResults != null)
+                OnUpdateResults();
+        }
 
         public delegate void UpdateResultsHandler();
         public event UpdateResultsHandler OnUpdateResults;
